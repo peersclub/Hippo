@@ -5,8 +5,13 @@
  * at send time — a drifted fixture fails loudly, not silently.
  */
 
+import { withLiveMarket } from './market.js'
+
 export type FrameDraft = { type: string } & Record<string, unknown>
-export type ScriptStep = { afterMs: number; frame: FrameDraft }
+/** A step's frame is either a static draft or a thunk resolved at play time
+ * (used to template live market data in without blocking the script). */
+export type FrameSource = FrameDraft | (() => Promise<FrameDraft>)
+export type ScriptStep = { afterMs: number; frame: FrameSource }
 
 export const VENUE = 'KoinBX'
 
@@ -74,9 +79,18 @@ const dipDecline: FrameDraft = {
     "I can't tell you whether to buy — not because I'm hedging, but because an assistant that gives trading calls isn't on your side. What I can do is show you the picture:",
   pivotTitle: "What's true about BTC right now",
   facts: [
-    { icon: '▾', text: 'Down 4.2% in 12h on the US inflation surprise — a macro move, not a BTC-specific one.' },
-    { icon: '◎', text: 'Funding is −0.008% — shorts now pay longs; positioning has flipped cautious.' },
-    { icon: '≋', text: '$310M in longs liquidated in an hour — forced selling, most of which has now cleared.' },
+    {
+      icon: '▾',
+      text: 'Down 4.2% in 12h on the US inflation surprise — a macro move, not a BTC-specific one.',
+    },
+    {
+      icon: '◎',
+      text: 'Funding is −0.008% — shorts now pay longs; positioning has flipped cautious.',
+    },
+    {
+      icon: '≋',
+      text: '$310M in longs liquidated in an hour — forced selling, most of which has now cleared.',
+    },
   ],
   followups: ['How do dips usually resolve?', 'What would change this picture?'],
 }
@@ -88,9 +102,18 @@ const userEcho = (text: string): FrameDraft => ({ type: 'user_echo', text })
 /** Played automatically when a stream connects — the prototype's opening thread. */
 export const openingScript: ScriptStep[] = [
   { afterMs: 200, frame: userEcho('why is btc down today?') },
-  { afterMs: 500, frame: thinking(['Parsing intent…', 'Fetching live market data…', 'Reading funding & liquidations…']) },
+  {
+    afterMs: 500,
+    frame: thinking([
+      'Parsing intent…',
+      'Fetching live market data…',
+      'Reading funding & liquidations…',
+    ]),
+  },
   { afterMs: 1400, frame: skeleton('brief') },
-  { afterMs: 1200, frame: btcBrief },
+  // Live numbers from the market-data service when it's up; the scripted
+  // hard-coded brief otherwise (the golden conversation must never break).
+  { afterMs: 1200, frame: () => withLiveMarket(btcBrief) },
   { afterMs: 1600, frame: userEcho('ok. buy 0.05 btc at market') },
   { afterMs: 900, frame: btcTicket },
   { afterMs: 1600, frame: userEcho('actually should i just buy more? is this the dip?') },
@@ -103,7 +126,14 @@ export function replyScriptFor(text: string): ScriptStep[] {
 
   if (/\b(buy|sell)\b/.test(t)) {
     return [
-      { afterMs: 300, frame: thinking(['Parsing intent…', 'Building your ticket…', 'Fetching live price & fees…']) },
+      {
+        afterMs: 300,
+        frame: thinking([
+          'Parsing intent…',
+          'Building your ticket…',
+          'Fetching live price & fees…',
+        ]),
+      },
       { afterMs: 1100, frame: { ...btcTicket, ticketId: `t_${Date.now().toString(36)}` } },
     ]
   }
@@ -123,9 +153,30 @@ export function replyScriptFor(text: string): ScriptStep[] {
         frame: {
           type: 'positions',
           rows: [
-            { instrument: 'BTC/USDT', size: '0.31 BTC', entry: '58,420', mark: '61,240', pnl: '+874.20 USDT', tone: 'pos' },
-            { instrument: 'SOL/USDT', size: '42 SOL', entry: '171.10', mark: '166.40', pnl: '−197.40 USDT', tone: 'neg' },
-            { instrument: 'ADA/USDT', size: '5,000 ADA', entry: '0.4980', mark: '0.5210', pnl: '+115.00 USDT', tone: 'pos' },
+            {
+              instrument: 'BTC/USDT',
+              size: '0.31 BTC',
+              entry: '58,420',
+              mark: '61,240',
+              pnl: '+874.20 USDT',
+              tone: 'pos',
+            },
+            {
+              instrument: 'SOL/USDT',
+              size: '42 SOL',
+              entry: '171.10',
+              mark: '166.40',
+              pnl: '−197.40 USDT',
+              tone: 'neg',
+            },
+            {
+              instrument: 'ADA/USDT',
+              size: '5,000 ADA',
+              entry: '0.4980',
+              mark: '0.5210',
+              pnl: '+115.00 USDT',
+              tone: 'pos',
+            },
           ],
         },
       },
@@ -135,7 +186,18 @@ export function replyScriptFor(text: string): ScriptStep[] {
   return [
     { afterMs: 300, frame: thinking(['Parsing intent…', 'Fetching live market data…']) },
     { afterMs: 1200, frame: skeleton('brief') },
-    { afterMs: 1100, frame: { ...btcBrief, headline: 'Here is the live picture', followups: ['My positions & P&L', 'Explain funding rates'] } },
+    {
+      afterMs: 1100,
+      frame: async () => {
+        const brief = await withLiveMarket(btcBrief)
+        return {
+          ...brief,
+          // Live headline when the fetch succeeded; the scripted line otherwise.
+          ...(brief === btcBrief ? { headline: 'Here is the live picture' } : {}),
+          followups: ['My positions & P&L', 'Explain funding rates'],
+        }
+      },
+    },
   ]
 }
 
