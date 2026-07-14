@@ -1,5 +1,7 @@
 # Hippo App — Monorepo
 
+[![CI](https://github.com/peersclub/Hippo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/peersclub/Hippo/actions/workflows/ci.yml)
+
 Conversational trading agent for partner exchanges. **Thin edge, heavy core:** the SDK draws; the server decides.
 
 Docs live in the Obsidian vault: `/Users/Victor/Projects22/hippo/Hippo/` (PRD: `Build Plan/08`, FE arch: `09`, BE arch: `10`).
