@@ -36,7 +36,11 @@ function play(session: Session, script: ScriptStep[]) {
   for (const step of script) {
     delay += step.afterMs
     setTimeout(() => {
-      session.send?.(stamp(session, step.frame))
+      // Frames may be thunks (live market templating) — resolve at fire time.
+      const draft = typeof step.frame === 'function' ? step.frame() : step.frame
+      Promise.resolve(draft)
+        .then((frame) => session.send?.(stamp(session, frame)))
+        .catch((err) => app.log.error({ err }, 'script step failed'))
     }, delay)
   }
 }
