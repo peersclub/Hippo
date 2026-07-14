@@ -1,4 +1,4 @@
-import type { Banner, Frame, OrdersSnapshot, UnknownFrame } from '@hippo/protocol'
+import type { Banner, Frame, OrdersSnapshot, ResearchBrief, UnknownFrame } from '@hippo/protocol'
 import { computed, signal } from '@preact/signals'
 
 /** A thread entry: a known frame, or an unknown one destined for FallbackCard. */
@@ -21,6 +21,26 @@ export const banners = signal<Banner[]>([])
 /** Consent/settings memory opt-in — set by onboarding, toggled in settings. */
 export const memoryOptIn = signal(true)
 export const settingsOpen = signal(false)
+
+/** Brief being shared — non-null opens the full-surface share overlay (§6). */
+export const shareFrame = signal<ResearchBrief | null>(null)
+
+/**
+ * One-shot composer prefill — set by the new-order hint chips, consumed by
+ * the Composer. FILLS the input only; the trader always hits send.
+ */
+export const composerPrefill = signal<string | null>(null)
+
+export function prefillComposer(text: string) {
+  composerPrefill.value = text
+}
+
+/** Consume the pending prefill (returns it once, then clears). */
+export function takeComposerPrefill(): string | null {
+  const v = composerPrefill.value
+  composerPrefill.value = null
+  return v
+}
 
 export const openOrderCount = computed(() => orders.value?.open.length ?? 0)
 

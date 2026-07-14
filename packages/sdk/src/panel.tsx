@@ -5,20 +5,27 @@
  */
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import type { OrdersSnapshot } from '@hippo/protocol'
 import { FallbackCard, renderFrame } from './cards.js'
 import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
-import { OnboardingOverlay, SettingsSheet } from './overlays.js'
+import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
+import { OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
 import {
   banners,
   clearPulse,
+  composerPrefill,
   connection,
   openOrderCount,
   orders,
   posture,
+  prefillComposer,
   pulseTag,
   settingsOpen,
+  shareFrame,
   suggestedQueries,
+  takeComposerPrefill,
   thread,
+  venueName,
 } from './state.js'
 import { panelCss } from './styles.js'
 import { connect, send } from './transport.js'
@@ -39,7 +46,20 @@ export function replayOnboarding() {
 function Composer() {
   const [text, setText] = useState('')
   const [failed, setFailed] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
   const offline = connection.value === 'offline'
+  // New-order example intents FILL the input — never auto-send (baseline §3:
+  // order placement stays conversational; the trader always hits send).
+  const pending = composerPrefill.value
+  useEffect(() => {
+    if (!pending) return
+    const t = takeComposerPrefill()
+    if (t) {
+      setText(t)
+      setFailed(false)
+      inputRef.current?.focus()
+    }
+  }, [pending])
   const submit = async (e: Event) => {
     e.preventDefault()
     const t = text.trim()
@@ -58,6 +78,7 @@ function Composer() {
       {failed && <div class="sendfail">SEND FAILED — your message is kept. Tap ↻ to retry.</div>}
       <form class="composer" onSubmit={submit}>
         <input
+          ref={inputRef}
           value={text}
           disabled={offline}
           onInput={(e) => {
@@ -83,9 +104,56 @@ function Composer() {
   )
 }
 
+/** Expanded order card — in place below the strip, thread pushed down (§3). */
+function OrderExpandCard({ order }: { order: OrdersSnapshot['open'][number] }) {
+  const parsed = parseOrderSummary(order.summary)
+  return (
+    <div class="ocard">
+      <div class="och">
+        <span class={`oside ${order.side}`}>{order.side.toUpperCase()}</span>
+        <b class="osum">{parsed.main}</b>
+        {parsed.details.map((d) => (
+          <span class="odet" key={d}>
+            {d}
+          </span>
+        ))}
+      </div>
+      <div class="ostat">{order.status}</div>
+      <button
+        type="button"
+        class="omanage"
+        onClick={() => send({ kind: 'chip_tap', text: `manage:${order.orderId}` })}
+      >
+        Manage on {venueName.value} →
+      </button>
+    </div>
+  )
+}
+
+/** "+ New order" hint — conversational, never a form (§3). Chips fill the
+ * composer via the prefill signal; the trader must hit send. */
+function NewOrderHint({ onPick }: { onPick: (text: string) => void }) {
+  return (
+    <div class="newhint">
+      <b>Tell me what to place…</b>
+      <div class="nchips">
+        {EXAMPLE_INTENTS.map((t) => (
+          <button type="button" class="chip" key={t} onClick={() => onPick(t)}>
+            {t}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function OrdersStrip() {
   const snap = orders.value
+  const [expanded, setExpanded] = useState<string | null>(null)
   if (!snap) return null
+  // A pill that vanished from the latest snapshot silently collapses.
+  const open = snap.open.find((o) => o.orderId === expanded)
+  const active = open ? expanded : expanded === NEW_ORDER ? NEW_ORDER : null
   return (
     <div class="orders">
       <div class="lab">
@@ -96,18 +164,36 @@ function OrdersStrip() {
       </div>
       <div class="row">
         {snap.open.map((o) => (
-          <div class={`opill ${o.side}`} key={o.orderId}>
+          <button
+            type="button"
+            class={`opill ${o.side}${active === o.orderId ? ' on' : ''}`}
+            key={o.orderId}
+            aria-expanded={active === o.orderId}
+            onClick={() => setExpanded(toggleExpand(expanded, o.orderId))}
+          >
             <span class="sd" />
             {o.summary} <span class="st">{o.status}</span>
-          </div>
+          </button>
         ))}
         <button
           type="button"
-          class="opill new"
-          onClick={() => send({ kind: 'chip_tap', text: 'new order' })}
+          class={`opill new${active === NEW_ORDER ? ' on' : ''}`}
+          aria-expanded={active === NEW_ORDER}
+          onClick={() => setExpanded(toggleExpand(expanded, NEW_ORDER))}
         >
           + New order
         </button>
+      </div>
+      <div class={`oexp${active ? ' open' : ''}`}>
+        {open && <OrderExpandCard order={open} />}
+        {active === NEW_ORDER && (
+          <NewOrderHint
+            onPick={(t) => {
+              prefillComposer(t) // fills the input only — never auto-sends
+              setExpanded(null)
+            }}
+          />
+        )}
       </div>
     </div>
   )
@@ -250,7 +336,8 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
       <Chips />
       <Composer />
       {ob.active.value && <OnboardingOverlay store={ob} onNotNow={onMinimize} />}
-      {!ob.active.value && settingsOpen.value && (
+      {!ob.active.value && shareFrame.value && <ShareOverlay frame={shareFrame.value} />}
+      {!ob.active.value && !shareFrame.value && settingsOpen.value && (
         <SettingsSheet
           onReplay={() => {
             settingsOpen.value = false
