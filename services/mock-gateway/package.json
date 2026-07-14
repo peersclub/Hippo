@@ -1,0 +1,21 @@
+{
+  "name": "@hippo/mock-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Golden-conversation player: same routes and protocol as the real gateway, scripted frames instead of models",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@hippo/protocol": "workspace:*",
+    "fastify": "^5.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}

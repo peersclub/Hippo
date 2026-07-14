@@ -1,0 +1,27 @@
+{
+  "name": "@hippo/protocol",
+  "version": "0.1.0",
+  "description": "Hippo card protocol v1 — Zod schemas, the single source of truth for the wire format",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node --experimental-strip-types scripts/export-jsonschema.ts",
+    "test": "vitest run",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

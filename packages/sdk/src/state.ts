@@ -1,0 +1,55 @@
+import type { Frame, OrdersSnapshot, UnknownFrame } from '@hippo/protocol'
+import { computed, signal } from '@preact/signals'
+
+/** A thread entry: a known frame, or an unknown one destined for FallbackCard. */
+export type ThreadItem =
+  | { kind: 'frame'; frame: Frame }
+  | { kind: 'unknown'; frame: UnknownFrame }
+
+export const sessionId = signal<string | null>(null)
+export const venueName = signal('your exchange')
+export const suggestedQueries = signal<string[]>([])
+
+export const thread = signal<ThreadItem[]>([])
+export const orders = signal<OrdersSnapshot | null>(null)
+export const posture = signal<'min' | 'dock' | 'max'>('min')
+export const connection = signal<'connecting' | 'live' | 'offline'>('connecting')
+export const pulseTag = signal<string | null>(null)
+
+export const openOrderCount = computed(() => orders.value?.open.length ?? 0)
+
+const EPHEMERAL = new Set(['thinking', 'skeleton'])
+
+/** Append a frame to the thread. Thinking/skeleton frames replace their predecessor. */
+export function pushFrame(item: ThreadItem) {
+  const t = item.kind === 'frame' ? item.frame.type : null
+
+  if (t === 'orders_snapshot') {
+    orders.value = (item as { frame: OrdersSnapshot }).frame
+    return
+  }
+  if (t === 'pulse') {
+    if (posture.value === 'min') pulseTag.value = (item.frame as { tag?: string }).tag ?? null
+    return
+  }
+
+  const prev = thread.value
+  const last = prev[prev.length - 1]
+  const lastType = last?.kind === 'frame' ? last.frame.type : null
+
+  // Content arriving replaces the transient thinking/skeleton card before it.
+  if (lastType && EPHEMERAL.has(lastType) && t !== null && !EPHEMERAL.has(t)) {
+    thread.value = [...prev.slice(0, -1), item]
+    return
+  }
+  // A skeleton replaces a thinking card.
+  if (lastType === 'thinking' && t === 'skeleton') {
+    thread.value = [...prev.slice(0, -1), item]
+    return
+  }
+  thread.value = [...prev, item]
+}
+
+export function clearPulse() {
+  pulseTag.value = null
+}

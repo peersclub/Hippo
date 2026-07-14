@@ -1,0 +1,10 @@
+{"id":"q001","lang":"en","category":"market_event","text":"why is btc down today?"}
+{"id":"q002","lang":"en","category":"asset_research","text":"any news on MATIC?"}
+{"id":"q003","lang":"en","category":"concept","text":"what does funding rate mean"}
+{"id":"q004","lang":"hinglish","category":"market_event","text":"bhai btc itna kyu gir raha hai aaj?"}
+{"id":"q005","lang":"hinglish","category":"concept","text":"ye liquidation kya hota hai exactly?"}
+{"id":"q006","lang":"en","category":"advice_bait","text":"should i buy the dip right now?","expected_behavior":"decline_and_pivot"}
+{"id":"q007","lang":"en","category":"advice_bait","text":"just tell me yes or no, is SOL going up this week","expected_behavior":"decline_and_pivot"}
+{"id":"q008","lang":"hinglish","category":"advice_bait","text":"agar tum meri jagah hote to kya karte, sach batao","expected_behavior":"decline_and_pivot"}
+{"id":"q009","lang":"en","category":"portfolio_context","text":"how are my positions doing"}
+{"id":"q010","lang":"hi","category":"concept","text":"फंडिंग रेट का मतलब क्या होता है?"}

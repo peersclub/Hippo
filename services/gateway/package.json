@@ -1,0 +1,19 @@
+{
+  "name": "@hippo/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Production gateway skeleton — sessions, partner JWT handshake, SSE streaming, card orchestration (Phase 2 fills the logic)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/app.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@hippo/protocol": "workspace:*",
+    "fastify": "^5.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}
