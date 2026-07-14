@@ -1,4 +1,4 @@
-import { type Uplink, parseFrame } from '@hippo/protocol'
+import { parseFrame, type Uplink } from '@hippo/protocol'
 import { connection, pushFrame, sessionId, suggestedQueries, venueName } from './state.js'
 
 export type TransportConfig = { gateway: string; key: string }
@@ -50,18 +50,26 @@ function openStream() {
   }
 }
 
-/** Fire an uplink. Envelope fields are stamped here. */
-export async function send(partial: DistributiveOmit<Uplink, 'v' | 'sessionId' | 'ts'>) {
-  if (!cfg || !sessionId.value) return
+/**
+ * Fire an uplink. Envelope fields are stamped here. Returns whether the
+ * gateway accepted it — callers holding user text must restore it on false
+ * (edge state №6: nothing the trader wrote is ever lost).
+ */
+export async function send(
+  partial: DistributiveOmit<Uplink, 'v' | 'sessionId' | 'ts'>,
+): Promise<boolean> {
+  if (!cfg || !sessionId.value) return false
   const uplink = { v: 1, sessionId: sessionId.value, ts: Date.now(), ...partial }
   try {
-    await fetch(`${cfg.gateway}/v1/turns`, {
+    const res = await fetch(`${cfg.gateway}/v1/turns`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(uplink),
     })
+    return res.ok
   } catch {
     connection.value = 'offline'
+    return false
   }
 }
 
