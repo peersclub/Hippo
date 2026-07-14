@@ -1,10 +1,8 @@
-import type { Frame, OrdersSnapshot, UnknownFrame } from '@hippo/protocol'
+import type { Banner, Frame, OrdersSnapshot, UnknownFrame } from '@hippo/protocol'
 import { computed, signal } from '@preact/signals'
 
 /** A thread entry: a known frame, or an unknown one destined for FallbackCard. */
-export type ThreadItem =
-  | { kind: 'frame'; frame: Frame }
-  | { kind: 'unknown'; frame: UnknownFrame }
+export type ThreadItem = { kind: 'frame'; frame: Frame } | { kind: 'unknown'; frame: UnknownFrame }
 
 export const sessionId = signal<string | null>(null)
 export const venueName = signal('your exchange')
@@ -15,6 +13,14 @@ export const orders = signal<OrdersSnapshot | null>(null)
 export const posture = signal<'min' | 'dock' | 'max'>('min')
 export const connection = signal<'connecting' | 'live' | 'offline'>('connecting')
 export const pulseTag = signal<string | null>(null)
+
+/** Pinned banners (degraded/offline/info) — rendered above the orders strip,
+ * never in-thread, so they can't scroll away. Latest frame per kind wins. */
+export const banners = signal<Banner[]>([])
+
+/** Consent/settings memory opt-in — set by onboarding, toggled in settings. */
+export const memoryOptIn = signal(true)
+export const settingsOpen = signal(false)
 
 export const openOrderCount = computed(() => orders.value?.open.length ?? 0)
 
@@ -30,6 +36,11 @@ export function pushFrame(item: ThreadItem) {
   }
   if (t === 'pulse') {
     if (posture.value === 'min') pulseTag.value = (item.frame as { tag?: string }).tag ?? null
+    return
+  }
+  if (t === 'banner') {
+    const b = (item as { frame: Banner }).frame
+    banners.value = [...banners.value.filter((x) => x.kind !== b.kind), b]
     return
   }
 

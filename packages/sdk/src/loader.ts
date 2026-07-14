@@ -70,7 +70,7 @@ type LoaderConfig = {
         () =>
           void loadPanel()
             .then(() => pill.dispatchEvent(new CustomEvent('hippo:open')))
-            .catch(() => pill.style.display = 'none'),
+            .catch(() => (pill.style.display = 'none')),
       )
     }
 

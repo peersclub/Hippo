@@ -16,8 +16,9 @@ import type {
   UnknownFrame,
   UserEcho,
 } from '@hippo/protocol'
-import { useEffect, useState } from 'preact/hooks'
 import type { JSX } from 'preact'
+import { useEffect, useState } from 'preact/hooks'
+import { isStale, STALE_CHECK_INTERVAL_MS } from './freshness.js'
 import { send } from './transport.js'
 
 function SparklineSvg({ points }: { points: number[] }) {
@@ -26,7 +27,9 @@ function SparklineSvg({ points }: { points: number[] }) {
   const span = max - min || 1
   const step = 300 / (points.length - 1)
   const y = (p: number) => 44 - ((p - min) / span) * 40
-  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${y(p).toFixed(1)}`).join(' ')
+  const line = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${y(p).toFixed(1)}`)
+    .join(' ')
   return (
     <svg class="spark" viewBox="0 0 300 48" preserveAspectRatio="none" aria-hidden="true">
       <path class="fill" d={`${line} L300,48 L0,48 Z`} />
@@ -39,6 +42,16 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   const lb = frame.liveBar
   const [voted, setVoted] = useState<null | 'up' | 'down'>(null)
   const [flash, setFlash] = useState(false)
+  // Stale data is declared, never silent (edge state №5): past the threshold
+  // the as-of turns amber and REFRESH becomes the loudest element.
+  const [stale, setStale] = useState(() => (lb ? isStale(lb.asOfIso) : false))
+  useEffect(() => {
+    if (!lb) return
+    const check = () => setStale(isStale(lb.asOfIso))
+    check()
+    const t = setInterval(check, STALE_CHECK_INTERVAL_MS)
+    return () => clearInterval(t)
+  }, [lb])
   if (!lb) return null
   const refresh = () => {
     setFlash(true)
@@ -50,9 +63,13 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
     send({ kind: 'feedback', frameId: frame.id, vote: v })
   }
   return (
-    <div class="livebar">
+    <div class={`livebar${stale ? ' stale' : ''}`}>
       <span class={`asof${flash ? ' flash' : ''}`}>{lb.asOf}</span>
-      {lb.refreshable && <button type="button" onClick={refresh}>↻ REFRESH</button>}
+      {lb.refreshable && (
+        <button type="button" class="rf" onClick={refresh}>
+          ↻ REFRESH
+        </button>
+      )}
       {lb.shareable && <button type="button">↗ SHARE</button>}
       {lb.feedback && (
         <span class="fb">
@@ -60,8 +77,12 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
             <span class="done">{voted === 'up' ? 'THANKS' : 'NOTED'}</span>
           ) : (
             <>
-              <button type="button" aria-label="Helpful" onClick={() => vote('up')}>👍</button>
-              <button type="button" aria-label="Not helpful" onClick={() => vote('down')}>👎</button>
+              <button type="button" aria-label="Helpful" onClick={() => vote('up')}>
+                👍
+              </button>
+              <button type="button" aria-label="Not helpful" onClick={() => vote('down')}>
+                👎
+              </button>
             </>
           )}
         </span>
@@ -77,7 +98,9 @@ function ResearchBriefCard({ frame }: { frame: ResearchBrief }) {
         <span>{frame.eyebrow}</span>
         {frame.live && <span class="live">● LIVE</span>}
       </div>
-      {frame.liveBar?.cached && <span class="cache-badge">CACHED BRIEF · {frame.liveBar.cacheAge}</span>}
+      {frame.liveBar?.cached && (
+        <span class="cache-badge">CACHED BRIEF · {frame.liveBar.cacheAge}</span>
+      )}
       <h3>{frame.headline}</h3>
       {frame.paragraphs.map((p) => (
         <p key={p}>{p}</p>
@@ -87,7 +110,9 @@ function ResearchBriefCard({ frame }: { frame: ResearchBrief }) {
           {frame.stats.map((s) => (
             <div key={s.k}>
               <span class="k">{s.k}</span>
-              <span class={`v ${s.tone === 'neg' ? 'neg' : s.tone === 'pos' ? 'pos' : ''}`}>{s.v}</span>
+              <span class={`v ${s.tone === 'neg' ? 'neg' : s.tone === 'pos' ? 'pos' : ''}`}>
+                {s.v}
+              </span>
             </div>
           ))}
         </div>
@@ -104,7 +129,9 @@ function ResearchBriefCard({ frame }: { frame: ResearchBrief }) {
       {frame.sources.length > 0 && (
         <div class="srcs">
           {frame.sources.map((s) => (
-            <span class="src" key={s}>{s}</span>
+            <span class="src" key={s}>
+              {s}
+            </span>
           ))}
         </div>
       )}
@@ -131,7 +158,9 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
       <button
         type="button"
         class="cta"
-        onClick={() => send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'confirm_handoff' })}
+        onClick={() =>
+          send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'confirm_handoff' })
+        }
       >
         {frame.cta}
       </button>
@@ -151,7 +180,9 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
             <button
               type="button"
               class="cxl"
-              onClick={() => send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'cancel' })}
+              onClick={() =>
+                send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'cancel' })
+              }
             >
               CANCEL
             </button>
@@ -201,7 +232,12 @@ function AdviceDeclineCard({ frame }: { frame: AdviceDecline }) {
         {frame.followups.length > 0 && (
           <div class="chips" style="border-top:0;padding:10px 0 0">
             {frame.followups.map((q) => (
-              <button type="button" class="chip" key={q} onClick={() => send({ kind: 'chip_tap', text: q })}>
+              <button
+                type="button"
+                class="chip"
+                key={q}
+                onClick={() => send({ kind: 'chip_tap', text: q })}
+              >
                 {q}
               </button>
             ))}
@@ -215,7 +251,9 @@ function AdviceDeclineCard({ frame }: { frame: AdviceDecline }) {
 function PositionsCard({ frame }: { frame: Positions }) {
   return (
     <div class="bubble">
-      <div class="eyebrow"><span>POSITIONS</span></div>
+      <div class="eyebrow">
+        <span>POSITIONS</span>
+      </div>
       {frame.rows.map((r) => (
         <div class="pos-row" key={r.instrument}>
           <span>{r.instrument}</span>
@@ -238,7 +276,11 @@ function RejectionCard({ frame }: { frame: RejectionTicket }) {
         <p style="font-size:12px;line-height:1.5;color:#E8B8B8;padding:8px 0">{frame.reason}</p>
       </div>
       {frame.fix && (
-        <button type="button" class="cta" onClick={() => send({ kind: 'chip_tap', text: frame.fix?.action ?? '' })}>
+        <button
+          type="button"
+          class="cta"
+          onClick={() => send({ kind: 'chip_tap', text: frame.fix?.action ?? '' })}
+        >
           {frame.fix.label}
         </button>
       )}
@@ -269,7 +311,9 @@ function SkeletonCard({ frame }: { frame: Skeleton }) {
       <div class="sk sk-line short" />
       {frame.shape === 'brief' && (
         <div class="sk-grid">
-          <div class="sk sk-cell" /><div class="sk sk-cell" /><div class="sk sk-cell" />
+          <div class="sk sk-cell" />
+          <div class="sk sk-cell" />
+          <div class="sk sk-cell" />
         </div>
       )}
     </div>
@@ -297,7 +341,12 @@ export function FallbackCard({ frame }: { frame: UnknownFrame }) {
   return (
     <div class="fallback">
       <p>
-        {fb.text} {fb.href && <a href={fb.href} target="_blank" rel="noreferrer">Open →</a>}
+        {fb.text}{' '}
+        {fb.href && (
+          <a href={fb.href} target="_blank" rel="noreferrer">
+            Open →
+          </a>
+        )}
       </p>
     </div>
   )

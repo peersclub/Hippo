@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Hippo thin-client SDK — two-stage loader, closed Shadow DOM, server-driven card renderer",
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "vite build --config vite.loader.config.ts && vite build --config vite.panel.config.ts && node scripts/size-gate.mjs",
     "dev": "vite build --config vite.loader.config.ts && vite build --watch --config vite.panel.config.ts",
