@@ -18,10 +18,19 @@ import type {
 } from '@hippo/protocol'
 import type { JSX } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
+import {
+  FEEDBACK_REASONS,
+  type FeedbackEvent,
+  type FeedbackState,
+  feedbackDoneLabel,
+  feedbackTransition,
+} from './feedback.js'
 import { isStale, STALE_CHECK_INTERVAL_MS } from './freshness.js'
+import { shareFrame } from './state.js'
 import { send } from './transport.js'
 
-function SparklineSvg({ points }: { points: number[] }) {
+/** Exported for the share overlay — the co-branded card reuses the exact spark. */
+export function SparklineSvg({ points }: { points: number[] }) {
   const max = Math.max(...points)
   const min = Math.min(...points)
   const span = max - min || 1
@@ -40,7 +49,7 @@ function SparklineSvg({ points }: { points: number[] }) {
 
 function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   const lb = frame.liveBar
-  const [voted, setVoted] = useState<null | 'up' | 'down'>(null)
+  const [fb, setFb] = useState<FeedbackState>({ phase: 'idle' })
   const [flash, setFlash] = useState(false)
   // Stale data is declared, never silent (edge state №5): past the threshold
   // the as-of turns amber and REFRESH becomes the loudest element.
@@ -58,36 +67,78 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
     setTimeout(() => setFlash(false), 900)
     send({ kind: 'chip_tap', text: `refresh:${frame.id}` })
   }
-  const vote = (v: 'up' | 'down') => {
-    setVoted(v)
-    send({ kind: 'feedback', frameId: frame.id, vote: v })
+  // 👍 stays instant; 👎 asks one follow-up. The three reason chips map 1:1
+  // to eval-harness scoring criteria — labels arrive pre-categorized (Layer 2).
+  const dispatch = (event: FeedbackEvent) => {
+    const { state: next, uplink } = feedbackTransition(fb, event)
+    setFb(next)
+    if (uplink) send({ kind: 'feedback', frameId: frame.id, ...uplink })
   }
+  const share = () => {
+    shareFrame.value = frame
+    // No share backend yet — the overlay renders from frame data alone;
+    // this uplink lets the server log share intent.
+    send({ kind: 'chip_tap', text: `share:${frame.id}` })
+  }
+  const done = feedbackDoneLabel(fb)
   return (
-    <div class={`livebar${stale ? ' stale' : ''}`}>
-      <span class={`asof${flash ? ' flash' : ''}`}>{lb.asOf}</span>
-      {lb.refreshable && (
-        <button type="button" class="rf" onClick={refresh}>
-          ↻ REFRESH
-        </button>
+    <>
+      <div class={`livebar${stale ? ' stale' : ''}`}>
+        <span class={`asof${flash ? ' flash' : ''}`}>{lb.asOf}</span>
+        {lb.refreshable && (
+          <button type="button" class="rf" onClick={refresh}>
+            ↻ REFRESH
+          </button>
+        )}
+        {lb.shareable && (
+          <button type="button" onClick={share}>
+            ↗ SHARE
+          </button>
+        )}
+        {lb.feedback && fb.phase !== 'asking' && (
+          <span class="fb">
+            {done ? (
+              <span class="done">{done}</span>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  aria-label="Helpful"
+                  onClick={() => dispatch({ type: 'vote', vote: 'up' })}
+                >
+                  👍
+                </button>
+                <button
+                  type="button"
+                  aria-label="Not helpful"
+                  onClick={() => dispatch({ type: 'vote', vote: 'down' })}
+                >
+                  👎
+                </button>
+              </>
+            )}
+          </span>
+        )}
+      </div>
+      {fb.phase === 'asking' && (
+        <div class="fbask">
+          <span class="q">WHAT WAS OFF?</span>
+          {FEEDBACK_REASONS.map((r) => (
+            <button
+              type="button"
+              class="fbchip"
+              key={r.reason}
+              onClick={() => dispatch({ type: 'reason', reason: r.reason })}
+            >
+              {r.label}
+            </button>
+          ))}
+          <button type="button" class="fbskip" onClick={() => dispatch({ type: 'skip' })}>
+            skip
+          </button>
+        </div>
       )}
-      {lb.shareable && <button type="button">↗ SHARE</button>}
-      {lb.feedback && (
-        <span class="fb">
-          {voted ? (
-            <span class="done">{voted === 'up' ? 'THANKS' : 'NOTED'}</span>
-          ) : (
-            <>
-              <button type="button" aria-label="Helpful" onClick={() => vote('up')}>
-                👍
-              </button>
-              <button type="button" aria-label="Not helpful" onClick={() => vote('down')}>
-                👎
-              </button>
-            </>
-          )}
-        </span>
-      )}
-    </div>
+    </>
   )
 }
 

@@ -42,6 +42,28 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .opill.buy .sd{background:var(--up)}.opill.sell .sd{background:var(--down)}
 .opill .st{color:var(--faint);font-size:9px}
 .opill.new{border:1px dashed rgba(240,185,74,.5);color:var(--amber);font-family:var(--disp);font-weight:600;font-size:11px}
+.opill.on{border-color:rgba(240,185,74,.6);background:rgba(240,185,74,.08)}
+.opill:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+/* order pill expand — in place below the strip, max-height animated (§3) */
+.oexp{overflow:hidden;max-height:0;transition:max-height .28s ease}
+.oexp.open{max-height:240px}
+@media (prefers-reduced-motion:reduce){.oexp{transition:none}}
+.ocard{margin-top:9px;background:#232733;border:1px solid rgba(255,255,255,.08);border-radius:13px;
+  padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+.ocard .och{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.oside{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.06em;padding:3px 8px;border-radius:999px}
+.oside.buy{background:rgba(46,196,141,.12);color:var(--up)}
+.oside.sell{background:rgba(255,133,133,.12);color:var(--down)}
+.ocard .osum{font-family:var(--mono);font-weight:500;font-size:11.5px}
+.ocard .odet{font-family:var(--mono);font-size:9px;color:var(--dim);border:1px solid var(--hairline);border-radius:999px;padding:2px 7px}
+.ocard .ostat{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--amber)}
+.omanage{font-family:var(--disp);font-weight:600;font-size:11.5px;text-align:center;padding:9px 12px;
+  border:1px solid var(--hairline);border-radius:10px;background:rgba(20,22,28,.7);color:#E9EBF0}
+.omanage:hover{border-color:rgba(240,185,74,.4)}
+/* + New order hint — conversational, never a form */
+.newhint{margin-top:9px;border:1px dashed rgba(240,185,74,.5);border-radius:13px;padding:11px 12px}
+.newhint b{display:block;font-family:var(--disp);font-weight:600;font-size:12px;color:var(--amber);margin-bottom:8px}
+.nchips{display:flex;gap:7px;flex-wrap:wrap}
 /* thread */
 .thread{overflow-y:auto;padding:13px;display:flex;flex-direction:column;gap:11px;flex:1;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
@@ -82,6 +104,15 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .fb button{font-size:12px;filter:grayscale(1);opacity:.5}
 .fb button:hover{opacity:.95}
 .fb .done{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--amber)}
+/* 👎 follow-up — one line in the live-bar area; reasons map 1:1 to eval criteria */
+.fbask{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;
+  font-family:var(--mono);font-size:8.5px;letter-spacing:.08em}
+.fbask .q{color:var(--faint)}
+.fbchip{border:1px solid var(--hairline);border-radius:999px;padding:3px 9px;background:rgba(255,255,255,.04);
+  font-family:var(--mono);font-size:8.5px;letter-spacing:.05em;color:#B8BDC9}
+.fbchip:hover{border-color:rgba(240,185,74,.4);color:#E9EBF0}
+.fbskip{margin-left:auto;font-family:var(--mono);font-size:8.5px;color:var(--faint);padding:2px 0}
+.fbskip:hover{color:#E9EBF0}
 .cache-badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;
   letter-spacing:.12em;color:var(--amber);background:rgba(240,185,74,.1);border-radius:999px;padding:3px 8px;margin-bottom:8px}
 /* ticket */
@@ -220,6 +251,26 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .obdots span.on{background:var(--amber)}
 .obnotnow{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--faint);padding:4px}
 .obnotnow:hover{color:#E9EBF0}
+/* share overlay — the live, co-branded card (baseline §6) */
+.shrcard{position:relative;width:100%;max-width:320px;background:#14161C;border:1px solid rgba(240,185,74,.35);
+  border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:10px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.shrbrand{display:flex;align-items:center;gap:7px;padding-right:28px}
+.shrmark{width:20px;height:20px;border-radius:7px;background:var(--amber);color:#15171D;
+  display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:10px}
+.shrbrand b{font-family:var(--disp);font-size:12.5px;font-weight:600}
+.shrbrand .on{color:var(--dim);font-size:11px}
+.shrlive{margin-left:auto;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--up)}
+.shrcard h3{font-family:var(--disp);font-size:15px;font-weight:600;line-height:1.3}
+.shrcard p{font-size:12px;line-height:1.55;color:#B8BDC9}
+.shrfoot{display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:8.5px;
+  letter-spacing:.1em;color:var(--faint)}
+.shrfoot .lnk{color:var(--amber)}
+/* The printed advice-line disclaimer — part of the card, not chrome */
+.shrdisc{font-family:var(--mono);font-size:8px;letter-spacing:.16em;color:var(--dim);text-align:center;
+  border-top:1px dashed rgba(255,255,255,.08);padding-top:9px}
+.shrx{position:absolute;top:10px;right:10px;width:24px;height:24px;border-radius:8px;
+  border:1px solid var(--hairline);color:var(--dim);display:grid;place-items:center;font-size:10px}
+.shrx:hover{color:#E9EBF0}
 /* settings sheet */
 .obcard.sheet{text-align:left;padding-top:18px}
 .shhd{display:flex;justify-content:space-between;align-items:center}

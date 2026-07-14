@@ -1,12 +1,15 @@
 /**
  * Full-surface overlays: the onboarding flow (baseline §5, the one hero
- * moment) and the ⚙ settings sheet. These are the ONLY surfaces where
- * backdrop-filter is allowed — the full-surface exception to the solid-
- * background rule.
+ * moment), the ⚙ settings sheet, and the ↗ share card (baseline §6).
+ * These are the ONLY surfaces where backdrop-filter is allowed — the
+ * full-surface exception to the solid-background rule.
  */
+import type { ResearchBrief } from '@hippo/protocol'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { SparklineSvg } from './cards.js'
 import { consentRows, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
-import { memoryOptIn, settingsOpen, venueName } from './state.js'
+import { COPIED_FLASH_MS, shareLink } from './share.js'
+import { memoryOptIn, settingsOpen, shareFrame, venueName } from './state.js'
 import { send } from './transport.js'
 
 const reducedMotion = () =>
@@ -255,6 +258,57 @@ export function OnboardingOverlay({
         <Dots step={step} />
         <button type="button" class="obnotnow" onClick={notNow}>
           Not now
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Share overlay (baseline §6) — a live, co-branded card, not a screenshot.
+ * Renders entirely from the brief's frame data; the short link is a
+ * placeholder until the share backend exists.
+ */
+export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef(0)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const link = shareLink(frame.id)
+  const close = () => {
+    shareFrame.value = null
+  }
+  const copy = () => {
+    // Clipboard can be unavailable (permissions, non-secure host) — the
+    // link stays visible on the card either way.
+    void navigator.clipboard?.writeText(link).catch(() => {})
+    setCopied(true)
+    clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
+  }
+  return (
+    <div class="overlay">
+      <div class="shrcard">
+        <div class="shrbrand">
+          <span class="shrmark">H</span>
+          <b>Hippo</b>
+          <span class="on">on {venueName.value}</span>
+          <span class="shrlive">● LIVE</span>
+        </div>
+        <h3>{frame.headline}</h3>
+        {frame.paragraphs[0] && <p>{frame.paragraphs[0]}</p>}
+        {frame.spark && <SparklineSvg points={frame.spark.points} />}
+        <div class="shrfoot">
+          <span>{frame.liveBar?.asOf}</span>
+          <span class="lnk">{link}</span>
+        </div>
+        {/* NON-NEGOTIABLE: printed on the card itself so viral distribution
+            never crosses the advice line (baseline §6). Do not remove. */}
+        <div class="shrdisc">MARKET INFORMATION · NOT INVESTMENT ADVICE</div>
+        <button type="button" class="obcta" onClick={copy}>
+          {copied ? 'COPIED ✓' : 'Copy link'}
+        </button>
+        <button type="button" class="shrx" aria-label="Close share card" onClick={close}>
+          ✕
         </button>
       </div>
     </div>
