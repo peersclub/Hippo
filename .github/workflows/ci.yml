@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref (e.g. force-push to a PR branch).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the version from the "packageManager" field in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The SDK build runs scripts/size-gate.mjs as its final step;
+      # it exits 1 if loader.js exceeds 5KB gz, failing this job.
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Loader size → step summary
+        run: |
+          {
+            echo "### SDK loader size gate"
+            echo ""
+            node -e "
+              const { readFileSync } = require('node:fs')
+              const { gzipSync } = require('node:zlib')
+              const bytes = gzipSync(readFileSync('packages/sdk/dist/loader.js')).length
+              console.log('| Artifact | Size (gz) | Limit |')
+              console.log('|---|---|---|')
+              console.log(\`| loader.js | \${(bytes / 1024).toFixed(2)} KB | 5 KB |\`)
+            "
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: Lint (biome)
+    runs-on: ubuntu-latest
+    # Non-blocking for now: the repo has pre-existing biome errors outside
+    # this branch's scope. Flip this to blocking (remove continue-on-error)
+    # once `biome check .` is clean on main.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Biome check
+        run: pnpm lint
