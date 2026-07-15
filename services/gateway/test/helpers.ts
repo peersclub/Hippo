@@ -77,7 +77,7 @@ export const deadIntel: IntelligenceClient = {
   respond: async () => {
     throw new Error('intelligence unreachable')
   },
-  // eslint-disable-next-line require-yield
+  // biome-ignore lint/correctness/useYield: hard-down stub — throws before any yield
   respondStream: async function* () {
     throw new Error('intelligence unreachable')
   },

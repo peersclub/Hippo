@@ -94,7 +94,11 @@ async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promi
 }
 
 /** Minimal SSE reader over fetch: yields {event, data} per event block. */
-async function* readSse(url: string, body: unknown, timeoutMs: number): AsyncGenerator<{ event: string; data: unknown }> {
+async function* readSse(
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+): AsyncGenerator<{ event: string; data: unknown }> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -110,8 +114,8 @@ async function* readSse(url: string, body: unknown, timeoutMs: number): AsyncGen
       const { done, value } = await reader.read()
       if (done) break
       buf += decoder.decode(value, { stream: true })
-      let sep: number
-      while ((sep = buf.indexOf('\n\n')) !== -1) {
+      let sep = buf.indexOf('\n\n')
+      while (sep !== -1) {
         const block = buf.slice(0, sep)
         buf = buf.slice(sep + 2)
         let event = 'message'
@@ -121,6 +125,7 @@ async function* readSse(url: string, body: unknown, timeoutMs: number): AsyncGen
           else if (line.startsWith('data:')) data += line.slice(5).trim()
         }
         if (data) yield { event, data: JSON.parse(data) }
+        sep = buf.indexOf('\n\n')
       }
     }
   } finally {
