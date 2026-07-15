@@ -33,7 +33,6 @@ import type {
 } from './intelligence.js'
 import { guessIntent } from './intelligence.js'
 import type { MarketClient, MarketSnapshot } from './market.js'
-import type { MemoryClient } from './memory.js'
 import {
   asOfDisplay,
   cacheAgeDisplay,
@@ -41,6 +40,7 @@ import {
   formatPrice,
   symbolFromText,
 } from './market.js'
+import type { MemoryClient } from './memory.js'
 import { demoOpenOrders, demoPositions } from './positions.js'
 
 /** Flat dev taker-fee assumption (0.1%) used for the est-cost line. The seam
