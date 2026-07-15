@@ -90,7 +90,7 @@ class OpenAICompatProvider:
             try:
                 res = await client.get(f"{self._origin}/api/version", timeout=2.0)
                 self._flavor = "ollama" if res.status_code == 200 else "openai"
-            except httpx.HTTPError:
+            except (httpx.HTTPError, OSError):
                 self._flavor = "openai"
         return self._flavor
 
@@ -118,7 +118,7 @@ class OpenAICompatProvider:
                     content = await self._chat_openai(
                         client, messages, temperature, max_tokens, json_mode
                     )
-        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as err:
+        except (httpx.HTTPError, OSError, ValueError, KeyError, IndexError, TypeError) as err:
             raise ProviderError(f"llm call failed: {err}") from err
         if not isinstance(content, str) or not content.strip():
             raise ProviderError("llm returned empty content")
@@ -192,7 +192,7 @@ class OpenAICompatProvider:
                     )
                 async for delta in stream:
                     yield delta
-        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as err:
+        except (httpx.HTTPError, OSError, ValueError, KeyError, IndexError, TypeError) as err:
             raise ProviderError(f"llm stream failed: {err}") from err
 
     async def _stream_openai(
@@ -271,7 +271,7 @@ class OpenAICompatProvider:
                 )
                 res.raise_for_status()
                 data = res.json()
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, OSError, ValueError):
             return False
         models = data.get("data") if isinstance(data, dict) else None
         if isinstance(models, list) and models:

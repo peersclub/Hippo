@@ -61,7 +61,7 @@ async def fetch_snapshot(symbol: str, timeout: float = 3.0) -> dict | None:
             )
             res.raise_for_status()
             data = res.json()
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, OSError, ValueError):
         return None
     if not isinstance(data, dict) or "last" not in data:
         return None

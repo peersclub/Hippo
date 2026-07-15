@@ -5,6 +5,7 @@
 import type {
   AdviceDecline,
   Banner,
+  BriefDelta,
   Frame,
   Lifecycle,
   OrderTicket,
@@ -371,6 +372,24 @@ function SkeletonCard({ frame }: { frame: Skeleton }) {
   )
 }
 
+/** Streaming research prose: the growing text that fills the skeleton while
+ * the research engine generates. state.ts accumulates consecutive
+ * brief_delta frames into one; the final research_brief replaces this card. */
+function StreamingBriefCard({ frame }: { frame: BriefDelta }) {
+  return (
+    <div class="bubble">
+      <div class="eyebrow">
+        <span>MARKET BRIEF</span>
+        <span class="live">● LIVE</span>
+      </div>
+      <p class="stream-text">
+        {frame.text}
+        <span class="stream-cursor" aria-hidden="true" />
+      </p>
+    </div>
+  )
+}
+
 function BannerCard({ frame }: { frame: Banner }) {
   return (
     <div class={`banner ${frame.kind}`}>
@@ -421,6 +440,8 @@ export function renderFrame(frame: Frame): JSX.Element | null {
       return <ThinkingCard frame={frame} />
     case 'skeleton':
       return <SkeletonCard frame={frame} />
+    case 'brief_delta':
+      return <StreamingBriefCard frame={frame} />
     case 'banner':
       return <BannerCard frame={frame} />
     case 'user_echo':

@@ -160,6 +160,21 @@ export const UserEchoFrame = z.object({
   text: z.string(),
 })
 
+/**
+ * Streaming research prose (additive, July 2026): while the research engine
+ * generates, the gateway forwards readable prose chunks so the pending brief
+ * fills in live instead of sitting on a skeleton. The SDK accumulates
+ * consecutive brief_delta frames into one growing card; the eventual
+ * research_brief frame is authoritative and REPLACES the accumulated text.
+ * SDKs that predate this frame simply keep showing the skeleton until the
+ * research_brief lands — graceful by construction, no fallback needed.
+ */
+export const BriefDeltaFrame = z.object({
+  ...base,
+  type: z.literal('brief_delta'),
+  text: z.string(),
+})
+
 export const Frame = z.discriminatedUnion('type', [
   ResearchBriefFrame,
   OrderTicketFrame,
@@ -173,6 +188,7 @@ export const Frame = z.discriminatedUnion('type', [
   PulseFrame,
   OrdersSnapshotFrame,
   UserEchoFrame,
+  BriefDeltaFrame,
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
@@ -194,4 +210,5 @@ export type Banner = z.infer<typeof BannerFrame>
 export type Pulse = z.infer<typeof PulseFrame>
 export type OrdersSnapshot = z.infer<typeof OrdersSnapshotFrame>
 export type UserEcho = z.infer<typeof UserEchoFrame>
+export type BriefDelta = z.infer<typeof BriefDeltaFrame>
 export type UnknownFrame = z.infer<typeof FrameEnvelope>
