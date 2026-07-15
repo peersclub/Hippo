@@ -20,7 +20,7 @@ import hashlib
 import json
 import os
 import time
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -170,6 +170,97 @@ class OpenAICompatProvider:
         res.raise_for_status()
         return res.json()["message"]["content"]
 
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 2000,
+        json_mode: bool = False,
+    ) -> AsyncIterator[str]:
+        """Yield content deltas as they arrive (first token < 2s p95 is the
+        PRD budget the streaming path exists for)."""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                if await self._detect_flavor(client) == "ollama":
+                    stream = self._stream_ollama_native(
+                        client, messages, temperature, max_tokens, json_mode
+                    )
+                else:
+                    stream = self._stream_openai(
+                        client, messages, temperature, max_tokens, json_mode
+                    )
+                async for delta in stream:
+                    yield delta
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as err:
+            raise ProviderError(f"llm stream failed: {err}") from err
+
+    async def _stream_openai(
+        self,
+        client: httpx.AsyncClient,
+        messages: list[Message],
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool,
+    ) -> AsyncIterator[str]:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        async with client.stream(
+            "POST",
+            f"{self.base_url}/chat/completions",
+            json=payload,
+            headers=self._headers(),
+        ) as res:
+            res.raise_for_status()
+            async for line in res.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:") :].strip()
+                if data == "[DONE]":
+                    break
+                chunk = json.loads(data)
+                delta = chunk["choices"][0].get("delta", {}).get("content")
+                if delta:
+                    yield delta
+
+    async def _stream_ollama_native(
+        self,
+        client: httpx.AsyncClient,
+        messages: list[Message],
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool,
+    ) -> AsyncIterator[str]:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,  # NDJSON, one chunk per line
+            "think": False,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }
+        if json_mode:
+            payload["format"] = "json"
+        async with client.stream(
+            "POST", f"{self._origin}/api/chat", json=payload
+        ) as res:
+            res.raise_for_status()
+            async for line in res.aiter_lines():
+                if not line.strip():
+                    continue
+                chunk = json.loads(line)
+                delta = chunk.get("message", {}).get("content")
+                if delta:
+                    yield delta
+                if chunk.get("done"):
+                    break
+
     async def probe(self) -> bool:
         """True if the endpoint answers and (when listable) serves our model."""
         try:
@@ -222,6 +313,24 @@ class MockProvider:
         if '"headline"' in user or '"headline"' in system:
             return self._brief(user)
         return "As of now, here is what the data shows."
+
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 2000,
+        json_mode: bool = False,
+    ) -> AsyncIterator[str]:
+        """Stream the canned answer in small chunks (realistic deltas that can
+        split JSON tokens/escapes anywhere, like a real token stream)."""
+        content = await self.chat(
+            messages, temperature=temperature, max_tokens=max_tokens
+        )
+        words = content.split(" ")
+        for i in range(0, len(words), 4):
+            chunk = " ".join(words[i : i + 4])
+            yield chunk if i + 4 >= len(words) else chunk + " "
 
     # -- intent -----------------------------------------------------------
     def _classify(self, user: str) -> str:
@@ -425,6 +534,44 @@ class ProviderRouter:
         return await self.mock.chat(
             messages, temperature=temperature, max_tokens=max_tokens
         )
+
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 2000,
+        json_mode: bool = False,
+    ) -> AsyncIterator[str]:
+        """Stream deltas; transparent mock fallback.
+
+        The first delta is awaited BEFORE anything is yielded, so a dead
+        endpoint falls back to the mock invisibly. A failure mid-stream (after
+        deltas have been shown) propagates as ProviderError — the caller
+        finalizes with what it has; it cannot un-show tokens.
+        """
+        if time.monotonic() >= self._down_until:
+            stream = self.llm.chat_stream(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=json_mode,
+            )
+            try:
+                first = await anext(stream)
+            except (ProviderError, StopAsyncIteration):
+                self._down_until = time.monotonic() + _BREAKER_SECONDS
+                self.mode = "mock"
+            else:
+                self.mode = "llm"
+                yield first
+                async for delta in stream:
+                    yield delta
+                return
+        async for delta in self.mock.chat_stream(
+            messages, temperature=temperature, max_tokens=max_tokens
+        ):
+            yield delta
 
     @property
     def model(self) -> str:

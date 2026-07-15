@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, AsyncIterator
 
-from cache import AnswerCache
+from cache import AnswerCache, volatility_scaled_ttl
 from guardrail import detect_advice_language
 from marketdata import extract_symbol, fetch_snapshot, to_pair
 from prompts import (
@@ -20,8 +20,8 @@ from prompts import (
     HIPPO_SYSTEM_PROMPT_V0,
     STERNER_GUARDRAIL_SUFFIX,
 )
-from providers import Message, MockProvider, ProviderRouter
-from textutil import extract_json_object
+from providers import Message, MockProvider, ProviderError, ProviderRouter
+from textutil import JsonProseExtractor, extract_json_object
 
 MAX_PARAGRAPHS = 3
 MAX_PARAGRAPH_WORDS = 60
@@ -180,6 +180,11 @@ async def build_brief(
         if flagged:
             return await build_decline(text, symbol, language, snapshot=snapshot)
 
+    return _assemble_brief(prose, snapshot)
+
+
+def _assemble_brief(prose: dict[str, Any], snapshot: dict | None) -> dict[str, Any]:
+    """Prose (generation) + snapshot card parts (retrieval) → brief dict."""
     brief: dict[str, Any] = {
         "kind": "brief",
         "headline": prose["headline"],
@@ -306,5 +311,116 @@ async def respond(
         text, asset, router, concept_mode=concept_mode, language=lang
     )
     if answer.get("kind") == "brief":
-        cache.set(text, cache_scope, answer)
+        # TTL scaled by realized volatility from the spark line: calm markets
+        # serve the brief longer, moving markets expire it fast.
+        cache.set(
+            text,
+            cache_scope,
+            answer,
+            ttl_s=volatility_scaled_ttl(answer.get("sparkPoints")),
+        )
     return answer
+
+
+# --- streaming respond ----------------------------------------------------------
+def _meta_from_brief(brief: dict[str, Any]) -> dict[str, Any]:
+    meta: dict[str, Any] = {
+        "stats": brief.get("stats", []),
+        "sources": brief.get("sources", []),
+        "asOfIso": brief.get("asOfIso"),
+    }
+    if "sparkPoints" in brief:
+        meta["sparkPoints"] = brief["sparkPoints"]
+    return meta
+
+
+async def respond_stream(
+    text: str,
+    intent: str,
+    router: ProviderRouter,
+    cache: AnswerCache,
+    symbol: str | None = None,
+    language: str | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Streaming variant of respond() for POST /v1/respond/stream (SSE).
+
+    Event order makes the retrieval/generation split visible on the wire:
+      meta    — stats/spark/sources/asOfIso straight from the snapshot,
+                emitted BEFORE the model produces a single token
+      delta   — readable prose chunks ({"text": ...}). The model streams
+                constrained JSON (json_mode); JsonProseExtractor passes
+                through only the headline/paragraph string contents so the
+                SDK renders clean text while the wire stays strict JSON.
+      done    — the full validated brief (authoritative; supersedes deltas)
+      replace — decline card when the output guardrail trips: streamed tokens
+                cannot be silently regenerated the way the blocking path does,
+                so the enforcement is a visible replacement instead
+      decline — advice intent (no generation at all)
+    Cache hits emit meta + done immediately (this is the < 800ms cache-hit
+    budget path). The model never contributes to meta — numbers are retrieval.
+    """
+    asset = (symbol or extract_symbol(text)).split("/")[0].upper()
+    lang = language if language in ("en", "hi", "hinglish") else "en"
+
+    if intent == "advice":
+        yield {"event": "decline", "data": await build_decline(text, asset, lang)}
+        return
+
+    concept_mode = intent in ("concept", "smalltalk")
+    cache_scope = f"{asset if not concept_mode else '-'}:{lang}"
+    hit = cache.get(text, cache_scope)
+    if hit is not None:
+        yield {"event": "meta", "data": _meta_from_brief(hit)}
+        yield {"event": "done", "data": {**hit, "cached": True}}
+        return
+
+    snapshot = None if concept_mode else await fetch_snapshot(asset)
+    meta: dict[str, Any] = {
+        "stats": _stats_from_snapshot(snapshot) if snapshot else [],
+        "sources": list(snapshot["sources"]) if snapshot and snapshot.get("sources") else [KNOWLEDGE_SOURCE],
+        "asOfIso": str(snapshot.get("asOfIso")) if snapshot and snapshot.get("asOfIso") else _now_iso(),
+    }
+    if snapshot and isinstance(snapshot.get("spark"), list):
+        meta["sparkPoints"] = snapshot["spark"]
+    yield {"event": "meta", "data": meta}
+
+    user = _brief_user_prompt(text, asset, snapshot, lang)
+    messages: list[Message] = [
+        {"role": "system", "content": HIPPO_SYSTEM_PROMPT_V0},
+        {"role": "user", "content": user},
+    ]
+    extractor = JsonProseExtractor()
+    raw = ""
+    try:
+        async for chunk in router.chat_stream(messages, json_mode=True):
+            raw += chunk
+            visible = extractor.feed(chunk)
+            if visible:
+                yield {"event": "delta", "data": {"text": visible}}
+    except ProviderError:
+        pass  # finalize with what we have; the floor below fills any gap
+
+    prose = _coerce_prose(extract_json_object(raw))
+    if prose is None:
+        # Stream was unusable — fall back to the blocking JSON path (which
+        # bottoms out at the deterministic mock); `done` supersedes deltas.
+        prose = await _generate_prose(router, HIPPO_SYSTEM_PROMPT_V0, user)
+
+    flagged = detect_advice_language(
+        " ".join([prose["headline"], *prose["paragraphs"], *prose["followups"]])
+    )
+    if flagged:
+        yield {
+            "event": "replace",
+            "data": await build_decline(text, asset, lang, snapshot=snapshot),
+        }
+        return
+
+    brief = _assemble_brief(prose, snapshot)
+    cache.set(
+        text,
+        cache_scope,
+        brief,
+        ttl_s=volatility_scaled_ttl(brief.get("sparkPoints")),
+    )
+    yield {"event": "done", "data": brief}

@@ -6,11 +6,13 @@ Run: ./dev.sh   (or .venv/bin/uvicorn main:app --port 8791)
 """
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Literal
 
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import intent as intent_engine
@@ -74,6 +76,40 @@ async def respond(req: RespondRequest) -> dict[str, Any]:
         # an error the SDK can't draw.
         log.exception("respond pipeline error; serving fallback decline")
         return await research.build_decline(req.text, "BTC", req.language or "en", snapshot=None)
+
+
+@app.post("/v1/respond/stream")
+async def respond_stream(req: RespondRequest) -> StreamingResponse:
+    """SSE variant of /v1/respond: meta (snapshot facts) → delta* → done,
+    or replace/decline. Additive to the pinned contract — the gateway can
+    adopt it for the first-token < 2s budget without breaking /v1/respond."""
+
+    def sse(event: str, data: dict[str, Any]) -> str:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    async def generate() -> AsyncIterator[str]:
+        try:
+            async for ev in research.respond_stream(
+                req.text,
+                req.intent,
+                router,
+                answer_cache,
+                symbol=req.symbol,
+                language=req.language,
+            ):
+                yield sse(ev["event"], ev["data"])
+        except Exception:
+            log.exception("respond stream error; emitting fallback decline")
+            fallback = await research.build_decline(
+                req.text, "BTC", req.language or "en"
+            )
+            yield sse("decline", fallback)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/health")

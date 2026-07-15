@@ -128,6 +128,22 @@ Concept answers carry no snapshot furniture and source `HIPPO KNOWLEDGE`.
 }
 ```
 
+### `POST /v1/respond/stream` (SSE)
+
+Streaming variant of `/v1/respond` — additive to the contract; same request
+body. Events, in order:
+
+| event | payload | notes |
+|---|---|---|
+| `meta` | `{stats, sparkPoints?, sources, asOfIso}` | snapshot facts, emitted **before the model produces a single token** — retrieval lands first |
+| `delta` | `{"text": "..."}` | readable prose chunks. The model streams constrained JSON (`json_mode`); `JsonProseExtractor` passes through only the headline/paragraph string contents, so the SDK renders clean text while the wire format stays strict JSON |
+| `done` | the full brief (same shape as `/v1/respond`) | authoritative; supersedes deltas |
+| `replace` | the decline shape | output guardrail tripped: streamed tokens can't be silently regenerated, so enforcement is a **visible replacement** |
+| `decline` | the decline shape | advice intent (no generation), or pipeline error fallback |
+
+Cache hits emit `meta` + `done` immediately (< 800ms cache-hit budget path).
+Measured locally on qwen3:4b: first byte ~4ms (meta), full brief ~5s.
+
 ### `GET /health`
 
 ```json
@@ -155,8 +171,13 @@ Key = (canonicalized question, symbol+language scope, 5-minute market
 window). "why is btc down today" and "btc kyu gir raha hai" hit the same
 entry. Market-level answers are facts, not opinions — generated once, served
 fleet-wide; cache hits return `cached: true` with the **original** `asOfIso`
-(a cached answer is a fact about *its* moment). TTL is a fixed 120s locally;
-hit rate is exported on `/health`.
+(a cached answer is a fact about *its* moment). Hit rate is exported on
+`/health`.
+
+**TTL is volatility-scaled**: realized volatility computed from the brief's
+spark line maps to 300s (calm) / 120s (normal) / 45s (volatile). Production
+drives this from the market-data volatility monitor, which also pre-warms
+burst GPU capacity before the query wave.
 
 ## Production notes
 
