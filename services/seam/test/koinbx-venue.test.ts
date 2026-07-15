@@ -189,6 +189,41 @@ describe('KoinbxVenueAdapter — poll reconciler', () => {
     expect(filled?.venueOrderId).toBe('999')
     expect(filled?.statusLine).toBe('FILLED')
   })
+
+  it('emits a terminal expired frame when the poll ceiling is hit (order never resolves)', async () => {
+    const events: LifecycleEvent[] = []
+    // Order stays ACTIVE forever — with no status-by-id or webhook, the poll
+    // never learns a terminal state and must hand the trader back to the venue.
+    const restingOrder = {
+      id: 999, // matches the orderId the create mock returns
+      pairName: 'BTC-USDT',
+      qty: 0.05,
+      filledQty: 0,
+      remainingQty: 0.05,
+      rate: 61_240,
+      status: 'Active',
+      orderType: 0,
+    }
+    const fetchImpl = makeFetch({ openSequence: [[restingOrder]] })
+    const a = new KoinbxVenueAdapter({
+      ...CREDS,
+      pollTimeoutMs: 15,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    a.onEvent((e) => events.push(e))
+
+    const ticket = await a.prepare(prepareReq)
+    await a.confirm(ticket.ticketId)
+    await vi.waitFor(() => expect(events.some((e) => e.phase === 'expired')).toBe(true), {
+      timeout: 500,
+    })
+
+    // never falsely reported as filled
+    expect(events.some((e) => e.phase === 'filled')).toBe(false)
+    const expired = events.find((e) => e.phase === 'expired')
+    expect(expired?.venueOrderId).toBe('999')
+    expect(expired?.statusLine).toContain('CHECK THERE')
+  })
 })
 
 describe('KoinbxVenueAdapter — cancel & portfolio', () => {

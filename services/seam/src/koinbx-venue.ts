@@ -290,7 +290,7 @@ export class KoinbxVenueAdapter implements VenueAdapter {
       } catch {
         // Transient poll failure — keep trying until the timeout ceiling.
       }
-      if (Date.now() - startedAt > this.opts.pollTimeoutMs) this.stopReconciler(ticket)
+      if (Date.now() - startedAt > this.opts.pollTimeoutMs) this.emitUnresolved(ticketId, ticket)
     }
 
     ticket.poll = setInterval(() => void tick(), this.opts.pollIntervalMs)
@@ -308,6 +308,27 @@ export class KoinbxVenueAdapter implements VenueAdapter {
         { label: 'Avg fill', value: formatPrice(ticket.price) },
         { label: 'Venue order ID', value: String(ticket.venueOrderId ?? '') },
       ],
+    })
+    this.tickets.delete(ticketId)
+  }
+
+  /**
+   * Poll ceiling reached without a terminal signal. KoinBX exposes no
+   * order-status-by-id and no lifecycle webhook (see the header note), so
+   * Hippo genuinely cannot cheaply learn the final state of an order still
+   * resting on the book. Rather than hang the lifecycle card forever we emit a
+   * terminal `expired` frame that hands the trader back to the venue — the
+   * card resolves and the ticket is released. A venue webhook (Open Decisions)
+   * removes the need for this fallback.
+   */
+  private emitUnresolved(ticketId: string, ticket: StoredTicket): void {
+    this.stopReconciler(ticket)
+    if (!this.tickets.has(ticketId)) return
+    this.handler({
+      ticketId,
+      phase: 'expired',
+      statusLine: 'STILL WORKING ON THE VENUE — CHECK THERE FOR THE FINAL STATUS',
+      venueOrderId: ticket.venueOrderId ? String(ticket.venueOrderId) : undefined,
     })
     this.tickets.delete(ticketId)
   }
