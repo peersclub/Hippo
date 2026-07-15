@@ -1,5 +1,6 @@
 import type { Banner, Frame, OrdersSnapshot, ResearchBrief, UnknownFrame } from '@hippo/protocol'
 import { computed, signal } from '@preact/signals'
+import type { Posture } from './posture.js'
 
 /** A thread entry: a known frame, or an unknown one destined for FallbackCard. */
 export type ThreadItem = { kind: 'frame'; frame: Frame } | { kind: 'unknown'; frame: UnknownFrame }
@@ -10,7 +11,9 @@ export const suggestedQueries = signal<string[]>([])
 
 export const thread = signal<ThreadItem[]>([])
 export const orders = signal<OrdersSnapshot | null>(null)
-export const posture = signal<'min' | 'dock' | 'max'>('min')
+/** Where the panel sits on the page. `pill` = minimized launcher (panel
+ * renders null). Full matrix + transitions live in posture.ts. */
+export const posture = signal<Posture>('pill')
 export const connection = signal<'connecting' | 'live' | 'offline'>('connecting')
 export const pulseTag = signal<string | null>(null)
 
@@ -78,7 +81,7 @@ export function pushFrame(item: ThreadItem) {
     return
   }
   if (t === 'pulse') {
-    if (posture.value === 'min') pulseTag.value = (item.frame as { tag?: string }).tag ?? null
+    if (posture.value === 'pill') pulseTag.value = (item.frame as { tag?: string }).tag ?? null
     return
   }
   if (t === 'banner') {
