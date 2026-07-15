@@ -24,15 +24,40 @@ export const exchangeSpec: OpenApiDoc = {
       get: { summary: 'Exchange trading rules and symbol information', tags: ['Market Data'] },
     },
     '/api/v3/order': {
-      post: { summary: 'Place a new order', operationId: 'createOrder', tags: ['Trade'] },
-      get: { summary: 'Query order status', operationId: 'getOrder', tags: ['Trade'] },
+      post: {
+        summary: 'Place a new order',
+        operationId: 'createOrder',
+        tags: ['Trade'],
+        responses: {
+          '200': { description: 'Order accepted' },
+          '400': { description: 'Invalid order parameters (symbol, quantity, or price)' },
+          '401': { description: 'Invalid API key or request signature' },
+          '429': { description: 'Rate limit exceeded' },
+        },
+      },
+      get: {
+        summary: 'Query order status',
+        operationId: 'getOrder',
+        tags: ['Trade'],
+        responses: {
+          '200': { description: 'Order status' },
+          '404': { description: 'Unknown order' },
+        },
+      },
       delete: { summary: 'Cancel an active order', operationId: 'cancelOrder', tags: ['Trade'] },
     },
     '/api/v3/openOrders': {
       get: { summary: 'Current open orders', tags: ['Trade'] },
     },
     '/api/v3/account': {
-      get: { summary: 'Account information including balances', tags: ['Account'] },
+      get: {
+        summary: 'Account information including balances',
+        tags: ['Account'],
+        responses: {
+          '200': { description: 'Account information' },
+          '401': { description: 'Invalid signature' },
+        },
+      },
     },
   },
 }

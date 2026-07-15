@@ -82,6 +82,16 @@ export interface ProbeResult {
   note: string | null
 }
 
+/** A single documented error response, extracted from the spec's operations. */
+export interface ErrorResponseFinding {
+  /** e.g. "POST /api/v3/order". */
+  endpoint: string
+  /** HTTP status key: "400", "429", "default", … */
+  status: string
+  /** The response's description text, when the spec provides one. */
+  description: string | null
+}
+
 export interface ScanResult {
   domain: string
   scannedAt: string
@@ -91,4 +101,10 @@ export interface ScanResult {
   probes: ProbeResult[]
   capabilities: CapabilityMatch[]
   authSchemes: string[]
+  /**
+   * Documented error responses from the spec's operations, used by stage-4
+   * `rejections.yaml` generation. Optional: absent for scans made before the
+   * field existed and empty when no spec (or no documented errors) was found.
+   */
+  errorResponses?: ErrorResponseFinding[]
 }

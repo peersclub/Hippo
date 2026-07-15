@@ -8,7 +8,7 @@
  * v0 is honest about being a heuristic: a match means "candidate endpoint",
  * a gap means "not publicly discoverable" — not proof of absence.
  */
-import type { CapabilityId, CapabilityMatch } from './types.js'
+import type { CapabilityId, CapabilityMatch, ErrorResponseFinding } from './types.js'
 
 const HTTP_METHODS = ['get', 'post', 'put', 'delete', 'patch'] as const
 
@@ -17,6 +17,8 @@ export interface OpenApiOperation {
   description?: string
   operationId?: string
   tags?: string[]
+  /** Keyed by status code (or "default"); values may be $refs we ignore. */
+  responses?: Record<string, { description?: string } | unknown>
 }
 
 export interface OpenApiDoc {
@@ -173,6 +175,39 @@ export function mapToCti(doc: OpenApiDoc): CapabilityMatch[] {
       consequence: def.consequence,
     }
   })
+}
+
+/** A status key that denotes an error (4xx/5xx) or the catch-all "default". */
+const ERROR_STATUS = /^[45]\d\d$/
+
+/**
+ * Documented error responses across all operations — the deterministic input
+ * to stage-4 `rejections.yaml`. Pulls each 4xx/5xx (and "default") response's
+ * status + description. An empty array means "spec documents no errors", which
+ * the rejection generator flags as a gap.
+ */
+export function extractErrorResponses(doc: OpenApiDoc): ErrorResponseFinding[] {
+  const findings: ErrorResponseFinding[] = []
+  for (const [path, item] of Object.entries(doc.paths ?? {})) {
+    if (typeof item !== 'object' || item === null) continue
+    for (const method of HTTP_METHODS) {
+      const op = (item as Record<string, unknown>)[method]
+      if (typeof op !== 'object' || op === null) continue
+      const responses = (op as OpenApiOperation).responses
+      if (!responses) continue
+      for (const [status, res] of Object.entries(responses)) {
+        if (!ERROR_STATUS.test(status) && status !== 'default') continue
+        const description =
+          typeof res === 'object' &&
+          res !== null &&
+          typeof (res as { description?: unknown }).description === 'string'
+            ? (res as { description: string }).description
+            : null
+        findings.push({ endpoint: `${method.toUpperCase()} ${path}`, status, description })
+      }
+    }
+  }
+  return findings
 }
 
 /** Declared auth schemes: v3 components.securitySchemes or v2 securityDefinitions. */
