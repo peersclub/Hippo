@@ -11,6 +11,7 @@ import { createOrchestrator } from './orchestrator/index.js'
 import { createIntelligenceClient } from './orchestrator/intelligence.js'
 import { createMarketClient } from './orchestrator/market.js'
 import { createMemoryClient } from './orchestrator/memory.js'
+import { createSeamClient } from './orchestrator/seam.js'
 import { authenticate, SessionStore } from './plugins/auth.js'
 import { createEmitter, streamSession } from './plugins/sse.js'
 import { Telemetry } from './plugins/telemetry.js'
@@ -21,8 +22,7 @@ export type GatewayOptions = {
   intel?: import('./orchestrator/intelligence.js').IntelligenceClient
   market?: import('./orchestrator/market.js').MarketClient
   memory?: import('./orchestrator/memory.js').MemoryClient
-  /** Simulated venue fill latency (ms); tests shrink it. */
-  fillDelayMs?: number
+  seam?: import('./orchestrator/seam.js').SeamClient
   /** Throw on invalid frames instead of log+drop. Defaults to true in tests. */
   strictFrames?: boolean
   /** Allow anonymous {partnerKey} sessions. Defaults to HIPPO_DEV !== '0'. */
@@ -43,10 +43,10 @@ export async function buildApp(opts: GatewayOptions = {}) {
     intel: opts.intel ?? createIntelligenceClient(),
     market: opts.market ?? createMarketClient(),
     memory: opts.memory ?? createMemoryClient(),
+    seam: opts.seam ?? createSeamClient(),
     emit,
     telemetry,
     log: app.log,
-    fillDelayMs: opts.fillDelayMs,
   })
 
   app.post('/v1/session', async (req, reply) => {
@@ -93,6 +93,19 @@ export async function buildApp(opts: GatewayOptions = {}) {
     }
     orchestrator.handleUplink(session, parsed.data)
     return { ok: true }
+  })
+
+  /** Venue lifecycle events delivered by the seam (the callbackUrl given at
+   * confirm time). Internal route: in pods this sits on the cluster network
+   * behind mTLS, never exposed through the partner-facing ingress. */
+  app.post('/internal/venue-events', async (req, reply) => {
+    const event = req.body as import('./orchestrator/seam.js').VenueEvent
+    if (typeof event?.ticketId !== 'string' || typeof event?.phase !== 'string') {
+      reply.code(400)
+      return { error: 'invalid venue event' }
+    }
+    const routed = orchestrator.onVenueEvent(event)
+    return { ok: true, routed }
   })
 
   app.get('/health', async () => ({ ok: true, service: 'gateway' }))

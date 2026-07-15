@@ -10,6 +10,7 @@ import type {
 } from '../src/orchestrator/intelligence.js'
 import type { MarketClient, MarketSnapshot } from '../src/orchestrator/market.js'
 import type { MemoryClient, Persona, PersonaUpdate } from '../src/orchestrator/memory.js'
+import type { PreparedTicket, SeamClient, SeamPortfolio } from '../src/orchestrator/seam.js'
 import type { Session, SessionStore } from '../src/plugins/auth.js'
 
 export const snapshotFixture: MarketSnapshot = {
@@ -134,6 +135,79 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
   }
 }
 
+export const ticketFixture: PreparedTicket = {
+  ticketId: 't_fixture001',
+  side: 'buy',
+  instrument: 'BTC/USDT',
+  orderType: 'market',
+  sideLabel: 'BUY · MKT',
+  rows: [
+    { label: 'Instrument', value: 'BTC / USDT' },
+    { label: 'Size', value: '0.05 BTC' },
+    { label: 'Est. price', value: '61,240' },
+    { label: 'Est. cost incl. fees', value: '3,065.06 USDT' },
+  ],
+}
+
+export const portfolioFixture: SeamPortfolio = {
+  positions: [
+    {
+      instrument: 'BTC/USDT',
+      size: '0.31 BTC',
+      entry: '58,420',
+      mark: '61,240',
+      pnl: '+874.20 USDT',
+      tone: 'pos',
+    },
+  ],
+  openOrders: [{ orderId: 'o_btc', side: 'buy', summary: 'BUY 0.05 BTC · MKT', status: 'OPEN' }],
+}
+
+/** Call-recording seam client with fixture responses. */
+export function stubSeam(): SeamClient & {
+  prepares: unknown[]
+  confirms: string[]
+  cancels: string[]
+} {
+  const prepares: unknown[] = []
+  const confirms: string[] = []
+  const cancels: string[] = []
+  return {
+    prepares,
+    confirms,
+    cancels,
+    async prepare(req) {
+      prepares.push(req)
+      return { ...ticketFixture, side: req.side, instrument: req.instrument }
+    },
+    async confirm(ticketId) {
+      confirms.push(ticketId)
+    },
+    async cancel(ticketId) {
+      cancels.push(ticketId)
+    },
+    async portfolio() {
+      return portfolioFixture
+    },
+  }
+}
+
+/** A seam client that is hard-down — every call rejects. */
+export const deadSeam: SeamClient = {
+  prepare: async () => {
+    throw new Error('seam unreachable')
+  },
+  confirm: async () => {
+    throw new Error('seam unreachable')
+  },
+  cancel: async () => {
+    throw new Error('seam unreachable')
+  },
+  portfolio: async () => {
+    throw new Error('seam unreachable')
+  },
+}
+
 /** A memory client that is hard-down — reads null, writes reject. */
 export const deadMemory: MemoryClient = {
   get: async () => null,
@@ -158,7 +232,7 @@ export async function testApp(opts: Parameters<typeof buildApp>[0] = {}): Promis
     intel: stubIntel({}),
     market: stubMarket,
     memory: stubMemory(),
-    fillDelayMs: 20,
+    seam: stubSeam(),
     ...opts,
   })
 }

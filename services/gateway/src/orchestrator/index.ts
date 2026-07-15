@@ -20,7 +20,6 @@
  * market-data-only brief — degraded but truthful. Orders, prices and
  * portfolio never depend on the intelligence service and stay fully live.
  */
-import { randomUUID } from 'node:crypto'
 import type { Session } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
@@ -33,24 +32,12 @@ import type {
 } from './intelligence.js'
 import { guessIntent } from './intelligence.js'
 import type { MarketClient, MarketSnapshot } from './market.js'
-import {
-  asOfDisplay,
-  cacheAgeDisplay,
-  formatAmount,
-  formatPrice,
-  symbolFromText,
-} from './market.js'
+import { asOfDisplay, cacheAgeDisplay, symbolFromText } from './market.js'
 import type { MemoryClient } from './memory.js'
-import { demoOpenOrders, demoPositions } from './positions.js'
-
-/** Flat dev taker-fee assumption (0.1%) used for the est-cost line. The seam
- * adapter returns venue-true fees in Phase 3. */
-const FEE_RATE = 0.001
+import type { SeamClient } from './seam.js'
 
 /** Below this intent confidence we don't trust the route and nudge instead. */
 const LOW_CONFIDENCE = 0.4
-
-const DEFAULT_FILL_DELAY_MS = 3_000
 
 /** Coalescing window for streamed brief_delta frames (journal economy). */
 const DELTA_FLUSH_MS = 150
@@ -67,16 +54,17 @@ export type OrchestratorDeps = {
   intel: IntelligenceClient
   market: MarketClient
   memory: MemoryClient
+  seam: SeamClient
   emit: EmitFrame
   telemetry: Telemetry
   log: Log
-  /** Simulated venue fill latency; tests shrink it. */
-  fillDelayMs?: number
 }
 
 export type Orchestrator = {
   onStreamConnect(session: Session): void
   handleUplink(session: Session, uplink: Uplink): void
+  /** Venue lifecycle event from the seam callback. false = unknown ticket. */
+  onVenueEvent(event: import('./seam.js').VenueEvent): boolean
 }
 
 function userKey(session: Session): string {
@@ -84,8 +72,7 @@ function userKey(session: Session): string {
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
-  const { intel, market, memory, emit, telemetry, log } = deps
-  const fillDelayMs = deps.fillDelayMs ?? DEFAULT_FILL_DELAY_MS
+  const { intel, market, memory, seam, emit, telemetry, log } = deps
 
   // ── frame builders ─────────────────────────────────────────────────────
 
@@ -240,87 +227,60 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   }
 
-  // ── action: order tickets (seam stub) ──────────────────────────────────
+  // ── action: order tickets (Canonical Trading Interface, Build Plan/04) ──
+
+  /** Live tickets → their session, so venue events (which carry only a
+   * ticketId) can be routed back into the right thread. */
+  const ticketSessions = new Map<string, Session>()
 
   async function prepareTicket(session: Session, order: OrderIntent, text: string) {
-    // SEAM STUB — Phase 3 replaces this block with the Canonical Trading
-    // Interface adapter (seam service): prepare() against the venue with real
-    // fee schedules and balance checks. Until then the gateway quotes the
-    // estimate from market-data and simulates the venue lifecycle.
-    const sizeNum = Number(order.size)
-    if (!Number.isFinite(sizeNum) || sizeNum <= 0) {
-      emit(session, {
-        type: 'rejection_ticket',
-        title: 'Order not prepared',
-        reason: `I couldn't read the order size — try phrasing it like "buy 0.05 BTC".`,
-      })
-      return
-    }
-
-    let snap: MarketSnapshot
+    // The seam owns quoting, fees and validation (per-venue adapter). The
+    // gateway forwards the prepared ticket verbatim — it never computes money.
+    let ticket: import('./seam.js').PreparedTicket
     try {
-      snap = await market.snapshot(order.instrument)
+      ticket = await seam.prepare({
+        partnerId: session.partner.partnerId,
+        userId: userKey(session),
+        side: order.side,
+        size: order.size,
+        instrument: order.instrument,
+        orderType: order.orderType,
+        ...(order.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
+      })
     } catch (err) {
-      log.error({ err, instrument: order.instrument }, 'quote unavailable')
+      log.error({ err, instrument: order.instrument }, 'seam prepare failed')
       emit(session, {
         type: 'rejection_ticket',
         title: 'Order not prepared',
-        reason: `Live pricing for ${order.instrument} is unavailable right now, so I won't guess at a quote.`,
+        reason: `${session.partner.venueName} couldn't quote this order right now, so I won't guess at a price. Nothing was sent to the venue.`,
         fix: { label: 'Try again', action: text },
       })
       return
     }
 
-    const isLimit = order.orderType === 'limit' && order.limitPrice !== undefined
-    const price = isLimit ? Number(order.limitPrice) : snap.last
-    if (!Number.isFinite(price) || price <= 0) {
-      emit(session, {
-        type: 'rejection_ticket',
-        title: 'Order not prepared',
-        reason: `I couldn't read the limit price — try phrasing it like "buy 0.05 BTC at 61000".`,
-      })
-      return
-    }
-
-    // Est. cost = size × price × 1.001 — flat 0.1% dev taker fee (FEE_RATE);
-    // the seam adapter substitutes venue-true fees in Phase 3.
-    const estCost = sizeNum * price * (1 + FEE_RATE)
-    const base = order.instrument.split('/')[0] ?? order.instrument
-    const sizeDisplay = `${order.size} ${base}`
-    const ticketId = `t_${randomUUID().replaceAll('-', '').slice(0, 10)}`
-
-    session.tickets.set(ticketId, {
-      side: order.side,
-      instrument: order.instrument,
-      sizeDisplay,
-      sizeNum,
-      price,
-      feeRate: FEE_RATE,
+    ticketSessions.set(ticket.ticketId, session)
+    session.tickets.set(ticket.ticketId, {
+      side: ticket.side,
+      instrument: ticket.instrument,
+      sizeDisplay: order.size,
+      sizeNum: Number(order.size),
+      price: 0, // actuals come back on venue events; the gateway holds no math
+      feeRate: 0,
     })
-
-    const rows: Array<{ label: string; value: string }> = [
-      { label: 'Instrument', value: order.instrument.replace('/', ' / ') },
-      { label: 'Size', value: sizeDisplay },
-      ...(isLimit
-        ? [{ label: 'Limit price', value: formatPrice(price) }]
-        : [{ label: 'Est. price', value: formatPrice(price) }]),
-      { label: 'Est. cost incl. fees', value: `${formatAmount(estCost)} USDT` },
-    ]
 
     emit(session, {
       type: 'order_ticket',
-      ticketId,
+      ticketId: ticket.ticketId,
       title: 'Order prepared',
-      side: order.side,
-      sideLabel: `${order.side.toUpperCase()} · ${isLimit ? 'LMT' : 'MKT'}`,
-      rows,
+      side: ticket.side,
+      sideLabel: ticket.sideLabel,
+      rows: ticket.rows,
       cta: `Review & confirm in ${session.partner.venueName} →`,
       footnote: `Hippo prepared this order. ${session.partner.venueName} will ask you to confirm before anything executes.`,
     })
   }
 
   function confirmHandoff(session: Session, ticketId: string): void {
-    const quote = session.tickets.get(ticketId)
     emit(session, {
       type: 'lifecycle',
       ticketId,
@@ -328,42 +288,29 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       statusLine: `WAITING FOR YOUR CONFIRM ON ${session.partner.venueName.toUpperCase()}`,
       cancellable: true,
     })
-
-    // SEAM STUB — Phase 3: the seam's webhook receiver + poll reconciler
-    // deliver real venue events here. Until then we simulate a fill with the
-    // actuals taken from the quote captured at prepare time.
-    const timer = setTimeout(() => {
-      const venueOrderId = `KBX-${Math.floor(10_000_000 + Math.random() * 89_999_999)}`
-      const rows: Array<{ label: string; value: string }> = quote
-        ? [
-            { label: 'Avg fill', value: formatPrice(quote.price) },
-            {
-              label: 'Fees (actual)',
-              value: `${formatAmount(quote.sizeNum * quote.price * quote.feeRate)} USDT`,
-            },
-            { label: 'Venue order ID', value: venueOrderId },
-          ]
-        : [{ label: 'Venue order ID', value: venueOrderId }]
+    // Venue events (fill, partial, reject) flow back asynchronously through
+    // POST /internal/venue-events → onVenueEvent below. If the confirm call
+    // itself fails, say so — silence is the one unacceptable outcome.
+    seam.confirm(ticketId).catch((err) => {
+      log.error({ err, ticketId }, 'seam confirm failed')
+      ticketSessions.delete(ticketId)
+      session.tickets.delete(ticketId)
       emit(session, {
         type: 'lifecycle',
         ticketId,
-        phase: 'filled',
-        statusLine: 'FILLED',
-        venueOrderId,
-        rows,
+        phase: 'expired',
+        statusLine: `COULDN'T HAND OFF TO ${session.partner.venueName.toUpperCase()} — NOTHING EXECUTED`,
       })
-      telemetry.recordOrderExecuted(userKey(session))
-      session.tickets.delete(ticketId)
-    }, fillDelayMs)
-    if (quote) quote.fillTimer = timer
-
+    })
     telemetry.recordUplink('ticket_confirm')
   }
 
   function cancelTicket(session: Session, ticketId: string): void {
-    const quote = session.tickets.get(ticketId)
-    if (quote?.fillTimer) clearTimeout(quote.fillTimer)
+    ticketSessions.delete(ticketId)
     session.tickets.delete(ticketId)
+    // Fire-and-forget: locally the ticket is gone either way; the seam call
+    // stops the venue-side lifecycle.
+    seam.cancel(ticketId).catch((err) => log.warn({ err, ticketId }, 'seam cancel failed'))
     emit(session, {
       type: 'lifecycle',
       ticketId,
@@ -371,6 +318,30 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       statusLine: 'CANCELLED — NOTHING WAS SENT TO THE VENUE',
     })
     telemetry.recordUplink('ticket_cancel')
+  }
+
+  /** Venue lifecycle event (from the seam's callback webhook) → frame.
+   * This is the mechanism behind "status changes made elsewhere still arrive
+   * in the thread": the frame journal + SSE resume deliver it even if the
+   * trader reconnects later. */
+  function onVenueEvent(event: import('./seam.js').VenueEvent): boolean {
+    const session = ticketSessions.get(event.ticketId)
+    if (!session) return false // unknown/expired ticket — audit-only
+    emit(session, {
+      type: 'lifecycle',
+      ticketId: event.ticketId,
+      phase: event.phase,
+      statusLine: event.statusLine,
+      ...(event.venueOrderId ? { venueOrderId: event.venueOrderId } : {}),
+      ...(event.fillPct !== undefined ? { fillPct: event.fillPct } : {}),
+      ...(event.rows ? { rows: event.rows } : {}),
+    })
+    if (event.phase === 'filled') telemetry.recordOrderExecuted(userKey(session))
+    if (event.phase !== 'partial') {
+      ticketSessions.delete(event.ticketId)
+      session.tickets.delete(event.ticketId)
+    }
+    return true
   }
 
   // ── per-turn routing ───────────────────────────────────────────────────
@@ -497,8 +468,21 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
 
       case 'portfolio': {
-        // Never cached; seam stub serves the demo table (positions.ts).
-        emit(session, { type: 'positions', rows: demoPositions })
+        // Never cached — every read goes to the venue via the seam adapter.
+        try {
+          const { positions } = await seam.portfolio(
+            session.partner.partnerId,
+            userKey(session),
+          )
+          emit(session, { type: 'positions', rows: positions })
+        } catch (err) {
+          log.error({ err }, 'seam portfolio unavailable')
+          emit(session, {
+            type: 'rejection_ticket',
+            title: 'Portfolio temporarily unavailable',
+            reason: `${session.partner.venueName} isn't answering position queries right now. Your funds and orders are unaffected — try again in a moment.`,
+          })
+        }
         return
       }
 
@@ -515,14 +499,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // Opening state: current orders strip only. No scripted conversation —
       // the thread starts empty and the SDK shows its empty-state hero.
       // Emit once per session: on reconnect the journal replay covers it.
+      // Fetched from the seam asynchronously; if the venue is unreachable
+      // the strip simply doesn't render — never a fabricated snapshot.
       if (session.journal.lastSeq() === 0) {
-        emit(session, {
-          type: 'orders_snapshot',
-          open: demoOpenOrders,
-          positionsCount: demoPositions.length,
-        })
+        seam
+          .portfolio(session.partner.partnerId, userKey(session))
+          .then(({ openOrders, positions }) => {
+            emit(session, {
+              type: 'orders_snapshot',
+              open: openOrders,
+              positionsCount: positions.length,
+            })
+          })
+          .catch((err) => log.warn({ err }, 'orders snapshot unavailable'))
       }
     },
+
+    onVenueEvent,
 
     handleUplink(session, uplink) {
       telemetry.recordTurn(uplink.kind)

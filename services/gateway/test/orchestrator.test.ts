@@ -5,11 +5,15 @@ import {
   deadIntel,
   deadMarket,
   deadMemory,
+  deadSeam,
   frameOfType,
+  portfolioFixture,
   sendTurn,
   stubIntel,
   stubMemory,
+  stubSeam,
   testApp,
+  ticketFixture,
   waitForJournal,
 } from './helpers.js'
 
@@ -230,12 +234,22 @@ describe('orchestrator: action route', () => {
     }),
   })
 
-  it('prepares a gateway-side ticket quoted from market-data', async () => {
-    const { app, sessions } = await testApp({ intel: buyIntent })
+  it('prepares a ticket via the seam and forwards its rows verbatim', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: buyIntent, seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc at market' })
     await waitForJournal(session, (t) => t.includes('order_ticket'))
 
+    // The seam received the canonical prepare request…
+    expect(seam.prepares[0]).toMatchObject({
+      partnerId: 'koinbx-dev',
+      side: 'buy',
+      size: '0.05',
+      instrument: 'BTC/USDT',
+      orderType: 'market',
+    })
+    // …and the frame carries the seam's display rows untouched.
     const ticket = frameOfType<{
       ticketId: string
       sideLabel: string
@@ -243,18 +257,14 @@ describe('orchestrator: action route', () => {
       cta: string
     }>(session, 'order_ticket')
     expect(ticket.sideLabel).toBe('BUY · MKT')
-    const rowMap = Object.fromEntries(ticket.rows.map((r) => [r.label, r.value]))
-    expect(rowMap.Instrument).toBe('BTC / USDT')
-    expect(rowMap.Size).toBe('0.05 BTC')
-    expect(rowMap['Est. price']).toBe('61,240')
-    // 0.05 × 61,240 × 1.001 (0.1% fee) = 3,065.062
-    expect(rowMap['Est. cost incl. fees']).toBe('3,065.06 USDT')
+    expect(ticket.rows).toEqual(ticketFixture.rows)
     expect(ticket.cta).toContain('KoinBX')
     await app.close()
   })
 
-  it('confirm_handoff → awaiting_confirm then simulated fill with quote actuals', async () => {
-    const { app, sessions, telemetry } = await testApp({ intel: buyIntent })
+  it('confirm_handoff → awaiting_confirm, then the venue event webhook drives the fill', async () => {
+    const seam = stubSeam()
+    const { app, sessions, telemetry } = await testApp({ intel: buyIntent, seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
     await waitForJournal(session, (t) => t.includes('order_ticket'))
@@ -265,7 +275,22 @@ describe('orchestrator: action route', () => {
       ticketId: ticket.ticketId,
       action: 'confirm_handoff',
     })
-    await waitForJournal(session, (t) => t.filter((x) => x === 'lifecycle').length >= 2)
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+    expect(seam.confirms).toEqual([ticket.ticketId])
+
+    // Simulate the venue: the seam POSTs the fill to /internal/venue-events.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      payload: {
+        ticketId: ticket.ticketId,
+        phase: 'filled',
+        statusLine: 'FILLED',
+        venueOrderId: 'SIM-12345678',
+        rows: [{ label: 'Fees (actual)', value: '3.06 USDT' }],
+      },
+    })
+    expect(res.json()).toEqual({ ok: true, routed: true })
 
     const phases = session.journal
       .after(0)
@@ -273,19 +298,14 @@ describe('orchestrator: action route', () => {
       .map((e) => (e.frame as { phase: string }).phase)
     expect(phases).toEqual(['awaiting_confirm', 'filled'])
 
-    const filled = session.journal
-      .after(0)
-      .map((e) => e.frame as { type: string; phase?: string; rows?: Array<{ label: string }> })
-      .find((f) => f.phase === 'filled')
-    expect(filled?.rows?.map((r) => r.label)).toContain('Fees (actual)')
-
     const metrics = telemetry.snapshot() as { mau: { order_executed: number } }
     expect(metrics.mau.order_executed).toBe(1)
     await app.close()
   })
 
-  it('cancel → cancelled lifecycle, no fill', async () => {
-    const { app, sessions } = await testApp({ intel: buyIntent, fillDelayMs: 50 })
+  it('cancel → cancelled lifecycle; a late venue event for that ticket is not routed', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: buyIntent, seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
     await waitForJournal(session, (t) => t.includes('order_ticket'))
@@ -297,13 +317,30 @@ describe('orchestrator: action route', () => {
       action: 'cancel',
     })
     await waitForJournal(session, (t) => t.includes('lifecycle'))
-    await new Promise((r) => setTimeout(r, 80)) // past the would-be fill delay
+    expect(seam.cancels).toEqual([ticket.ticketId])
+
+    // A straggler venue event after cancel must not resurrect the thread.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      payload: { ticketId: ticket.ticketId, phase: 'filled', statusLine: 'FILLED' },
+    })
+    expect(res.json()).toEqual({ ok: true, routed: false })
 
     const phases = session.journal
       .after(0)
       .filter((e) => e.frame.type === 'lifecycle')
       .map((e) => (e.frame as { phase: string }).phase)
     expect(phases).toEqual(['cancelled'])
+    await app.close()
+  })
+
+  it('seam down → honest rejection ticket, nothing sent to the venue', async () => {
+    const { app, sessions } = await testApp({ intel: buyIntent, seam: deadSeam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    const types = await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    expect(types).not.toContain('order_ticket')
     await app.close()
   })
 })
@@ -329,7 +366,7 @@ describe('orchestrator: other routes', () => {
     await app.close()
   })
 
-  it('portfolio → positions frame from the demo table', async () => {
+  it('portfolio → positions frame from the seam (never cached)', async () => {
     const { app, sessions } = await testApp({
       intel: stubIntel({
         intent: () => ({ intent: 'portfolio', confidence: 0.9, language: 'en' }),
@@ -338,8 +375,22 @@ describe('orchestrator: other routes', () => {
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'my positions' })
     await waitForJournal(session, (t) => t.includes('positions'))
-    const positions = frameOfType<{ rows: unknown[] }>(session, 'positions')
-    expect(positions.rows).toHaveLength(3)
+    const positions = frameOfType<{ rows: Array<{ instrument: string }> }>(session, 'positions')
+    expect(positions.rows).toEqual(portfolioFixture.positions)
+    await app.close()
+  })
+
+  it('portfolio with the seam down → honest unavailability, never a fabricated table', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        intent: () => ({ intent: 'portfolio', confidence: 0.9, language: 'en' }),
+      }),
+      seam: deadSeam,
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'my positions' })
+    const types = await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    expect(types).not.toContain('positions')
     await app.close()
   })
 
