@@ -40,10 +40,35 @@ def _clamp_words(text: str, limit: int = MAX_PARAGRAPH_WORDS) -> str:
 
 
 # --- prompt construction ---------------------------------------------------
+# Experience-calibrated depth (Memory v1). Concept answers ONLY: market
+# briefs are facts about a moment and stay identical fleet-wide (the cache
+# economics); how deeply a MECHANISM is explained is the thin per-user layer.
+_DEPTH_LINES: dict[str, str] = {
+    "new": (
+        "CALIBRATE DEPTH: the reader is new to trading — plain language, "
+        "define every term you use, give one concrete everyday example, no jargon."
+    ),
+    "intermediate": (
+        "CALIBRATE DEPTH: the reader knows the basics — skip definitions of "
+        "common terms, focus on mechanics and when it matters in practice."
+    ),
+    "pro": (
+        "CALIBRATE DEPTH: the reader is a professional trader — be terse and "
+        "technical, lead with the non-obvious, no basics."
+    ),
+}
+
+
 def _brief_user_prompt(
-    text: str, symbol: str, snapshot: dict | None, language: str
+    text: str,
+    symbol: str,
+    snapshot: dict | None,
+    language: str,
+    experience_level: str | None = None,
 ) -> str:
     lines = [f"QUESTION: {text}", f"ANSWER LANGUAGE: {language}"]
+    if snapshot is None and experience_level in _DEPTH_LINES:
+        lines.append(_DEPTH_LINES[experience_level])
     if snapshot is not None:
         lines.append(f"SNAPSHOT JSON: {json.dumps(snapshot, separators=(',', ':'))}")
         lines.append(
@@ -154,6 +179,7 @@ async def build_brief(
     *,
     concept_mode: bool,
     language: str = "en",
+    experience_level: str | None = None,
 ) -> dict[str, Any]:
     """Generate a research/concept brief; returns brief OR decline dict.
 
@@ -164,7 +190,7 @@ async def build_brief(
     (evals/runner/scoring.py drives the same patterns).
     """
     snapshot = None if concept_mode else await fetch_snapshot(symbol)
-    user = _brief_user_prompt(text, symbol, snapshot, language)
+    user = _brief_user_prompt(text, symbol, snapshot, language, experience_level)
 
     prose = await _generate_prose(router, HIPPO_SYSTEM_PROMPT_V0, user)
     flagged = detect_advice_language(
@@ -299,6 +325,18 @@ async def build_decline(
 
 
 # --- top-level respond ---------------------------------------------------------
+def _cache_scope(
+    asset: str, concept_mode: bool, lang: str, experience_level: str | None
+) -> str:
+    """Cache key scope. Language always scopes (a Hindi answer never serves
+    an English asker). Experience level scopes CONCEPT answers only — three
+    depth variants are still fleet-wide cacheable; market briefs ignore the
+    level entirely so their cache stays maximally shared (memo §9)."""
+    if concept_mode:
+        return f"-:{lang}:{experience_level or '-'}"
+    return f"{asset}:{lang}"
+
+
 async def respond(
     text: str,
     intent: str,
@@ -306,6 +344,7 @@ async def respond(
     cache: AnswerCache,
     symbol: str | None = None,
     language: str | None = None,
+    experience_level: str | None = None,
 ) -> dict[str, Any]:
     """Handle POST /v1/respond. Always returns a brief or decline dict."""
     asset = (symbol or extract_symbol(text)).split("/")[0].upper()
@@ -317,10 +356,8 @@ async def respond(
     concept_mode = intent in ("concept", "smalltalk")
 
     # Cache: market-level answers only (research + concept), keyed on the
-    # canonical question + symbol + 5-minute window. Language is folded into
-    # the key SCOPE (not the question text — keyword canonicalization would
-    # discard a text prefix) so a Hindi answer never serves an English asker.
-    cache_scope = f"{asset if not concept_mode else '-'}:{lang}"
+    # canonical question + scope + 5-minute window (see _cache_scope).
+    cache_scope = _cache_scope(asset, concept_mode, lang, experience_level)
     hit = cache.get(text, cache_scope)
     if hit is not None:
         # Serve the stored brief labeled honestly: cached=true, and the
@@ -328,7 +365,12 @@ async def respond(
         return {**hit, "cached": True}
 
     answer = await build_brief(
-        text, asset, router, concept_mode=concept_mode, language=lang
+        text,
+        asset,
+        router,
+        concept_mode=concept_mode,
+        language=lang,
+        experience_level=experience_level if concept_mode else None,
     )
     if answer.get("kind") == "brief":
         # TTL scaled by realized volatility from the spark line: calm markets
@@ -361,6 +403,7 @@ async def respond_stream(
     cache: AnswerCache,
     symbol: str | None = None,
     language: str | None = None,
+    experience_level: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming variant of respond() for POST /v1/respond/stream (SSE).
 
@@ -387,7 +430,7 @@ async def respond_stream(
         return
 
     concept_mode = intent in ("concept", "smalltalk")
-    cache_scope = f"{asset if not concept_mode else '-'}:{lang}"
+    cache_scope = _cache_scope(asset, concept_mode, lang, experience_level)
     hit = cache.get(text, cache_scope)
     if hit is not None:
         yield {"event": "meta", "data": _meta_from_brief(hit)}
@@ -404,7 +447,9 @@ async def respond_stream(
         meta["sparkPoints"] = snapshot["spark"]
     yield {"event": "meta", "data": meta}
 
-    user = _brief_user_prompt(text, asset, snapshot, lang)
+    user = _brief_user_prompt(
+        text, asset, snapshot, lang, experience_level if concept_mode else None
+    )
     messages: list[Message] = [
         {"role": "system", "content": HIPPO_SYSTEM_PROMPT_V0},
         {"role": "user", "content": user},

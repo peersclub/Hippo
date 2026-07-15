@@ -9,6 +9,7 @@ import type {
   RespondStreamEvent,
 } from '../src/orchestrator/intelligence.js'
 import type { MarketClient, MarketSnapshot } from '../src/orchestrator/market.js'
+import type { MemoryClient, Persona, PersonaUpdate } from '../src/orchestrator/memory.js'
 import type { Session, SessionStore } from '../src/plugins/auth.js'
 
 export const snapshotFixture: MarketSnapshot = {
@@ -44,28 +45,30 @@ export const briefFixture: BriefResponse = {
 export function stubIntel(overrides: {
   intent?: (text: string) => IntentResult | Promise<IntentResult>
   respond?: () => RespondResult | Promise<RespondResult>
-  respondStream?: () => AsyncGenerator<RespondStreamEvent>
+  respondStream?: (
+    req: Parameters<IntelligenceClient['respondStream']>[0],
+  ) => AsyncGenerator<RespondStreamEvent>
 }): IntelligenceClient {
   const respond = async () => (overrides.respond ? overrides.respond() : briefFixture)
+  // Default stream mirrors respond(): meta then done (or a lone decline),
+  // so blocking-era tests keep passing against the streaming orchestrator.
+  async function* defaultStream(): AsyncGenerator<RespondStreamEvent> {
+    const res = await respond()
+    if (res.kind === 'decline') {
+      yield { event: 'decline', data: res } as RespondStreamEvent
+    } else {
+      yield { event: 'meta', data: {} } as RespondStreamEvent
+      yield { event: 'done', data: res } as RespondStreamEvent
+    }
+  }
   return {
     intent: async ({ text }) =>
       overrides.intent
         ? overrides.intent(text)
         : { intent: 'research', confidence: 0.95, language: 'en' },
     respond,
-    // Default stream mirrors respond(): meta then done (or a lone decline),
-    // so blocking-era tests keep passing against the streaming orchestrator.
-    respondStream:
-      overrides.respondStream ??
-      async function* () {
-        const res = await respond()
-        if (res.kind === 'decline') {
-          yield { event: 'decline', data: res } as RespondStreamEvent
-        } else {
-          yield { event: 'meta', data: {} } as RespondStreamEvent
-          yield { event: 'done', data: res } as RespondStreamEvent
-        }
-      },
+    respondStream: (req) =>
+      overrides.respondStream ? overrides.respondStream(req) : defaultStream(),
   }
 }
 
@@ -87,6 +90,61 @@ export const stubMarket: MarketClient = {
   snapshot: async (symbol) => ({ ...snapshotFixture, symbol }),
 }
 
+/** In-test memory client backed by the real store semantics, call-recorded. */
+export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
+  personas: Map<string, Persona>
+  updates: Array<{ userId: string; patch: PersonaUpdate }>
+  clears: string[]
+} {
+  const personas = new Map<string, Persona>()
+  const updates: Array<{ userId: string; patch: PersonaUpdate }> = []
+  const clears: string[] = []
+  const blank = (): Persona => ({
+    optIn: false,
+    experienceLevel: null,
+    followedAssets: [],
+    openThreads: [],
+    updatedAt: 0,
+    ...initial,
+  })
+  return {
+    personas,
+    updates,
+    clears,
+    async get(partnerId, userId) {
+      return personas.get(`${partnerId}:${userId}`) ?? blank()
+    },
+    async update(partnerId, userId, patch) {
+      updates.push({ userId, patch })
+      const key = `${partnerId}:${userId}`
+      const cur = personas.get(key) ?? blank()
+      personas.set(key, {
+        ...cur,
+        ...(patch.optIn !== undefined ? { optIn: patch.optIn } : {}),
+        ...(patch.experienceLevel !== undefined ? { experienceLevel: patch.experienceLevel } : {}),
+        ...(patch.followAsset && (patch.optIn ?? cur.optIn)
+          ? { followedAssets: [patch.followAsset.toUpperCase(), ...cur.followedAssets] }
+          : {}),
+        updatedAt: Date.now(),
+      })
+    },
+    async clear(_partnerId, userId) {
+      clears.push(userId)
+    },
+  }
+}
+
+/** A memory client that is hard-down — reads null, writes reject. */
+export const deadMemory: MemoryClient = {
+  get: async () => null,
+  update: async () => {
+    throw new Error('memory unreachable')
+  },
+  clear: async () => {
+    throw new Error('memory unreachable')
+  },
+}
+
 export const deadMarket: MarketClient = {
   snapshot: async () => {
     throw new Error('market-data unreachable')
@@ -96,7 +154,13 @@ export const deadMarket: MarketClient = {
 export type TestGateway = Awaited<ReturnType<typeof buildApp>>
 
 export async function testApp(opts: Parameters<typeof buildApp>[0] = {}): Promise<TestGateway> {
-  return buildApp({ intel: stubIntel({}), market: stubMarket, fillDelayMs: 20, ...opts })
+  return buildApp({
+    intel: stubIntel({}),
+    market: stubMarket,
+    memory: stubMemory(),
+    fillDelayMs: 20,
+    ...opts,
+  })
 }
 
 export async function createSession(

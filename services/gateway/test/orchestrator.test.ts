@@ -4,9 +4,11 @@ import {
   createSession,
   deadIntel,
   deadMarket,
+  deadMemory,
   frameOfType,
   sendTurn,
   stubIntel,
+  stubMemory,
   testApp,
   waitForJournal,
 } from './helpers.js'
@@ -144,6 +146,76 @@ describe('orchestrator: streaming research (brief_delta)', () => {
     await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
     const types = await waitForJournal(session, (t) => t.includes('research_brief'))
     expect(types).toContain('banner')
+    await app.close()
+  })
+})
+
+describe('orchestrator: memory v1 (opt-in persona)', () => {
+  it('consent uplink flips memory opt-in', async () => {
+    const memory = stubMemory()
+    const { app, sessions } = await testApp({ memory })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'consent', memoryOptIn: true, l2Acknowledged: true })
+    expect(memory.updates).toContainEqual({ userId: session.id, patch: { optIn: true } })
+    await app.close()
+  })
+
+  it('research turns record followed asset + open thread for opted-in users', async () => {
+    const memory = stubMemory({ optIn: true })
+    const { app, sessions } = await testApp({ memory })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is sol down?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    const recorded = memory.updates.find((u) => u.patch.followAsset)
+    expect(recorded?.patch.followAsset).toBe('SOL')
+    expect(recorded?.patch.openThread?.text).toBe('why is sol down?')
+    await app.close()
+  })
+
+  it('records nothing for opted-out users — persona, not surveillance', async () => {
+    const memory = stubMemory() // optIn defaults false
+    const { app, sessions } = await testApp({ memory })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is sol down?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(memory.updates).toHaveLength(0)
+    await app.close()
+  })
+
+  it('forwards experience level to the research engine for opted-in users', async () => {
+    const memory = stubMemory({ optIn: true, experienceLevel: 'new' })
+    let seenPersona: unknown = 'unset'
+    const { app, sessions } = await testApp({
+      memory,
+      intel: stubIntel({
+        respondStream: async function* (req) {
+          seenPersona = req.persona
+          yield { event: 'done', data: briefFixture }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'what is funding?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(seenPersona).toEqual({ experienceLevel: 'new' })
+    await app.close()
+  })
+
+  it('settings clearMemory wipes the persona', async () => {
+    const memory = stubMemory({ optIn: true })
+    const { app, sessions } = await testApp({ memory })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'settings', clearMemory: true })
+    expect(memory.clears).toContain(session.id)
+    await app.close()
+  })
+
+  it('memory being hard-down never breaks a research turn', async () => {
+    const { app, sessions } = await testApp({ memory: deadMemory })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    const types = await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(types).not.toContain('banner') // not even degraded — just no memory
     await app.close()
   })
 })

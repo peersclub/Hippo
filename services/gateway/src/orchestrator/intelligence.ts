@@ -74,11 +74,14 @@ export interface IntelligenceClient {
   /**
    * Streaming respond. Throws (before or mid-iteration) on timeout, network
    * error or non-2xx — callers fall back to `respond` degraded handling.
+   * `persona` is the thin personalization layer (memo §9): experience level
+   * calibrates concept-answer depth; market briefs stay fleet-wide.
    */
   respondStream(req: {
     text: string
     intent: string
     symbol?: string
+    persona?: { experienceLevel: 'new' | 'intermediate' | 'pro' }
   }): AsyncGenerator<RespondStreamEvent>
 }
 
