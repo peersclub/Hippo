@@ -4,6 +4,15 @@
   "private": true,
   "description": "Execution seam — Canonical Trading Interface over per-venue adapters (Build Plan/04). Approach A: Hippo prepares, the venue confirms. Sim venue adapter in dev; the hand-built KoinBX adapter is the Phase 3 pilot target and the CLI's codegen reference",
   "type": "module",
+  "main": "./dist/lib.js",
+  "types": "./dist/lib.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "import": "./dist/lib.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",

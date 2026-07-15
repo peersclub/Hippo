@@ -159,6 +159,9 @@ importers:
 
   tools/cli:
     dependencies:
+      '@hippo/seam':
+        specifier: workspace:*
+        version: link:../../services/seam
       commander:
         specifier: ^13.0.0
         version: 13.1.0

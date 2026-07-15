@@ -11,7 +11,11 @@
  */
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { KoinbxVenueAdapter, SimVenueAdapter, type VenueAdapter } from '@hippo/seam'
 import { Command } from 'commander'
+import { inProcessDriver } from './conform/in-process-driver.js'
+import { renderConformanceReport, renderConformanceSummary } from './conform/report.js'
+import { runConformance } from './conform/suite.js'
 import { renderReport, renderSummary } from './scan/report.js'
 import { runScan } from './scan/run.js'
 
@@ -57,6 +61,49 @@ program
     await writeFile(reportPath, renderReport(outcome.result), 'utf8')
     console.log(renderSummary(outcome.result))
     console.log(`\nReport written: ${reportPath}`)
+  })
+
+program
+  .command('conform')
+  .description(
+    'Run the CTI conformance suite against a venue adapter (the verifier a generated adapter must pass)',
+  )
+  .option('--venue <venue>', 'which adapter to exercise: sim | koinbx', 'sim')
+  .option('--instrument <symbol>', 'instrument to exercise', 'BTC/USDT')
+  .action(async (opts: { venue: string; instrument: string }) => {
+    let adapter: VenueAdapter
+    if (opts.venue === 'koinbx') {
+      const { KOINBX_API_KEY, KOINBX_SECRET, KOINBX_BASE_URL } = process.env
+      if (!KOINBX_API_KEY || !KOINBX_SECRET || !KOINBX_BASE_URL) {
+        console.error(
+          'hippo conform --venue koinbx requires KOINBX_API_KEY, KOINBX_SECRET and KOINBX_BASE_URL.',
+        )
+        process.exitCode = 1
+        return
+      }
+      adapter = new KoinbxVenueAdapter({
+        apiKey: KOINBX_API_KEY,
+        secret: KOINBX_SECRET,
+        baseUrl: KOINBX_BASE_URL,
+      })
+    } else if (opts.venue === 'sim') {
+      adapter = new SimVenueAdapter()
+    } else {
+      console.error(`hippo conform — unknown venue "${opts.venue}" (expected sim | koinbx).`)
+      process.exitCode = 1
+      return
+    }
+
+    const driver = inProcessDriver(adapter, `${opts.venue} venue (in-process)`)
+    const report = await runConformance(driver, {
+      instrument: opts.instrument,
+      now: new Date().toISOString(),
+    })
+    const reportPath = path.resolve(process.cwd(), `hippo-conform-${opts.venue}.md`)
+    await writeFile(reportPath, renderConformanceReport(report), 'utf8')
+    console.log(renderConformanceSummary(report))
+    console.log(`\nReport written: ${reportPath}`)
+    if (report.verdict.level === 'Non-conformant') process.exitCode = 1
   })
 
 program.parse()
