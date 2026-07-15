@@ -51,6 +51,9 @@ const LOW_CONFIDENCE = 0.4
 
 const DEFAULT_FILL_DELAY_MS = 3_000
 
+/** Coalescing window for streamed brief_delta frames (journal economy). */
+const DELTA_FLUSH_MS = 150
+
 type Uplink = import('@hippo/protocol').Uplink
 
 type Log = {
@@ -401,18 +404,40 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           return
         }
         try {
-          const res = await intel.respond({
+          // Streaming path: brief_delta frames fill the skeleton with prose
+          // as the research engine generates; the final research_brief frame
+          // is authoritative and replaces the accumulated text in the SDK.
+          // Deltas are coalesced (~DELTA_FLUSH_MS) so the frame journal and
+          // SSE fan-out carry dozens of frames per brief, not hundreds.
+          let pending = ''
+          let lastFlush = 0
+          let finished = false
+          for await (const ev of intel.respondStream({
             text,
             intent: intentRes.intent,
             symbol: symbolFromText(text),
-          })
-          if (res.kind === 'decline') {
-            emit(session, declineFrame(res))
-            return
+          })) {
+            if (ev.event === 'delta') {
+              pending += ev.data.text
+              const now = Date.now()
+              if (pending.trim() && now - lastFlush >= DELTA_FLUSH_MS) {
+                emit(session, { type: 'brief_delta', text: pending })
+                pending = ''
+                lastFlush = now
+              }
+            } else if (ev.event === 'done') {
+              telemetry.recordCache(ev.data.cached)
+              emit(session, briefFrame(ev.data, intentRes.intent))
+              telemetry.recordResearchAnswered(userKey(session))
+              finished = true
+            } else if (ev.event === 'replace' || ev.event === 'decline') {
+              emit(session, declineFrame(ev.data))
+              finished = true
+            }
+            // 'meta' carries the snapshot facts; they land in the final
+            // brief either way and the skeleton is already up — no frame.
           }
-          telemetry.recordCache(res.cached)
-          emit(session, briefFrame(res, intentRes.intent))
-          telemetry.recordResearchAnswered(userKey(session))
+          if (!finished) throw new Error('respond stream ended without done/decline')
         } catch (err) {
           enterDegraded(session, err)
           await emitMarketOnlyBrief(session, text)

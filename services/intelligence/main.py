@@ -75,7 +75,16 @@ async def respond(req: RespondRequest) -> dict[str, Any]:
         # Never 500: degrade to a data-free decline-shaped card rather than
         # an error the SDK can't draw.
         log.exception("respond pipeline error; serving fallback decline")
-        return await research.build_decline(req.text, "BTC", req.language or "en", snapshot=None)
+        try:
+            return await research.build_decline(
+                req.text, "BTC", req.language or "en", snapshot=None
+            )
+        except Exception:
+            # build_decline fetches live facts; if even that raises (seen
+            # live: httpx client creation failing on a broken CA bundle),
+            # serve the zero-I/O static shape. The promise is absolute.
+            log.exception("fallback decline failed; serving static decline")
+            return research.static_decline("BTC", req.language or "en")
 
 
 @app.post("/v1/respond/stream")

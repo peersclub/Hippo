@@ -44,11 +44,34 @@ export function takeComposerPrefill(): string | null {
 
 export const openOrderCount = computed(() => orders.value?.open.length ?? 0)
 
-const EPHEMERAL = new Set(['thinking', 'skeleton'])
+const EPHEMERAL = new Set(['thinking', 'skeleton', 'brief_delta'])
 
 /** Append a frame to the thread. Thinking/skeleton frames replace their predecessor. */
 export function pushFrame(item: ThreadItem) {
   const t = item.kind === 'frame' ? item.frame.type : null
+
+  // Streaming prose: consecutive brief_delta frames accumulate into ONE
+  // growing card (replacing the skeleton they fill). The eventual
+  // research_brief is authoritative — the generic ephemeral rule below
+  // replaces the accumulated card with it.
+  if (t === 'brief_delta' && item.kind === 'frame' && item.frame.type === 'brief_delta') {
+    const prev = thread.value
+    const last = prev[prev.length - 1]
+    if (last?.kind === 'frame' && last.frame.type === 'brief_delta') {
+      const merged: ThreadItem = {
+        kind: 'frame',
+        frame: { ...item.frame, text: last.frame.text + item.frame.text },
+      }
+      thread.value = [...prev.slice(0, -1), merged]
+      return
+    }
+    if (last?.kind === 'frame' && EPHEMERAL.has(last.frame.type)) {
+      thread.value = [...prev.slice(0, -1), item]
+      return
+    }
+    thread.value = [...prev, item]
+    return
+  }
 
   if (t === 'orders_snapshot') {
     orders.value = (item as { frame: OrdersSnapshot }).frame

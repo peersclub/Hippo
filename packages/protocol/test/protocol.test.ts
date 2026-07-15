@@ -41,6 +41,16 @@ describe('card protocol v1 — frames', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('parses a brief_delta (streaming research prose)', () => {
+    const result = parseFrame({
+      ...base,
+      type: 'brief_delta',
+      text: 'BTC is down 4.2% after the ',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.frame.type).toBe('brief_delta')
+  })
+
   it('routes unknown future card types to the fallback path, never a throw', () => {
     const result = parseFrame({
       ...base,

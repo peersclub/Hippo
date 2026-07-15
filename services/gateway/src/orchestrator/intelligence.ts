@@ -54,11 +54,32 @@ export type DeclineResponse = {
 
 export type RespondResult = BriefResponse | DeclineResponse
 
+/**
+ * Events from POST /v1/respond/stream (SSE). Order on the wire:
+ * meta (snapshot facts before the model's first token) → delta* → done,
+ * or replace (output guardrail tripped mid-stream) / decline (advice).
+ */
+export type RespondStreamEvent =
+  | { event: 'meta'; data: Record<string, unknown> }
+  | { event: 'delta'; data: { text: string } }
+  | { event: 'done'; data: BriefResponse }
+  | { event: 'replace'; data: DeclineResponse }
+  | { event: 'decline'; data: DeclineResponse }
+
 export interface IntelligenceClient {
   /** Rejects on timeout (3s), network error or non-2xx — callers fall back. */
   intent(req: { text: string; language?: string }): Promise<IntentResult>
   /** Rejects on timeout (30s), network error or non-2xx. */
   respond(req: { text: string; intent: string; symbol?: string }): Promise<RespondResult>
+  /**
+   * Streaming respond. Throws (before or mid-iteration) on timeout, network
+   * error or non-2xx — callers fall back to `respond` degraded handling.
+   */
+  respondStream(req: {
+    text: string
+    intent: string
+    symbol?: string
+  }): AsyncGenerator<RespondStreamEvent>
 }
 
 async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promise<T> {
@@ -72,10 +93,56 @@ async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promi
   return (await res.json()) as T
 }
 
+/** Minimal SSE reader over fetch: yields {event, data} per event block. */
+async function* readSse(
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+): AsyncGenerator<{ event: string; data: unknown }> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!res.ok || !res.body) throw new Error(`intelligence ${res.status} for ${url}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let sep = buf.indexOf('\n\n')
+      while (sep !== -1) {
+        const block = buf.slice(0, sep)
+        buf = buf.slice(sep + 2)
+        let event = 'message'
+        let data = ''
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data += line.slice(5).trim()
+        }
+        if (data) yield { event, data: JSON.parse(data) }
+        sep = buf.indexOf('\n\n')
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export function createIntelligenceClient(baseUrl = INTELLIGENCE_URL): IntelligenceClient {
   return {
     intent: (req) => postJson<IntentResult>(`${baseUrl}/v1/intent`, req, INTENT_TIMEOUT_MS),
     respond: (req) => postJson<RespondResult>(`${baseUrl}/v1/respond`, req, RESPOND_TIMEOUT_MS),
+    respondStream: (req) =>
+      readSse(
+        `${baseUrl}/v1/respond/stream`,
+        req,
+        RESPOND_TIMEOUT_MS,
+      ) as AsyncGenerator<RespondStreamEvent>,
   }
 }
 

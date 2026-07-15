@@ -162,6 +162,10 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .sk-line.short{width:55%}
 .sk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px}
 .sk-cell{height:38px;border-radius:9px}
+/* streaming brief prose (brief_delta) */
+.stream-text{white-space:pre-wrap}
+.stream-cursor{display:inline-block;width:7px;height:12px;margin-left:2px;vertical-align:-1px;
+  background:var(--amber);animation:hpulse 1.1s ease infinite}
 /* positions */
 .pos-row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;font-family:var(--mono);font-size:11px}
 .pos-row+.pos-row{border-top:1px dashed rgba(255,255,255,.09)}

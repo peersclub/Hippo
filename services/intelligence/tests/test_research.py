@@ -233,5 +233,31 @@ class RespondShapes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out["sources"], ["HIPPO KNOWLEDGE"])
 
 
+class NeverFiveHundredFloor(unittest.IsolatedAsyncioTestCase):
+    """Regression for a live incident: httpx CLIENT CREATION raised OSError
+    (broken CA bundle after a python upgrade), escaping the (HTTPError,
+    ValueError) handlers and turning the never-500 fallback into a 500."""
+
+    async def test_fetch_snapshot_swallows_oserror(self) -> None:
+        import marketdata
+
+        def boom(*_: object, **__: object) -> object:
+            raise FileNotFoundError("ca bundle missing")
+
+        with patch.object(marketdata.httpx, "AsyncClient", boom):
+            self.assertIsNone(await marketdata.fetch_snapshot("BTC"))
+
+    def test_static_decline_is_zero_io_and_well_shaped(self) -> None:
+        out = research.static_decline("BTC", "en")
+        self.assertEqual(out["kind"], "decline")
+        self.assertEqual(len(out["facts"]), 3)
+        self.assertEqual(len(out["followups"]), 2)
+        for fact in out["facts"]:
+            self.assertEqual(set(fact), {"icon", "text"})
+
+    def test_static_decline_localized(self) -> None:
+        self.assertIn("nahi bata sakta", research.static_decline("BTC", "hinglish")["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

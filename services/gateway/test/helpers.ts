@@ -6,6 +6,7 @@ import type {
   IntelligenceClient,
   IntentResult,
   RespondResult,
+  RespondStreamEvent,
 } from '../src/orchestrator/intelligence.js'
 import type { MarketClient, MarketSnapshot } from '../src/orchestrator/market.js'
 import type { Session, SessionStore } from '../src/plugins/auth.js'
@@ -43,13 +44,28 @@ export const briefFixture: BriefResponse = {
 export function stubIntel(overrides: {
   intent?: (text: string) => IntentResult | Promise<IntentResult>
   respond?: () => RespondResult | Promise<RespondResult>
+  respondStream?: () => AsyncGenerator<RespondStreamEvent>
 }): IntelligenceClient {
+  const respond = async () => (overrides.respond ? overrides.respond() : briefFixture)
   return {
     intent: async ({ text }) =>
       overrides.intent
         ? overrides.intent(text)
         : { intent: 'research', confidence: 0.95, language: 'en' },
-    respond: async () => (overrides.respond ? overrides.respond() : briefFixture),
+    respond,
+    // Default stream mirrors respond(): meta then done (or a lone decline),
+    // so blocking-era tests keep passing against the streaming orchestrator.
+    respondStream:
+      overrides.respondStream ??
+      async function* () {
+        const res = await respond()
+        if (res.kind === 'decline') {
+          yield { event: 'decline', data: res } as RespondStreamEvent
+        } else {
+          yield { event: 'meta', data: {} } as RespondStreamEvent
+          yield { event: 'done', data: res } as RespondStreamEvent
+        }
+      },
   }
 }
 
@@ -59,6 +75,10 @@ export const deadIntel: IntelligenceClient = {
     throw new Error('intelligence unreachable')
   },
   respond: async () => {
+    throw new Error('intelligence unreachable')
+  },
+  // biome-ignore lint/correctness/useYield: hard-down stub — throws before any yield
+  respondStream: async function* () {
     throw new Error('intelligence unreachable')
   },
 }

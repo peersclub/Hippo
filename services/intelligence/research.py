@@ -217,6 +217,26 @@ _DECLINE_COPY: dict[str, dict[str, str]] = {
 }
 
 
+def static_decline(symbol: str, language: str = "en") -> dict[str, Any]:
+    """Zero-I/O decline card — the absolute floor for the never-500 promise.
+    No model, no market-data, no client construction; always succeeds."""
+    copy = _DECLINE_COPY.get(language, _DECLINE_COPY["en"])
+    return {
+        "kind": "decline",
+        "message": copy["message"],
+        "pivotTitle": copy["pivot"].format(sym=symbol),
+        "facts": [
+            {"icon": "📊", "text": f"Live {symbol} data is briefly unavailable — price, 12h change and funding are what I'd check first"},
+            {"icon": "⚖️", "text": "Funding and positioning show how the market is leaning, without anyone making your call"},
+            {"icon": "🕐", "text": "Every Hippo answer is a fact about a moment, stamped with its as-of time"},
+        ],
+        "followups": [
+            f"Why is {symbol} moving today?",
+            f"What is {symbol} funding right now?",
+        ],
+    }
+
+
 async def build_decline(
     text: str,
     symbol: str,

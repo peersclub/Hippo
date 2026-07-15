@@ -35,6 +35,45 @@ describe('thread store', () => {
     expect(last?.kind === 'frame' && last.frame.type).toBe('research_brief')
   })
 
+  it('accumulates brief_delta frames into one growing card that the final brief replaces', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'f1', type: 'skeleton', shape: 'brief' } })
+    pushFrame({
+      kind: 'frame',
+      frame: { ...base, id: 'f2', type: 'brief_delta', text: 'BTC is down 4.2% ' },
+    })
+    // Delta replaced the skeleton; the card is now streaming prose.
+    expect(thread.value).toHaveLength(1)
+    pushFrame({
+      kind: 'frame',
+      frame: { ...base, id: 'f3', type: 'brief_delta', text: 'after the inflation print.' },
+    })
+    expect(thread.value).toHaveLength(1)
+    const streaming = thread.value[0]
+    expect(
+      streaming?.kind === 'frame' && streaming.frame.type === 'brief_delta' && streaming.frame.text,
+    ).toBe('BTC is down 4.2% after the inflation print.')
+    pushFrame({
+      kind: 'frame',
+      frame: {
+        ...base,
+        id: 'f4',
+        type: 'research_brief',
+        eyebrow: 'MARKET BRIEF',
+        live: true,
+        headline: 'BTC is down 4.2%',
+        paragraphs: [],
+        stats: [],
+        sources: [],
+        followups: [],
+      },
+    })
+    // The authoritative brief replaced the accumulated streaming card.
+    expect(thread.value).toHaveLength(1)
+    const last = thread.value[0]
+    expect(last?.kind === 'frame' && last.frame.type).toBe('research_brief')
+  })
+
   it('routes orders_snapshot to the orders store, not the thread', () => {
     thread.value = []
     pushFrame({

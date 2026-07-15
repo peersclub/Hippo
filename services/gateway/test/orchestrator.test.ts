@@ -61,6 +61,93 @@ describe('orchestrator: research route', () => {
   })
 })
 
+describe('orchestrator: streaming research (brief_delta)', () => {
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  it('emits coalesced brief_delta frames, then the authoritative research_brief', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* () {
+          yield { event: 'meta', data: {} }
+          yield { event: 'delta', data: { text: 'BTC is down 4.2% ' } }
+          await delay(170) // beyond the 150ms coalescing window → second flush
+          yield { event: 'delta', data: { text: 'after the US inflation print.' } }
+          await delay(170)
+          yield { event: 'done', data: briefFixture }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    const types = await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(types.filter((t) => t === 'brief_delta').length).toBeGreaterThanOrEqual(2)
+    expect(types[types.length - 1]).toBe('research_brief')
+    // Deltas arrive between the skeleton and the final brief.
+    expect(types.indexOf('brief_delta')).toBeGreaterThan(types.indexOf('skeleton'))
+    await app.close()
+  })
+
+  it('guardrail replace mid-stream becomes an advice_decline frame', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* () {
+          yield { event: 'meta', data: {} }
+          yield { event: 'delta', data: { text: 'You should… ' } }
+          yield {
+            event: 'replace',
+            data: {
+              kind: 'decline' as const,
+              message: 'No calls — by design.',
+              pivotTitle: "What's true right now",
+              facts: [{ icon: '◎', text: 'BTC at 61,240' }],
+              followups: ['Why is BTC moving?'],
+            },
+          }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    const types = await waitForJournal(session, (t) => t.includes('advice_decline'))
+    expect(types).not.toContain('research_brief')
+    await app.close()
+  })
+
+  it('a stream that dies mid-generation degrades to the market-only brief', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* () {
+          yield { event: 'delta', data: { text: 'BTC is ' } }
+          throw new Error('stream died')
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    const types = await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(types).toContain('banner') // degraded, honestly labeled
+    const brief = frameOfType<{ sources: string[] }>(session, 'research_brief')
+    expect(brief.sources).toEqual(['PRICE FEED'])
+    await app.close()
+  })
+
+  it('a stream ending without done also degrades truthfully', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* () {
+          yield { event: 'meta', data: {} }
+          // …and nothing else: connection closed early.
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    const types = await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(types).toContain('banner')
+    await app.close()
+  })
+})
+
 describe('orchestrator: action route', () => {
   const buyIntent = stubIntel({
     intent: () => ({
