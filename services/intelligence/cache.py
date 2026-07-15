@@ -20,6 +20,7 @@ import re
 import time
 from typing import Any, Protocol, Sequence
 
+from observability import record_cache
 from textutil import canonical_text
 
 DEFAULT_TTL_S = 120.0
@@ -110,8 +111,10 @@ class AnswerCache:
             if entry is not None:
                 del self._store[key]
             self.misses += 1
+            record_cache(False)
             return None
         self.hits += 1
+        record_cache(True)
         return entry[1]
 
     def set(
@@ -190,8 +193,10 @@ class RedisAnswerCache:
         raw = self.client.get(self._key(text, symbol, now))
         if raw is None:
             self.misses += 1
+            record_cache(False)
             return None
         self.hits += 1
+        record_cache(True)
         return json.loads(raw)
 
     def set(
