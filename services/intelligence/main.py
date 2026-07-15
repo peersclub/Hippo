@@ -17,13 +17,14 @@ from pydantic import BaseModel, Field
 
 import intent as intent_engine
 import research
-from cache import AnswerCache
+from cache import make_answer_cache
 from providers import ProviderRouter
 
 log = logging.getLogger("intelligence")
 
 router = ProviderRouter()
-answer_cache = AnswerCache()
+# In-memory by default; Redis-backed when REDIS_URL is set (same surface).
+answer_cache = make_answer_cache()
 
 
 @asynccontextmanager
