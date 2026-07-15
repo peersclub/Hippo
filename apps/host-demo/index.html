@@ -68,7 +68,31 @@
     }
   </script>
 
-  <!-- ═══ The Hippo embed — the entire partner-side integration ═══ -->
-  <script src="/loader.js" data-hippo-key="pk_demo" data-hippo-gateway="http://localhost:8787" async></script>
+  <!-- ═══ The Hippo embed — the entire partner-side integration ═══
+       ?gw=real points the SDK at the real gateway (:8788) instead of the
+       mock (:8787, default). A partner ships the single static <script> tag;
+       the dynamic injection here exists only so demos can flip gateways. -->
+  <script>
+    (() => {
+      const real = new URLSearchParams(location.search).get('gw') === 'real'
+      const s = document.createElement('script')
+      s.src = '/loader.js'
+      s.async = true
+      s.dataset.hippoKey = 'pk_demo'
+      s.dataset.hippoGateway = real ? 'http://localhost:8788' : 'http://localhost:8787'
+      document.body.appendChild(s)
+
+      // Tiny badge so it's always unambiguous which gateway a demo is on.
+      const badge = document.createElement('div')
+      badge.textContent = `GW: ${real ? 'REAL' : 'MOCK'}`
+      badge.style.cssText =
+        'position:fixed;left:10px;bottom:10px;z-index:2147483001;padding:3px 8px;' +
+        'border:1px solid rgba(255,255,255,.14);border-radius:5px;' +
+        `background:${real ? 'rgba(46,196,141,.16)' : 'rgba(255,255,255,.05)'};` +
+        `color:${real ? '#2EC48D' : '#8A8F9C'};` +
+        'font:600 10px ui-monospace,monospace;letter-spacing:.08em;pointer-events:none'
+      document.body.appendChild(badge)
+    })()
+  </script>
 </body>
 </html>
