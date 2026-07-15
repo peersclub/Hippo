@@ -59,7 +59,7 @@ export function buildService(adapter: VenueAdapter = new SimVenueAdapter()): Fas
 } {
   const app = Fastify({
     logger: process.env.NODE_ENV !== 'test' && { level: 'info' },
-  }) as FastifyInstance & { audit: AuditEntry[] }
+  }) as unknown as FastifyInstance & { audit: AuditEntry[] }
 
   const audit: AuditEntry[] = []
   app.audit = audit
@@ -101,7 +101,11 @@ export function buildService(adapter: VenueAdapter = new SimVenueAdapter()): Fas
     if (parsed === null) return reply.code(400).send({ error: 'invalid prepare request' })
     try {
       const ticket = await adapter.prepare(parsed)
-      record({ kind: 'prepare', ticketId: ticket.ticketId, detail: `${parsed.side} ${parsed.size} ${parsed.instrument}` })
+      record({
+        kind: 'prepare',
+        ticketId: ticket.ticketId,
+        detail: `${parsed.side} ${parsed.size} ${parsed.instrument}`,
+      })
       return ticket
     } catch (err) {
       return reply.code(502).send({ error: `venue prepare failed: ${String(err)}` })

@@ -142,7 +142,11 @@ describe('seam service HTTP surface', () => {
       url: `/v1/tickets/${ticketId}/confirm`,
       payload: { callbackUrl: 'http://gateway.test/callback' },
     })
-    const res = await app.inject({ method: 'POST', url: `/v1/tickets/${ticketId}/cancel`, payload: {} })
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/cancel`,
+      payload: {},
+    })
     expect(res.json()).toEqual({ cancelled: true })
     await new Promise((r) => setTimeout(r, 40))
     expect(deliveries).toHaveLength(0)

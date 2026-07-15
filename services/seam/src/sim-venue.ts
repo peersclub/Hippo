@@ -10,8 +10,8 @@ import { randomUUID } from 'node:crypto'
 import type {
   LifecycleEvent,
   Portfolio,
-  PrepareRequest,
   PreparedTicket,
+  PrepareRequest,
   VenueAdapter,
 } from './types.js'
 
@@ -39,9 +39,7 @@ export class SimVenueAdapter implements VenueAdapter {
   private readonly tickets = new Map<string, StoredTicket>()
   private handler: (event: LifecycleEvent) => void = () => {}
 
-  constructor(
-    private readonly opts: { fillDelayMs?: number; marketDataUrl?: string } = {},
-  ) {}
+  constructor(private readonly opts: { fillDelayMs?: number; marketDataUrl?: string } = {}) {}
 
   onEvent(handler: (event: LifecycleEvent) => void): void {
     this.handler = handler
@@ -131,9 +129,30 @@ export class SimVenueAdapter implements VenueAdapter {
     // adapter maps the venue's positions/orders endpoints. NEVER cached.
     return {
       positions: [
-        { instrument: 'BTC/USDT', size: '0.31 BTC', entry: '58,420', mark: '61,240', pnl: '+874.20 USDT', tone: 'pos' },
-        { instrument: 'SOL/USDT', size: '42 SOL', entry: '171.10', mark: '166.40', pnl: '−197.40 USDT', tone: 'neg' },
-        { instrument: 'ADA/USDT', size: '5,000 ADA', entry: '0.4980', mark: '0.5210', pnl: '+115.00 USDT', tone: 'pos' },
+        {
+          instrument: 'BTC/USDT',
+          size: '0.31 BTC',
+          entry: '58,420',
+          mark: '61,240',
+          pnl: '+874.20 USDT',
+          tone: 'pos',
+        },
+        {
+          instrument: 'SOL/USDT',
+          size: '42 SOL',
+          entry: '171.10',
+          mark: '166.40',
+          pnl: '−197.40 USDT',
+          tone: 'neg',
+        },
+        {
+          instrument: 'ADA/USDT',
+          size: '5,000 ADA',
+          entry: '0.4980',
+          mark: '0.5210',
+          pnl: '+115.00 USDT',
+          tone: 'pos',
+        },
       ],
       openOrders: [
         { orderId: 'o_btc', side: 'buy', summary: 'BUY 0.05 BTC · MKT', status: 'FILLING 40%' },

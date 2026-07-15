@@ -470,10 +470,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       case 'portfolio': {
         // Never cached — every read goes to the venue via the seam adapter.
         try {
-          const { positions } = await seam.portfolio(
-            session.partner.partnerId,
-            userKey(session),
-          )
+          const { positions } = await seam.portfolio(session.partner.partnerId, userKey(session))
           emit(session, { type: 'positions', rows: positions })
         } catch (err) {
           log.error({ err }, 'seam portfolio unavailable')
