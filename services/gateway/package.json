@@ -2,11 +2,13 @@
   "name": "@hippo/gateway",
   "version": "0.1.0",
   "private": true,
-  "description": "Production gateway skeleton — sessions, partner JWT handshake, SSE streaming, card orchestration (Phase 2 fills the logic)",
+  "description": "Production gateway — sessions & partner JWT auth, SSE frame journal with Last-Event-ID resume, card orchestrator with degraded fallback",
   "type": "module",
   "scripts": {
+    "dev": "tsx watch src/app.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/app.js"
+    "start": "node dist/app.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
@@ -14,6 +16,8 @@
     "fastify": "^5.4.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.0"
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
   }
 }
