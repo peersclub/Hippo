@@ -33,6 +33,7 @@ import type {
 } from './intelligence.js'
 import { guessIntent } from './intelligence.js'
 import type { MarketClient, MarketSnapshot } from './market.js'
+import type { MemoryClient } from './memory.js'
 import {
   asOfDisplay,
   cacheAgeDisplay,
@@ -65,6 +66,7 @@ type Log = {
 export type OrchestratorDeps = {
   intel: IntelligenceClient
   market: MarketClient
+  memory: MemoryClient
   emit: EmitFrame
   telemetry: Telemetry
   log: Log
@@ -82,7 +84,7 @@ function userKey(session: Session): string {
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
-  const { intel, market, emit, telemetry, log } = deps
+  const { intel, market, memory, emit, telemetry, log } = deps
   const fillDelayMs = deps.fillDelayMs ?? DEFAULT_FILL_DELAY_MS
 
   // ── frame builders ─────────────────────────────────────────────────────
@@ -403,6 +405,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           await emitMarketOnlyBrief(session, text)
           return
         }
+        // Persona (Memory v1): one read per research turn — null (opted out
+        // or memory down) costs nothing and changes nothing. Experience
+        // level calibrates concept depth in the research engine; the asset
+        // and question are remembered ONLY for opted-in users.
+        const persona = await memory.get(session.partner.partnerId, userKey(session))
+        const symbol = symbolFromText(text)
+        if (persona?.optIn) {
+          memory
+            .update(session.partner.partnerId, userKey(session), {
+              followAsset: symbol.split('/')[0] ?? symbol,
+              openThread: { text, symbol: symbol.split('/')[0] },
+            })
+            .catch(() => {}) // fire-and-forget; a turn never waits on memory
+        }
         try {
           // Streaming path: brief_delta frames fill the skeleton with prose
           // as the research engine generates; the final research_brief frame
@@ -415,7 +431,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           for await (const ev of intel.respondStream({
             text,
             intent: intentRes.intent,
-            symbol: symbolFromText(text),
+            symbol,
+            ...(persona?.optIn && persona.experienceLevel
+              ? { persona: { experienceLevel: persona.experienceLevel } }
+              : {}),
           })) {
             if (ev.event === 'delta') {
               pending += ev.data.text
@@ -529,11 +548,31 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         }
         case 'settings': {
           if (uplink.language) session.language = uplink.language
+          if (uplink.memoryOptIn !== undefined) {
+            memory
+              .update(session.partner.partnerId, userKey(session), {
+                optIn: uplink.memoryOptIn,
+              })
+              .catch(() => {})
+          }
+          if (uplink.clearMemory) {
+            // The settings promise: wipe persona data (opt-in choice survives).
+            memory.clear(session.partner.partnerId, userKey(session)).catch(() => {})
+          }
           telemetry.recordUplink('settings')
           return
         }
-        case 'feedback':
         case 'consent': {
+          // Onboarding consent: the moment memory is allowed to exist.
+          memory
+            .update(session.partner.partnerId, userKey(session), {
+              optIn: uplink.memoryOptIn,
+            })
+            .catch(() => {})
+          telemetry.recordUplink('consent')
+          return
+        }
+        case 'feedback': {
           // Recorded for the L2 export pipeline (BE doc §4); counters only here.
           telemetry.recordUplink(uplink.kind)
           return

@@ -41,12 +41,21 @@ class IntentRequest(BaseModel):
     language: str | None = None
 
 
+class PersonaIn(BaseModel):
+    """Thin personalization slots (memo §9). Experience level calibrates
+    CONCEPT-answer depth only — market briefs stay fleet-wide cacheable."""
+
+    experienceLevel: Literal["new", "intermediate", "pro"] | None = None
+
+
 class RespondRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     intent: str
     symbol: str | None = None
     # Additive: future callers pass the language detected at intent time.
     language: Literal["en", "hi", "hinglish"] | None = None
+    # Additive (Memory v1): opt-in persona from the gateway's memory read.
+    persona: PersonaIn | None = None
 
 
 @app.post("/v1/intent")
@@ -70,6 +79,7 @@ async def respond(req: RespondRequest) -> dict[str, Any]:
             answer_cache,
             symbol=req.symbol,
             language=req.language,
+            experience_level=req.persona.experienceLevel if req.persona else None,
         )
     except Exception:
         # Never 500: degrade to a data-free decline-shaped card rather than
@@ -105,6 +115,7 @@ async def respond_stream(req: RespondRequest) -> StreamingResponse:
                 answer_cache,
                 symbol=req.symbol,
                 language=req.language,
+                experience_level=req.persona.experienceLevel if req.persona else None,
             ):
                 yield sse(ev["event"], ev["data"])
         except Exception:

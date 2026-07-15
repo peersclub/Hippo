@@ -233,6 +233,44 @@ class RespondShapes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out["sources"], ["HIPPO KNOWLEDGE"])
 
 
+class ExperienceCalibration(unittest.IsolatedAsyncioTestCase):
+    """Memory v1: experience level calibrates CONCEPT depth only — market
+    briefs stay fleet-wide cacheable (the cache economics, memo §9)."""
+
+    def test_depth_line_in_concept_prompt_only(self) -> None:
+        concept = research._brief_user_prompt("what is funding?", "BTC", None, "en", "new")
+        self.assertIn("CALIBRATE DEPTH", concept)
+        self.assertIn("new to trading", concept)
+        market = research._brief_user_prompt("why down?", "BTC", SNAPSHOT, "en", "new")
+        self.assertNotIn("CALIBRATE DEPTH", market)
+
+    async def test_concept_cache_scopes_by_level(self) -> None:
+        router, cache = offline_router(), AnswerCache()
+        first = await research.respond(
+            "what is a funding rate?", "concept", router, cache, experience_level="new"
+        )
+        pro = await research.respond(
+            "what is a funding rate?", "concept", router, cache, experience_level="pro"
+        )
+        again = await research.respond(
+            "what is a funding rate?", "concept", router, cache, experience_level="new"
+        )
+        self.assertFalse(first["cached"])
+        self.assertFalse(pro["cached"])  # a pro never gets the beginner depth
+        self.assertTrue(again["cached"])  # same level shares the entry
+
+    async def test_market_cache_ignores_level(self) -> None:
+        router, cache = offline_router(), AnswerCache()
+        with patch.object(research, "fetch_snapshot", fake_snapshot):
+            await research.respond(
+                "why is btc down", "research", router, cache, experience_level="new"
+            )
+            second = await research.respond(
+                "why is btc down", "research", router, cache, experience_level="pro"
+            )
+        self.assertTrue(second["cached"])  # market answers stay fleet-wide
+
+
 class NeverFiveHundredFloor(unittest.IsolatedAsyncioTestCase):
     """Regression for a live incident: httpx CLIENT CREATION raised OSError
     (broken CA bundle after a python upgrade), escaping the (HTTPError,

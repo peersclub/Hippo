@@ -10,6 +10,7 @@ import Fastify from 'fastify'
 import { createOrchestrator } from './orchestrator/index.js'
 import { createIntelligenceClient } from './orchestrator/intelligence.js'
 import { createMarketClient } from './orchestrator/market.js'
+import { createMemoryClient } from './orchestrator/memory.js'
 import { authenticate, SessionStore } from './plugins/auth.js'
 import { createEmitter, streamSession } from './plugins/sse.js'
 import { Telemetry } from './plugins/telemetry.js'
@@ -19,6 +20,7 @@ const PORT = Number(process.env.PORT ?? 8788)
 export type GatewayOptions = {
   intel?: import('./orchestrator/intelligence.js').IntelligenceClient
   market?: import('./orchestrator/market.js').MarketClient
+  memory?: import('./orchestrator/memory.js').MemoryClient
   /** Simulated venue fill latency (ms); tests shrink it. */
   fillDelayMs?: number
   /** Throw on invalid frames instead of log+drop. Defaults to true in tests. */
@@ -40,6 +42,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
   const orchestrator = createOrchestrator({
     intel: opts.intel ?? createIntelligenceClient(),
     market: opts.market ?? createMarketClient(),
+    memory: opts.memory ?? createMemoryClient(),
     emit,
     telemetry,
     log: app.log,
