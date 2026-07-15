@@ -16,6 +16,7 @@ import { Command } from 'commander'
 import { inProcessDriver } from './conform/in-process-driver.js'
 import { renderConformanceReport, renderConformanceSummary } from './conform/report.js'
 import { runConformance } from './conform/suite.js'
+import { draftAdapterConfig, renderAdapterConfigYaml } from './init/config.js'
 import { renderReport, renderSummary } from './scan/report.js'
 import { runScan } from './scan/run.js'
 
@@ -58,9 +59,12 @@ program
       return
     }
     const reportPath = path.resolve(process.cwd(), `hippo-scan-${outcome.result.domain}.md`)
+    const configPath = path.resolve(process.cwd(), `hippo-adapter-${outcome.result.domain}.yaml`)
     await writeFile(reportPath, renderReport(outcome.result), 'utf8')
+    await writeFile(configPath, renderAdapterConfigYaml(draftAdapterConfig(outcome.result)), 'utf8')
     console.log(renderSummary(outcome.result))
-    console.log(`\nReport written: ${reportPath}`)
+    console.log(`\nReport written:       ${reportPath}`)
+    console.log(`Draft adapter config: ${configPath}`)
   })
 
 program
