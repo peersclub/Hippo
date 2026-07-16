@@ -17,6 +17,8 @@ import { inProcessDriver } from './conform/in-process-driver.js'
 import { renderConformanceReport, renderConformanceSummary } from './conform/report.js'
 import { runConformance } from './conform/suite.js'
 import { draftAdapterConfig, renderAdapterConfigYaml } from './init/config.js'
+import { draftMapping, renderMappingTs } from './init/mapping.js'
+import { draftRejections, renderRejectionsYaml } from './init/rejections.js'
 import { renderReport, renderSummary } from './scan/report.js'
 import { runScan } from './scan/run.js'
 
@@ -60,11 +62,21 @@ program
     }
     const reportPath = path.resolve(process.cwd(), `hippo-scan-${outcome.result.domain}.md`)
     const configPath = path.resolve(process.cwd(), `hippo-adapter-${outcome.result.domain}.yaml`)
+    const mappingPath = path.resolve(process.cwd(), `hippo-mapping-${outcome.result.domain}.ts`)
+    const rejectionsPath = path.resolve(
+      process.cwd(),
+      `hippo-rejections-${outcome.result.domain}.yaml`,
+    )
+    const config = draftAdapterConfig(outcome.result)
     await writeFile(reportPath, renderReport(outcome.result), 'utf8')
-    await writeFile(configPath, renderAdapterConfigYaml(draftAdapterConfig(outcome.result)), 'utf8')
+    await writeFile(configPath, renderAdapterConfigYaml(config), 'utf8')
+    await writeFile(mappingPath, renderMappingTs(draftMapping(config)), 'utf8')
+    await writeFile(rejectionsPath, renderRejectionsYaml(draftRejections(outcome.result)), 'utf8')
     console.log(renderSummary(outcome.result))
     console.log(`\nReport written:       ${reportPath}`)
     console.log(`Draft adapter config: ${configPath}`)
+    console.log(`Mapping stubs:        ${mappingPath}`)
+    console.log(`Rejection map:        ${rejectionsPath}`)
   })
 
 program

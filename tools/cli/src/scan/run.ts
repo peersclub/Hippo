@@ -4,7 +4,13 @@
  */
 import { summarizeCsp } from './csp.js'
 import type { OpenApiDoc } from './cti.js'
-import { extractAuthSchemes, isOpenApiDoc, mapToCti, specVersion } from './cti.js'
+import {
+  extractAuthSchemes,
+  extractErrorResponses,
+  isOpenApiDoc,
+  mapToCti,
+  specVersion,
+} from './cti.js'
 import { detectFramework, extractLocales, extractTitle } from './detect.js'
 import { fetchHtml, fetchJson, fetchUrl } from './fetchers.js'
 import { parseRobots } from './robots.js'
@@ -128,6 +134,7 @@ export async function runScan(rawDomain: string): Promise<ScanOutcome> {
     probes,
     capabilities: mapToCti(specDoc ?? {}),
     authSchemes: specDoc ? extractAuthSchemes(specDoc) : [],
+    errorResponses: specDoc ? extractErrorResponses(specDoc) : [],
   }
   return { reachable: true, result }
 }
