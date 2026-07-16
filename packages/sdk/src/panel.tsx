@@ -3,13 +3,15 @@
  * Server-driven: everything in the thread is a protocol frame; the panel
  * decides nothing about content or timing.
  */
+
+import type { OrdersSnapshot } from '@hippo/protocol'
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import type { OrdersSnapshot } from '@hippo/protocol'
 import { FallbackCard, renderFrame } from './cards.js'
 import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
 import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
 import { OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
+import { cyclePosture, isMobileViewport, openPosture } from './posture.js'
 import {
   banners,
   clearPulse,
@@ -295,9 +297,11 @@ function Chips() {
 }
 
 function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore }) {
-  const max = posture.value === 'max'
+  // `pill` never reaches here (the panel renders null when minimized), so any
+  // posture we hold is a concrete on-screen one; drive the class straight off it.
+  const p = posture.value
   return (
-    <div class={`panel${max ? ' max' : ''}`}>
+    <div class={`panel ${p}`}>
       <div class="hd">
         <span class="mark">H</span>
         <div class="name">
@@ -317,10 +321,10 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
           </button>
           <button
             type="button"
-            title={max ? 'Dock panel' : 'Expand panel'}
-            aria-label={max ? 'Dock panel' : 'Expand panel'}
+            title="Change layout"
+            aria-label="Change panel layout"
             onClick={() => {
-              posture.value = max ? 'dock' : 'max'
+              posture.value = cyclePosture(posture.value, isMobileViewport())
             }}
           >
             ⤢
@@ -381,7 +385,7 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
   const evt = pill.querySelector('.evt')
 
   const open = () => {
-    posture.value = 'dock'
+    posture.value = openPosture(isMobileViewport())
     pill.style.display = 'none'
     pill.classList.remove('alert')
     clearPulse()
@@ -390,18 +394,18 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
     rerender()
   }
   const minimize = () => {
-    posture.value = 'min'
+    posture.value = 'pill'
     pill.style.display = ''
     rerender()
   }
 
   const rerender = () => {
-    render(posture.value === 'min' ? null : <Panel onMinimize={minimize} ob={ob} />, root)
+    render(posture.value === 'pill' ? null : <Panel onMinimize={minimize} ob={ob} />, root)
   }
 
   // Ambient market pulse → pill glow with mono event tag. Server decides when.
   pulseTag.subscribe((tag) => {
-    if (tag && posture.value === 'min' && evt) {
+    if (tag && posture.value === 'pill' && evt) {
       evt.textContent = tag
       pill.classList.add('alert')
     }

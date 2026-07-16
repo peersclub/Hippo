@@ -29,6 +29,8 @@ type LoaderConfig = {
       const host = document.createElement('hippo-root')
       // Fixed stacking context of our own; the host's layout never shifts.
       host.style.cssText = 'position:fixed;z-index:2147483000;inset:auto 0 0 auto;'
+      // Optional light theme — a pure token swap in the panel (default: dark).
+      if (script.dataset.hippoTheme === 'light') host.dataset.theme = 'light'
       const shadow = host.attachShadow({ mode: 'closed' })
 
       const style = document.createElement('style')
