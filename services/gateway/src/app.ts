@@ -6,6 +6,18 @@
  */
 import cors from '@fastify/cors'
 import { Uplink } from '@hippo/protocol'
+import {
+  getPool,
+  InMemoryPartnerStore,
+  InMemoryPlanStore,
+  InMemoryUserStore,
+  type PartnerStore,
+  type PlanStore,
+  PostgresPartnerStore,
+  PostgresPlanStore,
+  PostgresUserStore,
+  type UserStore,
+} from '@hippo/stores'
 import Fastify from 'fastify'
 import { createOrchestrator } from './orchestrator/index.js'
 import { createIntelligenceClient } from './orchestrator/intelligence.js'
@@ -27,6 +39,11 @@ export type GatewayOptions = {
   strictFrames?: boolean
   /** Allow anonymous {partnerKey} sessions. Defaults to HIPPO_DEV !== '0'. */
   devMode?: boolean
+  /** Partner/plan/user registries. Postgres when DATABASE_URL is set,
+   * in-memory (koinbx-dev seed) otherwise. */
+  partnerStore?: PartnerStore
+  planStore?: PlanStore
+  userStore?: UserStore
 }
 
 export async function buildApp(opts: GatewayOptions = {}) {
@@ -35,6 +52,14 @@ export async function buildApp(opts: GatewayOptions = {}) {
 
   const app = Fastify({ logger: { level: isTest ? 'silent' : 'info' } })
   await app.register(cors, { origin: true })
+
+  const usePg = Boolean(process.env.DATABASE_URL) && !isTest
+  const partners =
+    opts.partnerStore ?? (usePg ? new PostgresPartnerStore(getPool()) : new InMemoryPartnerStore())
+  const plans =
+    opts.planStore ?? (usePg ? new PostgresPlanStore(getPool()) : new InMemoryPlanStore())
+  const users =
+    opts.userStore ?? (usePg ? new PostgresUserStore(getPool()) : new InMemoryUserStore())
 
   const sessions = new SessionStore()
   const telemetry = new Telemetry()
@@ -51,18 +76,54 @@ export async function buildApp(opts: GatewayOptions = {}) {
 
   app.post('/v1/session', async (req, reply) => {
     const body = (req.body ?? {}) as { partnerKey?: string }
-    const auth = authenticate(req.headers.authorization, body.partnerKey, devMode)
+    const auth = await authenticate(partners, req.headers.authorization, body.partnerKey, devMode)
     if (!auth.ok) {
       reply.code(401)
       return { error: auth.error }
     }
+
+    // Blocked end-users never get a session (admin panel primitive).
+    if (auth.venueUserId) {
+      const user = await users.get(auth.partner.partnerId, auth.venueUserId)
+      if (user?.status === 'blocked') {
+        reply.code(401)
+        return { error: 'user blocked' }
+      }
+    }
+
+    // Plan MAU quota: a NEW distinct user this month past the ceiling → 429.
+    // Returning users (already counted) keep working — the quota bounds
+    // billable distinct users, it never cuts off someone mid-month.
+    const plan = auth.partner.planId ? await plans.get(auth.partner.planId) : undefined
+    if (plan?.mauQuota != null) {
+      const alreadyCounted = auth.venueUserId
+        ? telemetry.hasPartnerUser(auth.partner.partnerId, auth.venueUserId)
+        : false
+      if (!alreadyCounted && telemetry.partnerMau(auth.partner.partnerId) >= plan.mauQuota) {
+        reply.code(429)
+        return { error: 'plan MAU quota reached' }
+      }
+    }
+
     const session = sessions.create(auth.partner, auth.venueUserId)
+    telemetry.recordPartnerUser(auth.partner.partnerId, auth.venueUserId ?? session.id)
+
+    // Lazily register authenticated end-users (never anonymous sessions);
+    // fire-and-forget — registry writes must not slow session mint.
+    if (auth.venueUserId) {
+      void users
+        .upsertSeen(auth.partner.partnerId, auth.venueUserId)
+        .catch((err) => app.log.warn({ err }, 'users upsert failed'))
+    }
+
     return {
       sessionId: session.id,
       config: {
         venueName: auth.partner.venueName,
         locales: auth.partner.locales,
         suggestedQueries: auth.partner.suggestedQueries,
+        // Plan entitlements pass through for SDK feature gating (additive).
+        ...(plan ? { entitlements: plan.entitlements } : {}),
       },
     }
   })
@@ -113,7 +174,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
   // In-memory counters for dev; OTel + telemetry_events replace this in pods.
   app.get('/internal/metrics', async () => telemetry.snapshot())
 
-  return { app, sessions, emit, telemetry }
+  return { app, sessions, emit, telemetry, partners, plans, users }
 }
 
 if (process.env.NODE_ENV !== 'test') {

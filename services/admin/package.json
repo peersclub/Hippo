@@ -1,17 +1,16 @@
 {
-  "name": "@hippo/gateway",
+  "name": "@hippo/admin",
   "version": "0.1.0",
   "private": true,
-  "description": "Production gateway — sessions & partner JWT auth, SSE frame journal with Last-Event-ID resume, card orchestrator with degraded fallback",
+  "description": "Operator-facing admin service — partners, plans, users, user-wise memory management, audit. Never exposed through the partner ingress; apps/admin is its only client",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/app.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/app.js",
+    "start": "node dist/index.js",
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/cors": "^11.0.0",
     "@hippo/protocol": "workspace:*",
     "@hippo/stores": "workspace:*",
     "fastify": "^5.4.0"

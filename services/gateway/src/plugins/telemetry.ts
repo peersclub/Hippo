@@ -44,6 +44,29 @@ export class Telemetry {
     this.researchMau.add(`${userKey}:${monthKey()}`)
   }
 
+  // ── partner-scoped MAU (plan quota enforcement) ──────────────────────────
+  // Keyed `${partnerId}\u0000${userKey}:${month}` — NUL separator because a
+  // userKey may itself contain ':' (session ids don't, venue ids might).
+  private partnerMauSet = new Set<string>()
+
+  recordPartnerUser(partnerId: string, userKey: string): void {
+    this.partnerMauSet.add(`${partnerId}\u0000${userKey}:${monthKey()}`)
+  }
+
+  hasPartnerUser(partnerId: string, userKey: string): boolean {
+    return this.partnerMauSet.has(`${partnerId}\u0000${userKey}:${monthKey()}`)
+  }
+
+  /** Distinct users seen for a partner in the current calendar month. */
+  partnerMau(partnerId: string): number {
+    const month = monthKey()
+    let n = 0
+    for (const k of this.partnerMauSet) {
+      if (k.startsWith(`${partnerId}\u0000`) && k.endsWith(`:${month}`)) n += 1
+    }
+    return n
+  }
+
   recordOrderExecuted(userKey: string): void {
     this.orderMau.add(`${userKey}:${monthKey()}`)
   }

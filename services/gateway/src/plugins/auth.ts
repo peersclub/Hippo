@@ -16,6 +16,7 @@
  * surface — see Build Plan/10 BE Architecture §4.
  */
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
+import { devPartner, type PartnerRecord, type PartnerStore } from '@hippo/stores'
 import { InMemoryJournal, type Journal, type JournalEntry } from './sse.js'
 
 export type PartnerConfig = {
@@ -30,32 +31,12 @@ export type PartnerConfig = {
 }
 
 /**
- * Partner registry. In production this is the `partners` table (config blobs,
- * JWKS, adapter refs — BE doc §4); one dev partner ships in-memory.
+ * Partner registry moved to @hippo/stores (PartnerStore: the `partners`
+ * table when DATABASE_URL is set, in-memory otherwise — BE doc §4). This
+ * legacy export remains for tests and the partner simulator: it is exactly
+ * the seed the in-memory store ships with.
  */
-export const PARTNERS: readonly PartnerConfig[] = [
-  {
-    partnerId: 'koinbx-dev',
-    partnerKey: 'pk_demo',
-    jwtSecret: process.env.KOINBX_DEV_JWT_SECRET ?? 'koinbx-dev-secret-not-for-production',
-    venueName: 'KoinBX',
-    locales: ['en', 'hi', 'hinglish'],
-    suggestedQueries: [
-      "What's driving SOL volume?",
-      'My positions & P&L',
-      'ETH funding rate',
-      'Explain liquidations',
-    ],
-  },
-]
-
-function partnerById(id: string): PartnerConfig | undefined {
-  return PARTNERS.find((p) => p.partnerId === id)
-}
-
-function partnerByKey(key: string): PartnerConfig | undefined {
-  return PARTNERS.find((p) => p.partnerKey === key)
-}
+export const PARTNERS: readonly PartnerConfig[] = [devPartner()]
 
 /** Quote captured when a ticket was prepared; the simulated fill reads its
  * actuals from here. Phase 3: the seam's venue events replace this. */
@@ -185,29 +166,32 @@ export function verifyJwtHS256(token: string, secret: string): Record<string, un
 }
 
 export type AuthResult =
-  | { ok: true; partner: PartnerConfig; venueUserId: string | null }
+  | { ok: true; partner: PartnerRecord; venueUserId: string | null }
   | { ok: false; error: string }
 
 /**
- * Resolve a session-mint request. A Bearer token, when present, is ALWAYS
- * verified (even in dev mode — a bad token must never silently downgrade to
- * an anonymous session). Without a token, dev mode mints an anonymous session
- * from the partnerKey; JWT mode rejects.
+ * Resolve a session-mint request against the partner registry. A Bearer
+ * token, when present, is ALWAYS verified (even in dev mode — a bad token
+ * must never silently downgrade to an anonymous session). Without a token,
+ * dev mode mints an anonymous session from the partnerKey; JWT mode rejects.
+ * Suspended partners are rejected in every mode.
  */
-export function authenticate(
+export async function authenticate(
+  partners: PartnerStore,
   authHeader: string | undefined,
   partnerKey: string | undefined,
   devMode: boolean,
-): AuthResult {
+): Promise<AuthResult> {
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice('Bearer '.length).trim()
     // Partner is identified by the `iss` claim, falling back to the embed key.
     const unverified = decodeJson(token.split('.')[1] ?? '')
     const issuer = typeof unverified?.iss === 'string' ? unverified.iss : null
     const partner =
-      (issuer ? partnerById(issuer) : undefined) ??
-      (partnerKey ? partnerByKey(partnerKey) : undefined)
+      (issuer ? await partners.get(issuer) : undefined) ??
+      (partnerKey ? await partners.getByKey(partnerKey) : undefined)
     if (!partner) return { ok: false, error: 'unknown partner' }
+    if (partner.status === 'suspended') return { ok: false, error: 'partner suspended' }
     const claims = verifyJwtHS256(token, partner.jwtSecret)
     if (!claims || typeof claims.sub !== 'string' || claims.sub.length === 0) {
       return { ok: false, error: 'invalid partner token' }
@@ -216,8 +200,11 @@ export function authenticate(
   }
 
   if (devMode) {
-    const partner = (partnerKey ? partnerByKey(partnerKey) : undefined) ?? PARTNERS[0]
+    const partner =
+      (partnerKey ? await partners.getByKey(partnerKey) : undefined) ??
+      (await partners.get('koinbx-dev'))
     if (!partner) return { ok: false, error: 'no partner configured' }
+    if (partner.status === 'suspended') return { ok: false, error: 'partner suspended' }
     return { ok: true, partner, venueUserId: null }
   }
 

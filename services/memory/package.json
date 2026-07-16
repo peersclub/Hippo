@@ -11,9 +11,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hippo/stores": "workspace:*",
     "fastify": "^5.4.0"
   },
   "devDependencies": {
+    "@types/pg": "^8.11.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"

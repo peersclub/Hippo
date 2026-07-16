@@ -1,0 +1,33 @@
+{
+  "name": "@hippo/stores",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Durable stores for admin-managed entities (partners, plans, users) + migration runner. Postgres when DATABASE_URL is set, in-memory otherwise — the same dual-backend pattern the session/cache stores use for REDIS_URL",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

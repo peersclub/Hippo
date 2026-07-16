@@ -1,0 +1,18 @@
+# Local Postgres for the admin-managed stores (partners, plans, users,
+# users_memory, admin_*). Everything runs in-memory without it; set
+#   DATABASE_URL=postgres://hippo:hippo@localhost:5433/hippo
+# and run `pnpm --filter @hippo/stores migrate` to go durable.
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_USER: hippo
+      POSTGRES_PASSWORD: hippo
+      POSTGRES_DB: hippo
+    volumes:
+      - hippo-pgdata:/var/lib/postgresql/data
+
+volumes:
+  hippo-pgdata:

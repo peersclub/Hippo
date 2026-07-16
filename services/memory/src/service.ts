@@ -3,9 +3,17 @@
  *   GET  /v1/persona/:partnerId/:userId        → persona (default if unseen)
  *   PUT  /v1/persona/:partnerId/:userId        → merge a PersonaUpdate
  *   POST /v1/persona/:partnerId/:userId/clear  → wipe data (settings promise)
+ *   GET  /admin/personas                       → enumerate (admin panel; token)
+ *   DELETE /admin/personas/:partnerId/:userId  → hard delete/purge (token)
  *   GET  /health
+ *
+ * /admin/* is guarded by `x-hippo-internal-token` against INTERNAL_API_TOKEN
+ * (timing-safe). Fail-closed: no env token → admin surface is 503, never
+ * open. In pods this sits on the cluster network behind mTLS, same as the
+ * gateway's /internal routes.
  */
-import Fastify, { type FastifyInstance } from 'fastify'
+import { timingSafeEqual } from 'node:crypto'
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import {
   type ExperienceLevel,
   InMemoryPersonaStore,
@@ -45,7 +53,15 @@ function parseUpdate(body: unknown): PersonaUpdate | null {
   return patch
 }
 
-export function buildService(store: PersonaStore = new InMemoryPersonaStore()): FastifyInstance {
+export type ServiceOptions = {
+  store?: PersonaStore
+  /** Shared secret for /admin/*; defaults to INTERNAL_API_TOKEN env. */
+  internalToken?: string
+}
+
+export function buildService(opts: ServiceOptions = {}): FastifyInstance {
+  const store = opts.store ?? new InMemoryPersonaStore()
+  const internalToken = opts.internalToken ?? process.env.INTERNAL_API_TOKEN ?? ''
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } })
 
   type Params = { partnerId: string; userId: string }
@@ -67,7 +83,43 @@ export function buildService(store: PersonaStore = new InMemoryPersonaStore()): 
     return store.clear(partnerId, userId)
   })
 
-  app.get('/health', async () => ({ ok: true, service: 'memory', personas: store.size() }))
+  // ── admin surface (panel-only; internal token) ─────────────────────────
+  function adminGuard(req: FastifyRequest, reply: FastifyReply): boolean {
+    if (!internalToken) {
+      reply.code(503).send({ error: 'admin surface disabled: INTERNAL_API_TOKEN not set' })
+      return false
+    }
+    const presented = req.headers['x-hippo-internal-token']
+    const actual = Buffer.from(typeof presented === 'string' ? presented : '')
+    const expected = Buffer.from(internalToken)
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      reply.code(401).send({ error: 'invalid internal token' })
+      return false
+    }
+    return true
+  }
+
+  app.get<{
+    Querystring: { partnerId?: string; optIn?: string; offset?: string; limit?: string }
+  }>('/admin/personas', async (req, reply) => {
+    if (!adminGuard(req, reply)) return reply
+    const { partnerId, optIn, offset, limit } = req.query
+    return store.list({
+      ...(partnerId ? { partnerId } : {}),
+      ...(optIn === 'true' ? { optIn: true } : optIn === 'false' ? { optIn: false } : {}),
+      offset: Number(offset ?? 0) || 0,
+      limit: Math.min(Number(limit ?? 50) || 50, 200),
+    })
+  })
+
+  app.delete<{ Params: Params }>('/admin/personas/:partnerId/:userId', async (req, reply) => {
+    if (!adminGuard(req, reply)) return reply
+    const { partnerId, userId } = req.params
+    const deleted = await store.delete(partnerId, userId)
+    return { deleted }
+  })
+
+  app.get('/health', async () => ({ ok: true, service: 'memory', personas: await store.size() }))
 
   return app
 }
