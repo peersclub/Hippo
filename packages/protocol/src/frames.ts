@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CAPABILITIES } from './orders.js'
 
 /**
  * Card protocol v1 — DOWN frames (server → SDK).
@@ -61,8 +62,12 @@ export const OrderTicketFrame = z.object({
   type: z.literal('order_ticket'),
   ticketId: z.string(),
   title: z.string().default('Order prepared'),
-  sideLabel: z.string(), // e.g. "BUY · MKT"
+  sideLabel: z.string(), // e.g. "BUY · MKT" or "LONG 13× · ISOLATED"
   side: z.enum(['buy', 'sell']),
+  /** Which trade type this ticket is (spot default). Lets the SDK render
+   * feature-aware chrome (leverage/direction, liquidation row) while the
+   * money rows stay server-formatted. Additive — omitted reads as spot. */
+  capability: z.enum(CAPABILITIES).optional(),
   rows: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
   cta: z.string(), // e.g. "Review & confirm in KoinBX →"
   footnote: z.string(), // restates the seam
@@ -192,9 +197,7 @@ export const Frame = z.discriminatedUnion('type', [
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
-export const FrameEnvelope = z
-  .object({ ...base, type: z.string() })
-  .loose()
+export const FrameEnvelope = z.object({ ...base, type: z.string() }).loose()
 
 export type Frame = z.infer<typeof Frame>
 export type FrameType = Frame['type']
