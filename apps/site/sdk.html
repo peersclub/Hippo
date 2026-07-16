@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hippo SDK — One tag. Every platform.</title>
+<meta name="description" content="Integrate the Hippo trading agent anywhere: one script tag on the web, a WebView shell on iOS, Android, React Native and Flutter. Thin client, heavy core." />
+<link rel="icon" type="image/png" href="./assets/hippo-mascot.png" />
+<script>/* pre-paint theme boot — avoids a dark→light flash */
+try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./site.css" />
+<style>
+  .hero{padding:72px 0 30px}
+  .hero h1{font-family:var(--hippo-font-display);font-size:clamp(30px,4vw,46px);font-weight:700;letter-spacing:-.015em;line-height:1.1;margin:14px 0 16px}
+  .hero h1 .dot{color:var(--hippo-amber)}
+  .statstrip{display:flex;border:1px solid var(--hippo-hairline);border-radius:14px;overflow:hidden;max-width:560px;margin-top:26px}
+  .statstrip>div{flex:1;padding:13px 16px;background:var(--hippo-panel)}
+  .statstrip>div+div{border-left:1px solid var(--hippo-hairline)}
+  .statstrip .k{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-faint)}
+  .statstrip .v{font-family:var(--hippo-font-mono);font-size:12.5px;font-weight:600;color:var(--hippo-amber);margin-top:3px}
+
+  pre.snippet{background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-cell);padding:16px;font-family:var(--hippo-font-mono);font-size:11.5px;line-height:1.7;color:var(--hippo-text-mid);overflow-x:auto;margin-top:14px}
+  pre.snippet .hl{color:var(--hippo-amber)}
+  pre.snippet .c{color:var(--hippo-text-faint)}
+  .plat h3{font-family:var(--hippo-font-display);font-size:17px;font-weight:600;margin:34px 0 4px;display:flex;align-items:center;gap:9px}
+  .plat h3 .pk{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-amber);border:1px solid rgba(var(--hippo-amber-rgb),.4);border-radius:4px;padding:2px 7px}
+  .plat p{font-size:13.5px;color:var(--hippo-text-mid);max-width:52em}
+
+  table.ref{width:100%;border-collapse:collapse;margin-top:18px;font-size:13px}
+  table.ref th{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-faint);text-align:left;padding:9px 12px;border-bottom:1px solid var(--hippo-hairline)}
+  table.ref td{padding:10px 12px;border-bottom:1px dashed var(--hippo-dash);color:var(--hippo-text-mid);vertical-align:top}
+  table.ref td:first-child{font-family:var(--hippo-font-mono);font-size:11.5px;color:var(--hippo-text-hi);white-space:nowrap}
+  .req{color:var(--hippo-amber);font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.08em}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav">
+    <a class="lockup display" href="/"><span class="chip"><img src="./assets/hippo-mascot.png" alt="Hippo" /></span>Ask Hippo</a>
+    <nav>
+      <a href="/#loop">Product</a>
+      <a href="/#exchanges">For Exchanges</a>
+      <a href="/#trust">Trust</a>
+      <a href="/design">Design</a>
+      <a class="on" href="/sdk">SDK</a>
+    </nav>
+    <button class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
+    <a class="btn amber" href="/#cta">Talk to us</a>
+  </div>
+</header>
+
+<!-- ═══ Hero ═══ -->
+<div class="wrap hero">
+  <div class="eyebrow">HIPPO SDK · INTEGRATION</div>
+  <h1>One tag. Every platform<span class="dot">.</span></h1>
+  <p class="lede">The Hippo SDK is a two-stage thin client: a zero-dependency loader that mounts the Ask Hippo pill in a closed Shadow DOM, and a lazily-loaded panel that only ever draws what the server sends. Because the whole product is server-driven cards over HTTPS + SSE, "integrating Hippo" means the same thing everywhere — deliver one script tag, and on native, wrap it in a WebView shell we ship for you.</p>
+  <div class="statstrip">
+    <div><div class="k">LOADER</div><div class="v">1.2KB GZ</div></div>
+    <div><div class="k">PANEL, LAZY</div><div class="v">~45KB GZ</div></div>
+    <div><div class="k">HOST DEPENDENCIES</div><div class="v">ZERO</div></div>
+    <div><div class="k">UPGRADES</div><div class="v">SERVER-SIDE</div></div>
+  </div>
+</div>
+
+<!-- ═══ Quick start ═══ -->
+<section class="block" id="quickstart" style="padding-top:54px">
+  <div class="wrap">
+    <div class="eyebrow dim">QUICK START — THE ENTIRE WEB INTEGRATION</div>
+    <h2>The tag.</h2>
+<pre class="snippet">&lt;script src="https://cdn.hippo.app/loader.js" async
+        <span class="hl">data-hippo-key="pk_yourvenue"</span>&gt;&lt;/script&gt;</pre>
+    <table class="ref">
+      <thead><tr><th>ATTRIBUTE</th><th>DEFAULT</th><th>WHAT IT DOES</th></tr></thead>
+      <tbody>
+        <tr><td>data-hippo-key <span class="req">REQUIRED</span></td><td>—</td><td>Your partner embed key. Without it the loader exits silently.</td></tr>
+        <tr><td>data-hippo-gateway</td><td>https://gw.hippo.app</td><td>Gateway origin — regional pods, or a sandbox during integration.</td></tr>
+        <tr><td>data-hippo-locale</td><td>en</td><td><span class="mono">en · hi · hi-Latn</span> (Hinglish) <span class="mono">· ar</span>. RTL locales flip the panel chrome automatically.</td></tr>
+        <tr><td>data-hippo-theme</td><td>dark (locked hero)</td><td><span class="mono">light</span> — a pure token swap. Flip live any time: <span class="mono">hippoRoot.dataset.theme='light'</span>.</td></tr>
+        <tr><td>data-hippo-open</td><td>—</td><td><span class="mono">auto</span> — open the panel on mount (what WebView shells use). On demand: dispatch <span class="mono">hippo:open</span> on <span class="mono">&lt;hippo-root&gt;</span>.</td></tr>
+        <tr><td>data-hippo-panel</td><td>panel.js beside loader</td><td>Panel chunk override — pin versions or point at a canary.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ Guarantees ═══ -->
+<section class="block" id="guarantees" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">THE HOST-SAFETY CONTRACT</div>
+    <h2>A parasite that never harms the host.</h2>
+    <div class="grid3">
+      <div class="fcard"><h3>Closed Shadow DOM</h3><p>Your CSS can't leak in; ours can't leak out. The SDK creates one <span class="mono" style="font-size:11px">&lt;hippo-root&gt;</span> element with its own fixed stacking context — your layout never shifts.</p></div>
+      <div class="fcard"><h3>Fails invisible</h3><p>No globals, no console noise. A loader failure disappears silently rather than erroring the host page. Mounting waits for your <span class="mono" style="font-size:11px">load</span> event.</p></div>
+      <div class="fcard"><h3>Size-gated in CI</h3><p>The loader ships under a hard 5KB-gzip gate enforced on every PR (currently ~1.2KB). The 45KB panel loads only on first interaction.</p></div>
+      <div class="fcard"><h3>Draws, never computes</h3><p>Money arrives as pre-formatted display strings. Unknown card types render a fallback card — an old SDK never crashes on a new server.</p></div>
+      <div class="fcard"><h3>Additive protocol</h3><p>Card protocol v1 only ever adds fields. Every improvement ships server-side the moment we ship it — zero upgrade work in your app, ever.</p></div>
+      <div class="fcard"><h3>Reconnect-proof</h3><p>SSE with a sequence-numbered frame journal: after a disconnect the SDK resumes from Last-Event-ID and replays what it missed — order fills survive tunnels.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Platforms ═══ -->
+<section class="block plat" id="platforms" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">PLATFORM GUIDES</div>
+    <h2>Where it runs.</h2>
+    <p class="lede">One integration model, four delivery mechanisms: a script tag on the web, a WebView shell on native. The panel's posture matrix adapts by viewport — dock / overlay / max on wide screens, sheet / full under 640px — so the same bundle is the desktop widget and the mobile surface.</p>
+
+    <h3>Web — any site, any stack <span class="pk">SCRIPT TAG</span></h3>
+    <p>Plain HTML, WordPress, Shopify, Webflow, a Google Tag Manager custom tag — anywhere you can paste one script tag, Hippo runs. Server-rendered frameworks (Rails, Django, Laravel, PHP) drop it in the base template.</p>
+
+    <h3>React / Next.js <span class="pk">NPM-STYLE</span></h3>
+<pre class="snippet"><span class="c">// AskHippo.tsx — works in Next.js App Router ('use client') and any React app</span>
+import { useEffect } from 'react'
+
+export function AskHippo() {
+  useEffect(() =&gt; {
+    const s = document.createElement('script')
+    s.src = 'https://cdn.hippo.app/loader.js'
+    s.async = true
+    s.dataset.hippoKey = <span class="hl">'pk_yourvenue'</span>
+    document.body.appendChild(s)
+    return () =&gt; { s.remove(); document.querySelector('hippo-root')?.remove() }
+  }, [])
+  return null
+}
+
+<span class="c">// open Hippo from your own button, without touching our internals:</span>
+document.querySelector('hippo-root')?.dispatchEvent(new Event(<span class="hl">'hippo:open'</span>))</pre>
+
+    <h3>Vue / Angular / Svelte <span class="pk">SAME PATTERN</span></h3>
+<pre class="snippet"><span class="c">// Vue: onMounted — Angular: ngAfterViewInit — Svelte: onMount. Same 5 lines.</span>
+onMounted(() =&gt; {
+  const s = document.createElement('script')
+  s.src = 'https://cdn.hippo.app/loader.js'
+  s.async = true
+  s.dataset.hippoKey = <span class="hl">'pk_yourvenue'</span>
+  document.body.appendChild(s)
+})</pre>
+
+    <h3>iOS <span class="pk">WKWEBVIEW + SHELL</span></h3>
+    <p>Load the shipped shell — <span class="mono" style="font-size:12px">cdn.hippo.app/embed/mobile.html</span> — in a WKWebView. It auto-opens the panel (no floating pill inside an app), respects safe areas, and bridges events through a script-message handler named <span class="mono" style="font-size:12px">hippo</span>.</p>
+<pre class="snippet">let config = WKWebViewConfiguration()
+config.userContentController.add(self, name: <span class="hl">"hippo"</span>)
+let webView = WKWebView(frame: .zero, configuration: config)
+webView.load(URLRequest(url: URL(string:
+  "https://cdn.hippo.app/embed/mobile.html?<span class="hl">key=pk_yourvenue</span>&amp;theme=dark&amp;locale=hi")!))
+
+<span class="c">// events arrive in userContentController(_:didReceive:)</span>
+<span class="c">//   {type:"ready"} · {type:"open"} · seam confirm events as they land</span>
+<span class="c">// drive it from native:  webView.evaluateJavaScript("HippoShell.setTheme('light')")</span></pre>
+
+    <h3>Android <span class="pk">WEBVIEW + SHELL</span></h3>
+<pre class="snippet">webView.settings.javaScriptEnabled = true
+webView.settings.domStorageEnabled = true
+webView.addJavascriptInterface(object {
+  @JavascriptInterface fun postMessage(json: String) { onHippoEvent(JSONObject(json)) }
+}, <span class="hl">"HippoAndroid"</span>)
+webView.loadUrl("https://cdn.hippo.app/embed/mobile.html?<span class="hl">key=pk_yourvenue</span>")</pre>
+
+    <h3>React Native <span class="pk">REACT-NATIVE-WEBVIEW</span></h3>
+<pre class="snippet">import { WebView } from 'react-native-webview'
+
+&lt;WebView
+  source={{ uri: 'https://cdn.hippo.app/embed/mobile.html?<span class="hl">key=pk_yourvenue</span>' }}
+  onMessage={(e) =&gt; onHippoEvent(JSON.parse(e.nativeEvent.data))}
+/&gt;</pre>
+
+    <h3>Flutter <span class="pk">WEBVIEW_FLUTTER</span></h3>
+<pre class="snippet">final controller = WebViewController()
+  ..setJavaScriptMode(JavaScriptMode.unrestricted)
+  ..addJavaScriptChannel(<span class="hl">'HippoFlutter'</span>, onMessageReceived: (msg) {
+    onHippoEvent(jsonDecode(msg.message));
+  })
+  ..loadRequest(Uri.parse('https://cdn.hippo.app/embed/mobile.html?<span class="hl">key=pk_yourvenue</span>'));</pre>
+
+    <h3>Desktop — Electron / Tauri <span class="pk">IT'S THE WEB</span></h3>
+    <p>Electron and Tauri render Chromium/WebKit — the plain script tag works unchanged. Kiosk/terminal deployments use the shell URL with <span class="mono" style="font-size:12px">?open=pill</span> to keep the floating pill.</p>
+  </div>
+</section>
+
+<!-- ═══ Bridge contract ═══ -->
+<section class="block" id="bridge" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">THE NATIVE BRIDGE — SHIPPED WITH THE SDK</div>
+    <h2>One shell, four channels.</h2>
+    <p class="lede">The shell speaks whichever message channel the container provides — no per-platform builds, no SDK forks. It ships beside the bundles at <span class="mono" style="font-size:13px">/embed/mobile.html</span>.</p>
+    <table class="ref">
+      <thead><tr><th>DIRECTION</th><th>MECHANISM</th><th>EVENTS</th></tr></thead>
+      <tbody>
+        <tr><td>JS → native</td><td><span class="mono">HippoShell.post()</span> → WKWebView message handler · Android <span class="mono">@JavascriptInterface</span> · RN WebView · Flutter channel</td><td><span class="mono">{type:"ready"}</span> · <span class="mono">{type:"open"}</span> · execution-seam confirm events relay through unchanged as they land</td></tr>
+        <tr><td>Native → JS</td><td>evaluate JavaScript in the WebView</td><td><span class="mono">HippoShell.setTheme('light')</span> — live token swap · <span class="mono">HippoShell.open()</span></td></tr>
+        <tr><td>Config</td><td>query string on the shell URL</td><td><span class="mono">key · gateway · theme · locale · open=pill · loader</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ Wire & CSP ═══ -->
+<section class="block" id="wire" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">NETWORK SURFACE</div>
+    <h2>Three endpoints and a CSP line.</h2>
+    <p class="lede">The SDK talks to exactly one origin — your assigned gateway — over HTTPS and SSE. Sessions are minted by your backend with a partner-signed JWT asserting the venue user; anonymous sessions exist for sandboxes.</p>
+    <table class="ref">
+      <thead><tr><th>CALL</th><th>PURPOSE</th></tr></thead>
+      <tbody>
+        <tr><td>POST /v1/session</td><td>Partner-auth handshake → session id + venue config (name, locales, suggested queries)</td></tr>
+        <tr><td>GET /v1/stream</td><td>SSE down-channel — seq-numbered card frames, resumable via Last-Event-ID</td></tr>
+        <tr><td>POST /v1/turns</td><td>Uplinks: user text, chip taps, ticket actions, feedback, consent, settings</td></tr>
+      </tbody>
+    </table>
+<pre class="snippet"><span class="c">/* if your site ships a Content-Security-Policy, allow: */</span>
+script-src  … <span class="hl">https://cdn.hippo.app</span>;
+connect-src … <span class="hl">https://gw.hippo.app</span>;   <span class="c">/* your regional gateway origin */</span></pre>
+  </div>
+</section>
+
+<!-- ═══ Roadmap ═══ -->
+<section class="block" id="roadmap" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">WHY WEBVIEW-FIRST</div>
+    <h2>The protocol makes native a rendering port.</h2>
+    <div class="grid3">
+      <div class="fcard"><div class="n">NOW</div><h3>WebView through pilot</h3><p>One codebase, every platform, capability parity by construction — and every server-side improvement reaches iOS and Android the day it ships.</p></div>
+      <div class="fcard"><div class="n">NEXT</div><h3>Native renderers</h3><p>Cards are typed JSON frames, not HTML. A SwiftUI or Compose renderer for the same card vocabulary is a rendering port, not a rewrite — the intelligence never moves client-side.</p></div>
+      <div class="fcard"><div class="n">ALWAYS</div><h3>Thin edge, heavy core</h3><p>Whatever the surface, the client only draws. That's the stop-line rule that keeps integrations weeks-not-quarters on every platform we add.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="row">
+      <a class="lockup display" href="/"><span class="chip"><img src="./assets/hippo-mascot.png" alt="" /></span>Ask Hippo</a>
+      <nav>
+        <a href="/#loop">Product</a>
+        <a href="/#exchanges">For Exchanges</a>
+        <a href="/#trust">Trust</a>
+        <a href="/design">Design</a>
+        <a class="on" href="/sdk">SDK</a>
+      </nav>
+    </div>
+    <div class="fine">ONE TAG · CLOSED SHADOW DOM · SIZE-GATED · THE SDK DRAWS, THE SERVER DECIDES</div>
+  </div>
+</footer>
+
+<script type="module" src="./theme.js"></script>
+</body>
+</html>
