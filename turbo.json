@@ -1,5 +1,26 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "REDIS_URL",
+    "INTERNAL_API_TOKEN",
+    "ADMIN_JWT_SECRET",
+    "ADMIN_BOOTSTRAP_EMAIL",
+    "ADMIN_BOOTSTRAP_PASSWORD",
+    "GATEWAY_URL",
+    "MEMORY_URL",
+    "MARKET_DATA_URL",
+    "INTELLIGENCE_URL",
+    "ADMIN_API_URL",
+    "HIPPO_DEV",
+    "HIPPO_OTEL",
+    "FIXTURES",
+    "VENUE",
+    "KOINBX_DEV_JWT_SECRET",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "LLM_API_KEY"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
