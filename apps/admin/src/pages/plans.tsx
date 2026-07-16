@@ -1,6 +1,7 @@
 import type { PlanRecord } from '@hippo/stores'
-import { useEffect, useState } from 'preact/hooks'
+import { useState } from 'preact/hooks'
 import { ApiError, del, get, patch, post } from '../api.js'
+import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
 
 type PlanDraft = {
   planId: string
@@ -26,13 +27,8 @@ export function PlansPage() {
   const [editing, setEditing] = useState<string | null>(null)
   const [error, setError] = useState('')
 
-  const load = () =>
-    get<PlanRecord[]>('/v1/plans')
-      .then(setPlans)
-      .catch(() => {})
-  useEffect(() => {
-    void load()
-  }, [])
+  const load = () => get<PlanRecord[]>('/v1/plans').then(setPlans)
+  const state = useLoad(load)
 
   const field = (k: keyof PlanDraft) => (e: Event) =>
     setDraft((d) => (d ? { ...d, [k]: (e.target as HTMLInputElement).value } : d))
@@ -67,12 +63,19 @@ export function PlansPage() {
   }
 
   async function remove(planId: string) {
-    if (!confirm(`Delete plan "${planId}"? Partners must be unassigned first.`)) return
+    const ok = await confirmAction({
+      title: `Delete plan ${planId}`,
+      body: 'Partners must be unassigned first — delete is refused while any partner is on this plan.',
+      confirmLabel: 'Delete plan',
+      typedPhrase: planId,
+    })
+    if (!ok) return
     try {
       await del(`/v1/plans/${planId}`)
+      toast(`Plan ${planId} deleted`)
       await load()
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : 'delete failed')
+      toast(err instanceof ApiError ? err.message : 'delete failed', 'err')
     }
   }
 
@@ -92,71 +95,75 @@ export function PlansPage() {
         </button>
       </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Plan</th>
-            <th>Tier</th>
-            <th>MAU quota</th>
-            <th>Price / mo</th>
-            <th>Entitlements</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {plans.length === 0 && (
+      {state.error && <ErrorBanner message={state.error} retry={state.retry} />}
+      {state.loading && <Busy rows={3} />}
+      {!state.loading && !state.error && (
+        <table>
+          <thead>
             <tr>
-              <td colSpan={6} class="empty">
-                No plans yet — create the first tier.
-              </td>
+              <th>Plan</th>
+              <th>Tier</th>
+              <th>MAU quota</th>
+              <th>Price / mo</th>
+              <th>Entitlements</th>
+              <th />
             </tr>
-          )}
-          {plans.map((p) => (
-            <tr key={p.planId}>
-              <td>
-                <strong>{p.name}</strong> <span class="mono dim">{p.planId}</span>
-              </td>
-              <td>
-                <span class="badge plan">{p.tier}</span>
-              </td>
-              <td class="mono">{p.mauQuota ?? 'unlimited'}</td>
-              <td class="mono">{p.priceMonthlyUsd == null ? '—' : `$${p.priceMonthlyUsd}`}</td>
-              <td>
-                <div class="chips">
-                  {Object.keys(p.entitlements).length === 0 && <span class="dim">none</span>}
-                  {Object.entries(p.entitlements).map(([k, v]) => (
-                    <span class="chip" key={k}>
-                      {k}: {String(v)}
-                    </span>
-                  ))}
-                </div>
-              </td>
-              <td style="text-align:right; white-space:nowrap">
-                <button
-                  class="btn ghost sm"
-                  type="button"
-                  onClick={() => {
-                    setEditing(p.planId)
-                    setDraft({
-                      planId: p.planId,
-                      name: p.name,
-                      tier: p.tier,
-                      mauQuota: p.mauQuota == null ? '' : String(p.mauQuota),
-                      priceMonthlyUsd: p.priceMonthlyUsd == null ? '' : String(p.priceMonthlyUsd),
-                      entitlements: JSON.stringify(p.entitlements),
-                    })
-                  }}
-                >
-                  Edit
-                </button>{' '}
-                <button class="btn danger sm" type="button" onClick={() => remove(p.planId)}>
-                  Delete
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {plans.length === 0 && (
+              <tr>
+                <td colSpan={6} class="empty">
+                  No plans yet — create the first tier.
+                </td>
+              </tr>
+            )}
+            {plans.map((p) => (
+              <tr key={p.planId}>
+                <td>
+                  <strong>{p.name}</strong> <span class="mono dim">{p.planId}</span>
+                </td>
+                <td>
+                  <span class="badge plan">{p.tier}</span>
+                </td>
+                <td class="mono">{p.mauQuota ?? 'unlimited'}</td>
+                <td class="mono">{p.priceMonthlyUsd == null ? '—' : `$${p.priceMonthlyUsd}`}</td>
+                <td>
+                  <div class="chips">
+                    {Object.keys(p.entitlements).length === 0 && <span class="dim">none</span>}
+                    {Object.entries(p.entitlements).map(([k, v]) => (
+                      <span class="chip" key={k}>
+                        {k}: {String(v)}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td style="text-align:right; white-space:nowrap">
+                  <button
+                    class="btn ghost sm"
+                    type="button"
+                    onClick={() => {
+                      setEditing(p.planId)
+                      setDraft({
+                        planId: p.planId,
+                        name: p.name,
+                        tier: p.tier,
+                        mauQuota: p.mauQuota == null ? '' : String(p.mauQuota),
+                        priceMonthlyUsd: p.priceMonthlyUsd == null ? '' : String(p.priceMonthlyUsd),
+                        entitlements: JSON.stringify(p.entitlements),
+                      })
+                    }}
+                  >
+                    Edit
+                  </button>{' '}
+                  <button class="btn danger sm" type="button" onClick={() => remove(p.planId)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       {draft && (
         <>

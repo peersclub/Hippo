@@ -208,3 +208,42 @@ describe('admin surface', () => {
     await app.close()
   })
 })
+
+describe('bulk purge (partner offboarding)', () => {
+  it('deleteByPartner removes only that partner and reports the count', async () => {
+    const store = new InMemoryPersonaStore()
+    await store.update('pA', 'u1', { optIn: true })
+    await store.update('pA', 'u2', { optIn: false })
+    await store.update('pB', 'u3', { optIn: true })
+    expect(await store.deleteByPartner('pA')).toBe(2)
+    expect(await store.size()).toBe(1)
+    expect((await store.list({ partnerId: 'pB' })).total).toBe(1)
+    expect(await store.deleteByPartner('pA')).toBe(0)
+  })
+
+  it('DELETE /admin/personas requires partnerId and the token', async () => {
+    const store = new InMemoryPersonaStore()
+    await store.update('pA', 'u1', { optIn: true })
+    const app = buildService({ store, internalToken: 'tok' })
+
+    expect(
+      (await app.inject({ method: 'DELETE', url: '/admin/personas?partnerId=pA' })).statusCode,
+    ).toBe(401) // no token
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: '/admin/personas',
+          headers: { 'x-hippo-internal-token': 'tok' },
+        })
+      ).statusCode,
+    ).toBe(400) // no partnerId
+    const ok = await app.inject({
+      method: 'DELETE',
+      url: '/admin/personas?partnerId=pA',
+      headers: { 'x-hippo-internal-token': 'tok' },
+    })
+    expect(ok.json()).toEqual({ deleted: 1 })
+    await app.close()
+  })
+})

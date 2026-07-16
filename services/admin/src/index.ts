@@ -13,6 +13,7 @@ import {
   InMemoryPlanStore,
   InMemoryUserStore,
   PostgresAuditStore,
+  PostgresMauStore,
   PostgresOperatorStore,
   PostgresPartnerStore,
   PostgresPlanStore,
@@ -55,7 +56,16 @@ if ((await operators.count()) === 0) {
   }
 }
 
-const app = buildAdminService({ partners, plans, users, operators, audit, jwtSecret })
+const app = buildAdminService({
+  partners,
+  plans,
+  users,
+  operators,
+  audit,
+  jwtSecret,
+  // Durable MAU counts (quota alerts survive gateway restarts).
+  ...(pool ? { mauStore: new PostgresMauStore(pool) } : {}),
+})
 app
   .listen({ port: PORT, host: '0.0.0.0' })
   .then(() =>

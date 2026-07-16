@@ -1,7 +1,8 @@
 import type { PartnerRecord, UserRecord } from '@hippo/stores'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { ApiError, del, get, post, put } from '../api.js'
 import { navigate } from '../router.js'
+import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
 
 type Persona = {
   optIn: boolean
@@ -16,13 +17,15 @@ type PersonaRow = { partnerId: string; userId: string; persona: Persona }
 const fmt = (ts: number) => (ts ? new Date(ts).toLocaleString() : '—')
 
 /**
- * One page, two modes sharing the partner filter + pager:
+ * One page, two modes sharing the partner filter + search + pager:
  *  - "users":  the gateway-registered user rows (authenticated venueUserIds)
  *  - "memory": every persona the memory service holds (incl. anonymous keys)
  */
 export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
   const [partners, setPartners] = useState<Omit<PartnerRecord, 'jwtSecret'>[]>([])
   const [partnerId, setPartnerId] = useState('')
+  const [q, setQ] = useState('')
+  const [debouncedQ, setDebouncedQ] = useState('')
   const [offset, setOffset] = useState(0)
   const [users, setUsers] = useState<{ rows: UserRecord[]; total: number }>({ rows: [], total: 0 })
   const [personas, setPersonas] = useState<{ rows: PersonaRow[]; total: number }>({
@@ -30,6 +33,7 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
     total: 0,
   })
   const limit = 50
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
     void get<Omit<PartnerRecord, 'jwtSecret'>[]>('/v1/partners')
@@ -37,21 +41,26 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
       .catch(() => {})
   }, [])
 
+  // Debounced search: 300ms after the last keystroke.
   useEffect(() => {
+    clearTimeout(debounceTimer.current)
+    debounceTimer.current = setTimeout(() => {
+      setOffset(0)
+      setDebouncedQ(q)
+    }, 300)
+    return () => clearTimeout(debounceTimer.current)
+  }, [q])
+
+  const state = useLoad(async () => {
     const qs = new URLSearchParams({
       ...(partnerId ? { partnerId } : {}),
+      ...(mode === 'users' && debouncedQ ? { q: debouncedQ } : {}),
       offset: String(offset),
       limit: String(limit),
     }).toString()
-    if (mode === 'users')
-      void get<typeof users>(`/v1/users?${qs}`)
-        .then(setUsers)
-        .catch(() => {})
-    else
-      void get<typeof personas>(`/v1/memory?${qs}`)
-        .then(setPersonas)
-        .catch(() => {})
-  }, [mode, partnerId, offset])
+    if (mode === 'users') setUsers(await get<typeof users>(`/v1/users?${qs}`))
+    else setPersonas(await get<typeof personas>(`/v1/memory?${qs}`))
+  }, [mode, partnerId, debouncedQ, offset])
 
   const total = mode === 'users' ? users.total : personas.total
 
@@ -79,9 +88,21 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
             </option>
           ))}
         </select>
+        {mode === 'users' && (
+          <input
+            class="search-box"
+            type="search"
+            placeholder="Search user id…"
+            value={q}
+            onInput={(e) => setQ((e.target as HTMLInputElement).value)}
+          />
+        )}
       </div>
 
-      {mode === 'users' ? (
+      {state.error && <ErrorBanner message={state.error} retry={state.retry} />}
+      {state.loading && <Busy rows={4} />}
+
+      {!state.loading && !state.error && mode === 'users' && (
         <table>
           <thead>
             <tr>
@@ -96,7 +117,9 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
             {users.rows.length === 0 && (
               <tr>
                 <td colSpan={5} class="empty">
-                  No registered users yet — rows appear when partners mint JWT-bound sessions.
+                  {debouncedQ
+                    ? `No users match “${debouncedQ}”.`
+                    : 'No registered users yet — rows appear when partners mint JWT-bound sessions.'}
                 </td>
               </tr>
             )}
@@ -121,7 +144,9 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
             ))}
           </tbody>
         </table>
-      ) : (
+      )}
+
+      {!state.loading && !state.error && mode === 'memory' && (
         <table>
           <thead>
             <tr>
@@ -185,7 +210,7 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
           ← Prev
         </button>
         <span>
-          {offset + 1}–{Math.min(offset + limit, total)} of {total}
+          {total === 0 ? 0 : offset + 1}–{Math.min(offset + limit, total)} of {total}
         </span>
         <button
           class="btn ghost sm"
@@ -204,9 +229,8 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
   const [user, setUser] = useState<(UserRecord & { persona: Persona | null }) | null>(null)
   const [persona, setPersona] = useState<Persona | null>(null)
   const [notFoundUser, setNotFoundUser] = useState(false)
-  const [error, setError] = useState('')
 
-  async function load() {
+  const state = useLoad(async () => {
     // The user row exists only for authenticated users; memory may exist for
     // anonymous session keys too — fetch both, render what's there.
     try {
@@ -226,38 +250,58 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
     )
     const row = page.rows.find((r) => r.userId === userId)
     setPersona(row?.persona ?? null)
-  }
-
-  useEffect(() => {
-    void load().catch((e) => setError(String(e.message ?? e)))
   }, [partnerId, userId])
 
   async function setLevel(level: string) {
     await put(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`, {
       experienceLevel: level === '' ? null : level,
     })
-    await load()
+    toast('Experience level updated')
+    state.retry()
   }
 
   async function clearMemory() {
-    if (!confirm('Clear this user’s memory? Data is wiped; their opt-in choice survives.')) return
+    const ok = await confirmAction({
+      title: 'Clear memory',
+      body: 'Persona data is wiped; the user’s opt-in choice survives (clearing is not opting out).',
+      confirmLabel: 'Clear memory',
+    })
+    if (!ok) return
     await post(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/clear`)
-    await load()
+    toast('Memory cleared')
+    state.retry()
   }
 
   async function purgeMemory() {
-    if (!confirm('PURGE this user’s memory record entirely? This is a hard delete.')) return
+    const ok = await confirmAction({
+      title: 'Purge memory record',
+      body: 'Hard delete — nothing survives, not even the opt-in flag.',
+      confirmLabel: 'Purge',
+      typedPhrase: userId,
+    })
+    if (!ok) return
     await del(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`)
-    await load()
+    toast('Memory record purged')
+    state.retry()
   }
 
   async function setBlocked(action: 'block' | 'unblock') {
-    if (action === 'block' && !confirm(`Block ${userId}? Their sessions will be rejected.`)) return
+    if (action === 'block') {
+      const ok = await confirmAction({
+        title: `Block ${userId}`,
+        body: 'Their next session mint is rejected with 401 until unblocked.',
+        confirmLabel: 'Block user',
+        typedPhrase: userId,
+      })
+      if (!ok) return
+    }
     await post(`/v1/users/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/${action}`)
-    await load()
+    toast(action === 'block' ? 'User blocked' : 'User unblocked')
+    state.retry()
   }
 
-  if (error) return <div class="error">{error}</div>
+  if (state.error) return <ErrorBanner message={state.error} retry={state.retry} />
+  if (state.loading) return <Busy rows={4} />
 
   return (
     <>

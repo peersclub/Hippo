@@ -1,7 +1,8 @@
 import type { PartnerRecord, PlanRecord, UserRecord } from '@hippo/stores'
-import { useEffect, useState } from 'preact/hooks'
+import { useState } from 'preact/hooks'
 import { del, get, post } from '../api.js'
 import { navigate } from '../router.js'
+import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
 
 type SessionRow = {
   id: string
@@ -23,35 +24,55 @@ const fmt = (ts: number) => new Date(ts).toLocaleString()
 
 export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
   const [detail, setDetail] = useState<Detail | null>(null)
-  const [error, setError] = useState('')
 
-  const load = () =>
-    get<Detail>(`/v1/partners/${encodeURIComponent(partnerId)}/detail`)
-      .then(setDetail)
-      .catch((e) => setError(String(e.message ?? e)))
-  useEffect(() => {
-    void load()
+  const state = useLoad(async () => {
+    setDetail(await get<Detail>(`/v1/partners/${encodeURIComponent(partnerId)}/detail`))
   }, [partnerId])
 
   async function killSession(id: string) {
-    if (!confirm(`Revoke session ${id}? The client is cut off immediately and must re-mint.`))
-      return
+    const ok = await confirmAction({
+      title: 'Revoke session',
+      body: `${id} is cut off immediately — the SSE socket closes and the client must mint a fresh session.`,
+      confirmLabel: 'Revoke',
+    })
+    if (!ok) return
     await del(`/v1/sessions/${encodeURIComponent(id)}`)
-    await load()
+    toast('Session revoked')
+    state.retry()
   }
 
   async function setStatus(action: 'suspend' | 'activate') {
-    if (
-      action === 'suspend' &&
-      !confirm(`Suspend ${partnerId}? All new sessions will be rejected with 401.`)
-    )
-      return
+    if (action === 'suspend') {
+      const ok = await confirmAction({
+        title: `Suspend ${partnerId}`,
+        body: 'ALL new sessions for this partner are rejected with 401 until reactivated. Existing sessions expire naturally.',
+        confirmLabel: 'Suspend partner',
+        typedPhrase: partnerId,
+      })
+      if (!ok) return
+    }
     await post(`/v1/partners/${encodeURIComponent(partnerId)}/${action}`)
-    await load()
+    toast(action === 'suspend' ? 'Partner suspended' : 'Partner activated')
+    state.retry()
   }
 
-  if (error) return <div class="error">{error}</div>
-  if (!detail) return <div class="empty">Loading…</div>
+  async function purgeAllMemory() {
+    const ok = await confirmAction({
+      title: 'Purge ALL memory for this partner',
+      body: 'Hard-deletes every persona this partner holds — the offboarding/compliance primitive. This cannot be undone.',
+      confirmLabel: 'Purge all',
+      typedPhrase: partnerId,
+    })
+    if (!ok) return
+    const res = await del<{ deleted: number }>(
+      `/v1/memory?partnerId=${encodeURIComponent(partnerId)}`,
+    )
+    toast(`Purged ${res.deleted} persona record${res.deleted === 1 ? '' : 's'}`)
+    state.retry()
+  }
+
+  if (state.error) return <ErrorBanner message={state.error} retry={state.retry} />
+  if (state.loading || !detail) return <Busy rows={4} />
 
   const { partner, plan, users, mau, sessions } = detail
   const pct = mau.quota ? Math.min(100, Math.round((mau.current / mau.quota) * 100)) : null
@@ -202,6 +223,11 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
           </div>
         </>
       )}
+
+      <h2>Danger zone</h2>
+      <button class="btn danger sm" type="button" onClick={purgeAllMemory}>
+        Purge ALL memory for this partner
+      </button>
     </>
   )
 }

@@ -29,3 +29,24 @@ export function shareSlug(frameId: string): string {
 export function shareLink(frameId: string): string {
   return `${SHARE_LINK_BASE}${shareSlug(frameId)}`
 }
+
+/** The advice line travels with every copied brief — same non-negotiable
+ * rule as the share card (baseline §6): distribution never crosses it. */
+export const COPY_DISCLAIMER = 'MARKET INFORMATION · NOT INVESTMENT ADVICE'
+
+/** Plain-text rendering of a brief for the clipboard. Structural typing so
+ * this module keeps zero runtime imports. */
+export function briefClipboardText(frame: {
+  headline: string
+  paragraphs: string[]
+  stats: Array<{ k: string; v: string }>
+  liveBar?: { asOf: string }
+}): string {
+  const lines = [frame.headline, '', ...frame.paragraphs]
+  if (frame.stats.length > 0) {
+    lines.push('', frame.stats.map((s) => `${s.k} ${s.v}`).join(' · '))
+  }
+  if (frame.liveBar?.asOf) lines.push('', frame.liveBar.asOf)
+  lines.push('', COPY_DISCLAIMER)
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n')
+}

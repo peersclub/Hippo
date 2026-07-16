@@ -8,6 +8,13 @@ export {
 } from './admin-store.js'
 export { closePool, getPool } from './db.js'
 export * from './jwt.js'
+export {
+  InMemoryMauStore,
+  type MauEntry,
+  type MauStore,
+  monthKey,
+  PostgresMauStore,
+} from './mau-store.js'
 export { migrate } from './migrate.js'
 export {
   devPartner,

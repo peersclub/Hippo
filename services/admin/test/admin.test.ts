@@ -546,3 +546,50 @@ describe('live sessions proxy + partner detail + quota alerts', () => {
     await app.close()
   })
 })
+
+describe('login protection', () => {
+  it('locks out after 5 failures (429 + Retry-After) and audits the trail', async () => {
+    const { app, audit } = await testAdmin()
+    for (let i = 0; i < 5; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'ops@hippo.dev', password: 'wrong-password!' },
+      })
+      expect(res.statusCode).toBe(401)
+    }
+    // 6th attempt — even with the CORRECT password — is throttled.
+    const locked = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'ops@hippo.dev', password: 'correct horse battery' },
+    })
+    expect(locked.statusCode).toBe(429)
+    expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0)
+
+    const actions = (await audit.list({ limit: 20 })).rows.map((r) => r.action)
+    expect(actions.filter((a) => a === 'auth.login_failed')).toHaveLength(5)
+    expect(actions).toContain('auth.login_locked')
+    await app.close()
+  })
+
+  it('rejects mutating requests with a foreign Origin (403); same-host passes', async () => {
+    const { app } = await testAdmin()
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { origin: 'http://evil.example' },
+      payload: { email: 'ops@hippo.dev', password: 'correct horse battery' },
+    })
+    expect(bad.statusCode).toBe(403)
+
+    const good = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { origin: 'http://localhost:80' },
+      payload: { email: 'ops@hippo.dev', password: 'correct horse battery' },
+    })
+    expect(good.statusCode).toBe(200)
+    await app.close()
+  })
+})

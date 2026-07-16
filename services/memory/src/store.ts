@@ -106,6 +106,8 @@ export interface PersonaStore {
   list(opts?: PersonaListOpts): Promise<PersonaPage>
   /** Hard delete (admin purge) — unlike clear, nothing survives, not even opt-in. */
   delete(partnerId: string, userId: string): Promise<boolean>
+  /** Bulk hard delete for partner offboarding; returns rows removed. */
+  deleteByPartner(partnerId: string): Promise<number>
   size(): Promise<number>
 }
 
@@ -153,6 +155,17 @@ export class InMemoryPersonaStore implements PersonaStore {
 
   async delete(partnerId: string, userId: string): Promise<boolean> {
     return this.personas.delete(this.key(partnerId, userId))
+  }
+
+  async deleteByPartner(partnerId: string): Promise<number> {
+    let n = 0
+    for (const key of [...this.personas.keys()]) {
+      if (key.startsWith(`${partnerId}:`)) {
+        this.personas.delete(key)
+        n += 1
+      }
+    }
+    return n
   }
 
   async size(): Promise<number> {
@@ -233,6 +246,11 @@ export class PostgresPersonaStore implements PersonaStore {
       [partnerId, userId],
     )
     return (res.rowCount ?? 0) > 0
+  }
+
+  async deleteByPartner(partnerId: string): Promise<number> {
+    const res = await this.pool.query('DELETE FROM users_memory WHERE partner_id = $1', [partnerId])
+    return res.rowCount ?? 0
   }
 
   async size(): Promise<number> {

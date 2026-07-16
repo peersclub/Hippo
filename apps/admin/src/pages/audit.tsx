@@ -1,16 +1,15 @@
 import type { AuditEntry } from '@hippo/stores'
-import { useEffect, useState } from 'preact/hooks'
+import { useState } from 'preact/hooks'
 import { get } from '../api.js'
+import { Busy, ErrorBanner, useLoad } from '../ui.js'
 
 export function AuditPage() {
   const [page, setPage] = useState<{ rows: AuditEntry[]; total: number }>({ rows: [], total: 0 })
   const [offset, setOffset] = useState(0)
   const limit = 50
 
-  useEffect(() => {
-    void get<typeof page>(`/v1/audit?offset=${offset}&limit=${limit}`)
-      .then(setPage)
-      .catch(() => {})
+  const state = useLoad(async () => {
+    setPage(await get<typeof page>(`/v1/audit?offset=${offset}&limit=${limit}`))
   }, [offset])
 
   return (
@@ -19,37 +18,43 @@ export function AuditPage() {
         <h1>Audit</h1>
         <span class="dim">{page.total} operator actions</span>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>When</th>
-            <th>Operator</th>
-            <th>Action</th>
-            <th>Target</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {page.rows.length === 0 && (
+
+      {state.error && <ErrorBanner message={state.error} retry={state.retry} />}
+      {state.loading && <Busy rows={5} />}
+      {!state.loading && !state.error && (
+        <table>
+          <thead>
             <tr>
-              <td colSpan={5} class="empty">
-                No operator actions recorded yet.
-              </td>
+              <th>When</th>
+              <th>Operator</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Detail</th>
             </tr>
-          )}
-          {page.rows.map((e) => (
-            <tr key={e.id}>
-              <td class="dim">{new Date(e.ts).toLocaleString()}</td>
-              <td>{e.operatorEmail}</td>
-              <td class="mono">{e.action}</td>
-              <td class="mono">{e.target}</td>
-              <td class="mono dim">
-                {Object.keys(e.detail).length ? JSON.stringify(e.detail) : ''}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {page.rows.length === 0 && (
+              <tr>
+                <td colSpan={5} class="empty">
+                  No operator actions recorded yet.
+                </td>
+              </tr>
+            )}
+            {page.rows.map((e) => (
+              <tr key={e.id}>
+                <td class="dim">{new Date(e.ts).toLocaleString()}</td>
+                <td>{e.operatorEmail}</td>
+                <td class="mono">{e.action}</td>
+                <td class="mono">{e.target}</td>
+                <td class="mono dim">
+                  {Object.keys(e.detail).length ? JSON.stringify(e.detail) : ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
       <div class="pager">
         <button
           class="btn ghost sm"

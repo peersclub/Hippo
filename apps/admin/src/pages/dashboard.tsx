@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { get } from '../api.js'
+import { Busy, ErrorBanner, useLoad } from '../ui.js'
 
 type Metrics = {
   gateway: {
@@ -11,18 +12,26 @@ type Metrics = {
   counts: { partners: number; plans: number; users: number }
 }
 
+const REFRESH_MS = 30_000
+
 export function DashboardPage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [error, setError] = useState('')
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
 
+  const state = useLoad(async () => {
+    setMetrics(await get<Metrics>('/v1/metrics'))
+    setUpdatedAt(new Date())
+  })
+
+  // Ambient auto-refresh — the panel is a monitoring surface.
   useEffect(() => {
-    get<Metrics>('/v1/metrics')
-      .then(setMetrics)
-      .catch((e) => setError(String(e.message ?? e)))
-  }, [])
+    const t = setInterval(() => state.retry(), REFRESH_MS)
+    return () => clearInterval(t)
+  }, [state.retry])
 
-  if (error) return <div class="error">{error}</div>
-  if (!metrics) return <div class="empty">Loading…</div>
+  if (state.error) return <ErrorBanner message={state.error} retry={state.retry} />
+  if (state.loading && !metrics) return <Busy rows={3} />
+  if (!metrics) return null
 
   const gw = metrics.gateway
   const hitRate = gw?.cache?.hitRate
@@ -31,7 +40,10 @@ export function DashboardPage() {
     <>
       <div class="page-head">
         <h1>Dashboard</h1>
-        {gw?.mau?.month && <span class="dim">MAU month: {gw.mau.month}</span>}
+        <span class="dim">
+          {gw?.mau?.month && `MAU month: ${gw.mau.month} · `}
+          {updatedAt && `updated ${updatedAt.toLocaleTimeString()}`}
+        </span>
       </div>
 
       {metrics.alerts.length > 0 && (

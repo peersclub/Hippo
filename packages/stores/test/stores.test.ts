@@ -147,3 +147,41 @@ describe('jwt helpers (lifted from gateway auth)', () => {
     expect(verifyJwtHS256(expired, 'secret')).toBeNull()
   })
 })
+
+describe('InMemoryMauStore', () => {
+  it('records idempotently per (partner,user,month), counts and groups', async () => {
+    const { InMemoryMauStore } = await import('../src/mau-store.js')
+    const store = new InMemoryMauStore()
+    await store.record('p1', 'u1', '2026-07')
+    await store.record('p1', 'u1', '2026-07') // dup — idempotent
+    await store.record('p1', 'u2', '2026-07')
+    await store.record('p2', 'u1', '2026-07')
+    await store.record('p1', 'u1', '2026-08') // next month is distinct
+
+    expect(await store.count('p1', '2026-07')).toBe(2)
+    expect(await store.count('p1', '2026-08')).toBe(1)
+    expect(await store.byPartner('2026-07')).toEqual({ p1: 2, p2: 1 })
+
+    const entries = await store.entries('2026-07')
+    expect(entries).toHaveLength(3)
+    expect(entries).toContainEqual({ partnerId: 'p1', userKey: 'u2' })
+  })
+
+  it('monthKey buckets to YYYY-MM', async () => {
+    const { monthKey } = await import('../src/mau-store.js')
+    expect(monthKey(new Date('2026-07-16T10:00:00Z'))).toBe('2026-07')
+  })
+})
+
+describe('user search (q)', () => {
+  it('matches userId substrings case-insensitively', async () => {
+    const store = new InMemoryUserStore()
+    await store.upsertSeen('p1', 'rahul.verma')
+    await store.upsertSeen('p1', 'priya.patel')
+    await store.upsertSeen('p2', 'rahul.k')
+
+    expect((await store.list({ q: 'RAHUL' })).total).toBe(2)
+    expect((await store.list({ q: 'rahul', partnerId: 'p1' })).total).toBe(1)
+    expect((await store.list({ q: 'nobody' })).total).toBe(0)
+  })
+})

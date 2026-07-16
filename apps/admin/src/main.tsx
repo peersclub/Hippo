@@ -13,6 +13,7 @@ import { PartnersPage } from './pages/partners.js'
 import { PlansPage } from './pages/plans.js'
 import { UserDetailPage, UsersPage } from './pages/users.js'
 import { navigate, route } from './router.js'
+import { ConfirmHost, Toasts } from './ui.js'
 
 const NAV = [
   ['dashboard', 'Dashboard'],
@@ -102,6 +103,8 @@ function Shell() {
       <main class="main">
         <Page />
       </main>
+      <Toasts />
+      <ConfirmHost />
     </div>
   )
 }

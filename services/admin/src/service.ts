@@ -26,8 +26,16 @@ import {
   PlanBody,
   PlanPatch,
 } from '@hippo/protocol'
-import type { AuditStore, OperatorStore, PartnerStore, PlanStore, UserStore } from '@hippo/stores'
+import type {
+  AuditStore,
+  MauStore,
+  OperatorStore,
+  PartnerStore,
+  PlanStore,
+  UserStore,
+} from '@hippo/stores'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
+import { LoginThrottle, originAllowed } from './guard.js'
 import {
   clearedSessionCookie,
   hashPassword,
@@ -51,6 +59,9 @@ export type AdminServiceOptions = {
   internalToken?: string
   /** gateway base URL for /internal/metrics. */
   gatewayUrl?: string
+  /** Durable MAU counts (mau_events) — preferred over the gateway's
+   * in-process snapshot when provided; survives gateway restarts. */
+  mauStore?: MauStore
   /** fetch override for tests. */
   fetchImpl?: typeof fetch
 }
@@ -66,10 +77,23 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     memoryUrl = process.env.MEMORY_URL ?? 'http://localhost:8792',
     internalToken = process.env.INTERNAL_API_TOKEN ?? '',
     gatewayUrl = process.env.GATEWAY_URL ?? 'http://localhost:8788',
+    mauStore,
     fetchImpl = fetch,
   } = opts
 
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } })
+
+  // ── request hardening ────────────────────────────────────────────────────
+  // CSRF belt-and-braces on top of SameSite=Strict: mutating requests with an
+  // Origin header must match our own host.
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return
+    if (!originAllowed(req.headers.origin, req.headers.host)) {
+      reply.code(403).send({ error: 'origin not allowed' })
+    }
+  })
+
+  const throttle = new LoginThrottle()
 
   // ── operator guard ───────────────────────────────────────────────────────
   function operator(req: FastifyRequest, reply: FastifyReply): OperatorSession | null {
@@ -125,11 +149,39 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
   app.post('/auth/login', async (req, reply) => {
     const parsed = LoginBody.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'invalid login body' })
-    const op = await operators.get(parsed.data.email)
+    const email = parsed.data.email.toLowerCase()
+    const throttleKeys = [`email:${email}`, `ip:${req.ip}`]
+
+    // Locked out? 429 before any credential work (no timing oracle either).
+    const retryAfter = throttle.retryAfterS(throttleKeys)
+    if (retryAfter > 0) {
+      void audit
+        .append({
+          operatorEmail: email,
+          action: 'auth.login_locked',
+          target: req.ip,
+          detail: { retryAfterS: retryAfter },
+        })
+        .catch(() => {})
+      reply.header('retry-after', String(retryAfter))
+      return reply.code(429).send({ error: 'too many attempts — try again later' })
+    }
+
+    const op = await operators.get(email)
     // Same error either way — no operator-existence oracle.
     if (!op || !verifyPassword(parsed.data.password, op.passwordHash)) {
+      throttle.recordFailure(throttleKeys)
+      void audit
+        .append({
+          operatorEmail: email,
+          action: 'auth.login_failed',
+          target: req.ip,
+          detail: {},
+        })
+        .catch(() => {})
       return reply.code(401).send({ error: 'invalid credentials' })
     }
+    throttle.clear(`email:${email}`)
     const session: OperatorSession = { email: op.email, role: op.role }
     reply.header('set-cookie', sessionCookie(mintSessionToken(session, jwtSecret)))
     return { email: op.email, role: op.role }
@@ -256,14 +308,15 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
   })
 
   // ── users ────────────────────────────────────────────────────────────────
-  app.get<{ Querystring: { partnerId?: string; offset?: string; limit?: string } }>(
+  app.get<{ Querystring: { partnerId?: string; q?: string; offset?: string; limit?: string } }>(
     '/v1/users',
     async (req, reply) => {
       const op = operator(req, reply)
       if (!op) return reply
-      const { partnerId, offset, limit } = req.query
+      const { partnerId, q, offset, limit } = req.query
       return users.list({
         ...(partnerId ? { partnerId } : {}),
+        ...(q ? { q } : {}),
         offset: Number(offset ?? 0) || 0,
         limit: Math.min(Number(limit ?? 50) || 50, 200),
       })
@@ -350,6 +403,20 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     const res = await memoryFetch(`/admin/personas/${partnerId}/${userId}`, { method: 'DELETE' })
     void record(op, 'memory.purge', `${partnerId}/${userId}`)
     return reply.code(res.status).send(await res.json())
+  })
+
+  // Bulk purge (partner offboarding) — audited with the row count.
+  app.delete<{ Querystring: { partnerId?: string } }>('/v1/memory', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    const { partnerId } = req.query
+    if (!partnerId) return reply.code(400).send({ error: 'partnerId required' })
+    const res = await memoryFetch(`/admin/personas?partnerId=${encodeURIComponent(partnerId)}`, {
+      method: 'DELETE',
+    })
+    const body = (await res.json()) as { deleted?: number }
+    void record(op, 'memory.purge_partner', partnerId, { deleted: body.deleted ?? 0 })
+    return reply.code(res.status).send(body)
   })
 
   // ── operators (owner-only) ───────────────────────────────────────────────
@@ -448,6 +515,14 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     } catch {
       /* gateway down — DB-backed parts still render */
     }
+    // Durable count wins when available — survives gateway restarts.
+    if (mauStore) {
+      try {
+        mau = await mauStore.count(partner.partnerId)
+      } catch {
+        /* keep gateway snapshot */
+      }
+    }
 
     return {
       partner: safe,
@@ -473,8 +548,17 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     }
 
     // Quota alerts: any planned partner at ≥80% of its MAU ceiling.
-    const byPartner =
+    // Durable counts win when available (survive gateway restarts); the
+    // gateway's in-process snapshot is the fallback.
+    let byPartner =
       (gateway as { mau?: { byPartner?: Record<string, number> } } | null)?.mau?.byPartner ?? {}
+    if (mauStore) {
+      try {
+        byPartner = await mauStore.byPartner()
+      } catch {
+        /* keep gateway snapshot */
+      }
+    }
     const alerts: Array<{
       partnerId: string
       venueName: string

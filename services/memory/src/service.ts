@@ -119,6 +119,16 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     return { deleted }
   })
 
+  // Bulk purge for partner offboarding — partnerId is mandatory: there is
+  // deliberately no "delete everything" surface.
+  app.delete<{ Querystring: { partnerId?: string } }>('/admin/personas', async (req, reply) => {
+    if (!adminGuard(req, reply)) return reply
+    const { partnerId } = req.query
+    if (!partnerId) return reply.code(400).send({ error: 'partnerId required' })
+    const deleted = await store.deleteByPartner(partnerId)
+    return { deleted }
+  })
+
   app.get('/health', async () => ({ ok: true, service: 'memory', personas: await store.size() }))
 
   return app

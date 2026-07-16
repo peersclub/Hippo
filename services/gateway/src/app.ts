@@ -9,11 +9,15 @@ import cors from '@fastify/cors'
 import { Uplink } from '@hippo/protocol'
 import {
   getPool,
+  InMemoryMauStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
   InMemoryUserStore,
+  type MauStore,
+  monthKey,
   type PartnerStore,
   type PlanStore,
+  PostgresMauStore,
   PostgresPartnerStore,
   PostgresPlanStore,
   PostgresUserStore,
@@ -48,6 +52,7 @@ export type GatewayOptions = {
   partnerStore?: PartnerStore
   planStore?: PlanStore
   userStore?: UserStore
+  mauStore?: MauStore
   /** Override the session store (tests inject a Redis-backed one). Defaults to
    * Redis when REDIS_URL is set, else in-memory. */
   sessions?: SessionStore
@@ -67,6 +72,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
     opts.planStore ?? (usePg ? new PostgresPlanStore(getPool()) : new InMemoryPlanStore())
   const users =
     opts.userStore ?? (usePg ? new PostgresUserStore(getPool()) : new InMemoryUserStore())
+  const mau = opts.mauStore ?? (usePg ? new PostgresMauStore(getPool()) : new InMemoryMauStore())
 
   const sessions =
     opts.sessions ??
@@ -77,6 +83,13 @@ export async function buildApp(opts: GatewayOptions = {}) {
       partnerLookup: (partnerId) => partners.get(partnerId),
     })
   const telemetry = new Telemetry()
+  // Restart-proof quota state: seed the in-process MAU set from the durable
+  // store, so a pod restart never resets enforcement or the panel's alerts.
+  try {
+    telemetry.hydratePartnerMau(await mau.entries(monthKey()), monthKey())
+  } catch (err) {
+    app.log.warn({ err }, 'MAU hydration failed — quota counters start cold')
+  }
   const emit = createEmitter({ strict: opts.strictFrames ?? isTest, log: app.log })
   const orchestrator = createOrchestrator({
     intel: opts.intel ?? createIntelligenceClient(),
@@ -120,7 +133,12 @@ export async function buildApp(opts: GatewayOptions = {}) {
     }
 
     const session = sessions.create(auth.partner, auth.venueUserId)
-    telemetry.recordPartnerUser(auth.partner.partnerId, auth.venueUserId ?? session.id)
+    const userKey = auth.venueUserId ?? session.id
+    telemetry.recordPartnerUser(auth.partner.partnerId, userKey)
+    // Durable mirror (fire-and-forget) — feeds boot hydration + admin counts.
+    void mau
+      .record(auth.partner.partnerId, userKey)
+      .catch((err) => app.log.warn({ err }, 'mau record failed'))
 
     // Lazily register authenticated end-users (never anonymous sessions);
     // fire-and-forget — registry writes must not slow session mint.

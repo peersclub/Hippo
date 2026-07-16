@@ -6,10 +6,18 @@
 import type pg from 'pg'
 import type { Page, UserRecord, UserStatus } from './types.js'
 
+export type UserListOpts = {
+  partnerId?: string
+  /** Case-insensitive substring match on userId. */
+  q?: string
+  offset?: number
+  limit?: number
+}
+
 export interface UserStore {
   upsertSeen(partnerId: string, userId: string, now?: number): Promise<UserRecord>
   get(partnerId: string, userId: string): Promise<UserRecord | undefined>
-  list(opts: { partnerId?: string; offset?: number; limit?: number }): Promise<Page<UserRecord>>
+  list(opts: UserListOpts): Promise<Page<UserRecord>>
   setStatus(partnerId: string, userId: string, status: UserStatus): Promise<UserRecord | undefined>
 }
 
@@ -31,17 +39,11 @@ export class InMemoryUserStore implements UserStore {
     return this.users.get(key(partnerId, userId))
   }
 
-  async list({
-    partnerId,
-    offset = 0,
-    limit = 50,
-  }: {
-    partnerId?: string
-    offset?: number
-    limit?: number
-  }): Promise<Page<UserRecord>> {
+  async list({ partnerId, q, offset = 0, limit = 50 }: UserListOpts): Promise<Page<UserRecord>> {
+    const needle = q?.toLowerCase()
     const all = [...this.users.values()]
       .filter((u) => !partnerId || u.partnerId === partnerId)
+      .filter((u) => !needle || u.userId.toLowerCase().includes(needle))
       .sort((a, b) => b.lastSeen - a.lastSeen)
     return { rows: all.slice(offset, offset + limit), total: all.length }
   }
@@ -69,6 +71,11 @@ function rowToUser(r: Record<string, unknown>): UserRecord {
   }
 }
 
+/** Escape LIKE wildcards so a literal % or _ in the query stays literal. */
+function likeEscape(q: string): string {
+  return q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')
+}
+
 export class PostgresUserStore implements UserStore {
   constructor(private readonly pool: pg.Pool) {}
 
@@ -91,25 +98,24 @@ export class PostgresUserStore implements UserStore {
     return res.rows[0] ? rowToUser(res.rows[0]) : undefined
   }
 
-  async list({
-    partnerId,
-    offset = 0,
-    limit = 50,
-  }: {
-    partnerId?: string
-    offset?: number
-    limit?: number
-  }): Promise<Page<UserRecord>> {
-    const where = partnerId ? 'WHERE partner_id = $3' : ''
-    const params: unknown[] = [limit, offset]
-    if (partnerId) params.push(partnerId)
+  async list({ partnerId, q, offset = 0, limit = 50 }: UserListOpts): Promise<Page<UserRecord>> {
+    const conds: string[] = []
+    const filterParams: unknown[] = []
+    if (partnerId) {
+      filterParams.push(partnerId)
+      conds.push(`partner_id = $${filterParams.length}`)
+    }
+    if (q) {
+      filterParams.push(`%${likeEscape(q)}%`)
+      conds.push(`user_id ILIKE $${filterParams.length}`)
+    }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+
+    const total = await this.pool.query(`SELECT count(*) FROM users ${where}`, filterParams)
     const rows = await this.pool.query(
-      `SELECT * FROM users ${where} ORDER BY last_seen DESC LIMIT $1 OFFSET $2`,
-      params,
-    )
-    const total = await this.pool.query(
-      partnerId ? 'SELECT count(*) FROM users WHERE partner_id = $1' : 'SELECT count(*) FROM users',
-      partnerId ? [partnerId] : [],
+      `SELECT * FROM users ${where} ORDER BY last_seen DESC
+       LIMIT $${filterParams.length + 1} OFFSET $${filterParams.length + 2}`,
+      [...filterParams, limit, offset],
     )
     return { rows: rows.rows.map(rowToUser), total: Number(total.rows[0].count) }
   }

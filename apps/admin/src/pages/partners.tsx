@@ -1,6 +1,7 @@
 import type { PartnerRecord, PlanRecord } from '@hippo/stores'
-import { useEffect, useState } from 'preact/hooks'
+import { useState } from 'preact/hooks'
 import { ApiError, get, patch, post } from '../api.js'
+import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
 
 /** List view never receives jwtSecret (the service strips it). */
 type PartnerRow = Omit<PartnerRecord, 'jwtSecret'>
@@ -31,15 +32,13 @@ export function PartnersPage() {
   const [error, setError] = useState('')
 
   const load = () =>
-    Promise.all([get<PartnerRow[]>('/v1/partners'), get<PlanRecord[]>('/v1/plans')])
-      .then(([p, pl]) => {
+    Promise.all([get<PartnerRow[]>('/v1/partners'), get<PlanRecord[]>('/v1/plans')]).then(
+      ([p, pl]) => {
         setPartners(p)
         setPlans(pl)
-      })
-      .catch(() => {})
-  useEffect(() => {
-    void load()
-  }, [])
+      },
+    )
+  const state = useLoad(load)
 
   const field = (k: keyof Draft) => (e: Event) =>
     setDraft((d) => (d ? { ...d, [k]: (e.target as HTMLInputElement).value } : d))
@@ -75,22 +74,31 @@ export function PartnersPage() {
       }
       setDraft(null)
       setEditing(null)
-      await load()
+      state.retry()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'save failed')
     }
   }
 
   async function setStatus(partnerId: string, action: 'suspend' | 'activate') {
-    if (action === 'suspend' && !confirm(`Suspend "${partnerId}"? New sessions will be rejected.`))
-      return
+    if (action === 'suspend') {
+      const ok = await confirmAction({
+        title: `Suspend ${partnerId}`,
+        body: 'ALL new sessions for this partner are rejected with 401 until reactivated.',
+        confirmLabel: 'Suspend partner',
+        typedPhrase: partnerId,
+      })
+      if (!ok) return
+    }
     await post(`/v1/partners/${partnerId}/${action}`)
-    await load()
+    toast(action === 'suspend' ? `${partnerId} suspended` : `${partnerId} activated`)
+    state.retry()
   }
 
   async function assignPlan(partnerId: string, planId: string) {
     await post(`/v1/partners/${partnerId}/plan`, { planId: planId || null })
-    await load()
+    toast(planId ? `Plan ${planId} assigned to ${partnerId}` : `Plan removed from ${partnerId}`)
+    state.retry()
   }
 
   return (
@@ -109,86 +117,90 @@ export function PartnersPage() {
         </button>
       </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Partner</th>
-            <th>Embed key</th>
-            <th>Status</th>
-            <th>Plan</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {partners.map((p) => (
-            <tr key={p.partnerId}>
-              <td>
-                <strong>{p.venueName}</strong> <span class="mono dim">{p.partnerId}</span>
-              </td>
-              <td class="mono">{p.partnerKey}</td>
-              <td>
-                <span class={`badge ${p.status}`}>{p.status}</span>
-              </td>
-              <td>
-                <select
-                  value={p.planId ?? ''}
-                  onChange={(e) => assignPlan(p.partnerId, (e.target as HTMLSelectElement).value)}
-                >
-                  <option value="">— no plan —</option>
-                  {plans.map((pl) => (
-                    <option key={pl.planId} value={pl.planId}>
-                      {pl.name} ({pl.tier})
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td style="text-align:right; white-space:nowrap">
-                <a
-                  class="btn ghost sm"
-                  style="text-decoration:none"
-                  href={`#/partners/${p.partnerId}`}
-                >
-                  Detail
-                </a>{' '}
-                <button
-                  class="btn ghost sm"
-                  type="button"
-                  onClick={() => {
-                    setEditing(p.partnerId)
-                    setDraft({
-                      partnerId: p.partnerId,
-                      partnerKey: p.partnerKey,
-                      jwtSecret: '',
-                      venueName: p.venueName,
-                      locales: p.locales.join(', '),
-                      suggestedQueries: p.suggestedQueries.join('\n'),
-                    })
-                  }}
-                >
-                  Edit
-                </button>{' '}
-                {p.status === 'active' ? (
-                  <button
-                    class="btn danger sm"
-                    type="button"
-                    onClick={() => setStatus(p.partnerId, 'suspend')}
+      {state.error && <ErrorBanner message={state.error} retry={state.retry} />}
+      {state.loading && <Busy rows={3} />}
+      {!state.loading && !state.error && (
+        <table>
+          <thead>
+            <tr>
+              <th>Partner</th>
+              <th>Embed key</th>
+              <th>Status</th>
+              <th>Plan</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {partners.map((p) => (
+              <tr key={p.partnerId}>
+                <td>
+                  <strong>{p.venueName}</strong> <span class="mono dim">{p.partnerId}</span>
+                </td>
+                <td class="mono">{p.partnerKey}</td>
+                <td>
+                  <span class={`badge ${p.status}`}>{p.status}</span>
+                </td>
+                <td>
+                  <select
+                    value={p.planId ?? ''}
+                    onChange={(e) => assignPlan(p.partnerId, (e.target as HTMLSelectElement).value)}
                   >
-                    Suspend
-                  </button>
-                ) : (
+                    <option value="">— no plan —</option>
+                    {plans.map((pl) => (
+                      <option key={pl.planId} value={pl.planId}>
+                        {pl.name} ({pl.tier})
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td style="text-align:right; white-space:nowrap">
+                  <a
+                    class="btn ghost sm"
+                    style="text-decoration:none"
+                    href={`#/partners/${p.partnerId}`}
+                  >
+                    Detail
+                  </a>{' '}
                   <button
                     class="btn ghost sm"
                     type="button"
-                    onClick={() => setStatus(p.partnerId, 'activate')}
+                    onClick={() => {
+                      setEditing(p.partnerId)
+                      setDraft({
+                        partnerId: p.partnerId,
+                        partnerKey: p.partnerKey,
+                        jwtSecret: '',
+                        venueName: p.venueName,
+                        locales: p.locales.join(', '),
+                        suggestedQueries: p.suggestedQueries.join('\n'),
+                      })
+                    }}
                   >
-                    Activate
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                    Edit
+                  </button>{' '}
+                  {p.status === 'active' ? (
+                    <button
+                      class="btn danger sm"
+                      type="button"
+                      onClick={() => setStatus(p.partnerId, 'suspend')}
+                    >
+                      Suspend
+                    </button>
+                  ) : (
+                    <button
+                      class="btn ghost sm"
+                      type="button"
+                      onClick={() => setStatus(p.partnerId, 'activate')}
+                    >
+                      Activate
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       {draft && (
         <>

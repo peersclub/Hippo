@@ -1,5 +1,7 @@
 import type { Banner, Frame, OrdersSnapshot, ResearchBrief, UnknownFrame } from '@hippo/protocol'
 import { computed, signal } from '@preact/signals'
+import { resolveChips } from './chips.js'
+import type { FeedbackState } from './feedback.js'
 import { isRtl, type Locale } from './i18n.js'
 import type { Posture } from './posture.js'
 
@@ -49,6 +51,30 @@ export function takeComposerPrefill(): string | null {
   const v = composerPrefill.value
   composerPrefill.value = null
   return v
+}
+
+/** Composer draft — a signal (not component state) so minimizing to the
+ * pill never destroys typed text. Edge state №6 applied to the panel
+ * lifecycle, not just failed sends. */
+export const composerDraft = signal('')
+
+/** The chip bar's contents: the latest server-sent followups win; the
+ * session's suggested queries are the floor. Server-authored either way. */
+export const activeChips = computed(() => resolveChips(thread.value, suggestedQueries.value))
+
+/** Feedback state per brief, keyed by frame id — lives here (not in card
+ * component state) so "already gave feedback" survives minimize/reopen.
+ * The reducer is one-shot on terminal states, so replays can't double-send. */
+export const feedbackMap = signal<Record<string, FeedbackState>>({})
+
+/** Locale persistence — installed by mountPanel (storage is namespaced by
+ * partner key there); the settings sheet calls persistLocale on selection. */
+let localePersister: (l: Locale) => void = () => {}
+export function setLocalePersistence(fn: (l: Locale) => void) {
+  localePersister = fn
+}
+export function persistLocale(l: Locale) {
+  localePersister(l)
 }
 
 export const openOrderCount = computed(() => orders.value?.open.length ?? 0)

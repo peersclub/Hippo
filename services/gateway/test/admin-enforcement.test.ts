@@ -140,3 +140,37 @@ describe('plan MAU quota', () => {
     await app.close()
   })
 })
+
+describe('durable MAU survives gateway restarts', () => {
+  it('hydrates quota state from the MauStore: 429 still enforced after a "restart"', async () => {
+    const { InMemoryMauStore } = await import('@hippo/stores')
+    const mauStore = new InMemoryMauStore() // shared across both app instances
+    const partnerStore = new InMemoryPartnerStore([{ ...devPartner(), planId: 'pilot' }])
+    const planStore = new InMemoryPlanStore()
+    await planStore.create({
+      planId: 'pilot',
+      name: 'Pilot',
+      tier: 'pilot',
+      mauQuota: 2,
+      priceMonthlyUsd: null,
+      entitlements: {},
+    })
+
+    // First "pod": fill the quota.
+    const first = await testApp({ partnerStore, planStore, mauStore })
+    expect((await mint(first.app, { sub: 'u1' })).statusCode).toBe(200)
+    expect((await mint(first.app, { sub: 'u2' })).statusCode).toBe(200)
+    // fire-and-forget durable writes — let the microtasks land
+    await new Promise((r) => setTimeout(r, 10))
+    await first.app.close()
+
+    // "Restart": a brand-new app + fresh Telemetry, same durable store.
+    const second = await testApp({ partnerStore, planStore, mauStore })
+    // New distinct user must STILL be over quota (hydration worked)…
+    const third = await mint(second.app, { sub: 'u3' })
+    expect(third.statusCode).toBe(429)
+    // …and returning users still get in.
+    expect((await mint(second.app, { sub: 'u1' })).statusCode).toBe(200)
+    await second.app.close()
+  })
+})

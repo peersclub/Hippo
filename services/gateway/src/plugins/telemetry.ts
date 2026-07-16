@@ -139,6 +139,13 @@ export class Telemetry {
     return n
   }
 
+  /** Seed the in-process quota set from the durable MauStore (boot). */
+  hydratePartnerMau(entries: Array<{ partnerId: string; userKey: string }>, month: string): void {
+    for (const e of entries) {
+      this.partnerMauSet.add(`${e.partnerId}\u0000${e.userKey}:${month}`)
+    }
+  }
+
   /** Current-month MAU per partner — the admin panel's quota view. */
   mauByPartner(): Record<string, number> {
     const month = monthKey()
