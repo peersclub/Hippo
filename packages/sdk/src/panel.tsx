@@ -8,6 +8,7 @@ import type { OrdersSnapshot } from '@hippo/protocol'
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { FallbackCard, renderFrame } from './cards.js'
+import { resolveLocale, t } from './i18n.js'
 import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
 import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
 import { OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
@@ -17,6 +18,8 @@ import {
   clearPulse,
   composerPrefill,
   connection,
+  dir,
+  locale,
   openOrderCount,
   orders,
   posture,
@@ -35,7 +38,7 @@ import { connect, send } from './transport.js'
 type MountOpts = {
   shadow: ShadowRoot
   pill: HTMLButtonElement
-  config: { key: string; gateway: string; panelUrl: string }
+  config: { key: string; gateway: string; panelUrl: string; locale?: string }
 }
 
 let onboarding: OnboardingStore | null = null
@@ -75,9 +78,10 @@ function Composer() {
       setFailed(true)
     }
   }
+  const L = locale.value
   return (
     <div class="cwrap">
-      {failed && <div class="sendfail">SEND FAILED — your message is kept. Tap ↻ to retry.</div>}
+      {failed && <div class="sendfail">{t(L, 'send_failed')}</div>}
       <form class="composer" onSubmit={submit}>
         <input
           ref={inputRef}
@@ -87,17 +91,15 @@ function Composer() {
             setText((e.target as HTMLInputElement).value)
             setFailed(false)
           }}
-          placeholder={
-            offline ? "Reconnecting — you can't send right now" : 'Ask about any market…'
-          }
-          aria-label="Ask Hippo"
+          placeholder={t(L, offline ? 'composer_placeholder_offline' : 'composer_placeholder')}
+          aria-label={t(L, 'brand_ask')}
         />
         <button
           type="submit"
           class="send"
           disabled={offline}
-          title={failed ? 'Retry send' : undefined}
-          aria-label={failed ? 'Retry send' : 'Send'}
+          title={failed ? t(L, 'retry_send') : undefined}
+          aria-label={failed ? t(L, 'retry_send') : t(L, 'send')}
         >
           {failed ? '↻' : '↑'}
         </button>
@@ -126,7 +128,7 @@ function OrderExpandCard({ order }: { order: OrdersSnapshot['open'][number] }) {
         class="omanage"
         onClick={() => send({ kind: 'chip_tap', text: `manage:${order.orderId}` })}
       >
-        Manage on {venueName.value} →
+        {t(locale.value, 'manage_on', { venue: venueName.value })}
       </button>
     </div>
   )
@@ -137,7 +139,7 @@ function OrderExpandCard({ order }: { order: OrdersSnapshot['open'][number] }) {
 function NewOrderHint({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div class="newhint">
-      <b>Tell me what to place…</b>
+      <b>{t(locale.value, 'new_order_hint')}</b>
       <div class="nchips">
         {EXAMPLE_INTENTS.map((t) => (
           <button type="button" class="chip" key={t} onClick={() => onPick(t)}>
@@ -160,9 +162,11 @@ function OrdersStrip() {
     <div class="orders">
       <div class="lab">
         <span>
-          OPEN ORDERS <span class="cnt">· {openOrderCount.value}</span>
+          {t(locale.value, 'orders_open')} <span class="cnt">· {openOrderCount.value}</span>
         </span>
-        <span>POSITIONS · {snap.positionsCount}</span>
+        <span>
+          {t(locale.value, 'orders_positions')} · {snap.positionsCount}
+        </span>
       </div>
       <div class="row">
         {snap.open.map((o) => (
@@ -183,7 +187,7 @@ function OrdersStrip() {
           aria-expanded={active === NEW_ORDER}
           onClick={() => setExpanded(toggleExpand(expanded, NEW_ORDER))}
         >
-          + New order
+          {t(locale.value, 'new_order')}
         </button>
       </div>
       <div class={`oexp${active ? ' open' : ''}`}>
@@ -227,7 +231,7 @@ function EmptyHero() {
   return (
     <div class="empty">
       <span class="emark">H</span>
-      <h2>Ask your market anything.</h2>
+      <h2>{t(locale.value, 'hero_title')}</h2>
       <div class="echips">
         {list.map((q) => (
           <button
@@ -264,8 +268,8 @@ function Thread() {
       {connection.value === 'offline' && (
         <div class="banner offline">
           <div>
-            <b>CONNECTION LOST</b>
-            Reconnecting — your thread is safe, and nothing you typed is lost.
+            <b>{t(locale.value, 'connection_lost')}</b>
+            {t(locale.value, 'connection_lost_body')}
           </div>
         </div>
       )}
@@ -300,19 +304,20 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
   // `pill` never reaches here (the panel renders null when minimized), so any
   // posture we hold is a concrete on-screen one; drive the class straight off it.
   const p = posture.value
+  const L = locale.value
   return (
-    <div class={`panel ${p}`}>
+    <div class={`panel ${p}`} dir={dir.value}>
       <div class="hd">
         <span class="mark">H</span>
         <div class="name">
-          Ask Hippo
-          <small>MARKET INTELLIGENCE</small>
+          {t(L, 'brand_ask')}
+          <small>{t(L, 'header_subtitle')}</small>
         </div>
         <div class="ctl">
           <button
             type="button"
-            title="Settings"
-            aria-label="Settings"
+            title={t(L, 'settings')}
+            aria-label={t(L, 'settings')}
             onClick={() => {
               settingsOpen.value = true
             }}
@@ -321,15 +326,20 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
           </button>
           <button
             type="button"
-            title="Change layout"
-            aria-label="Change panel layout"
+            title={t(L, 'change_layout')}
+            aria-label={t(L, 'change_layout')}
             onClick={() => {
               posture.value = cyclePosture(posture.value, isMobileViewport())
             }}
           >
             ⤢
           </button>
-          <button type="button" title="Minimize" aria-label="Minimize" onClick={onMinimize}>
+          <button
+            type="button"
+            title={t(L, 'minimize')}
+            aria-label={t(L, 'minimize')}
+            onClick={onMinimize}
+          >
             —
           </button>
         </div>
@@ -354,6 +364,9 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
 }
 
 export function mountPanel({ shadow, pill, config }: MountOpts) {
+  // Chrome locale from the embed config; content language stays server-decided.
+  locale.value = resolveLocale(config.locale)
+
   const sheet = new CSSStyleSheet()
   sheet.replaceSync(panelCss)
   shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet]
