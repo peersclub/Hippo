@@ -79,7 +79,7 @@ function normalizeLocale(raw: string): string {
       `
       shadow.appendChild(style)
 
-      const label = PILL_LABEL[config.locale] ?? PILL_LABEL.en
+      const label = PILL_LABEL[config.locale] ?? PILL_LABEL.en ?? 'Ask Hippo'
       const pill = document.createElement('button')
       pill.className = 'pill'
       pill.setAttribute('aria-label', label)

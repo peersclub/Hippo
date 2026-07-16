@@ -8,14 +8,20 @@ import type { OrdersSnapshot } from '@hippo/protocol'
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { FallbackCard, renderFrame } from './cards.js'
+import { LONG_PRESS_MS, PRESS_MOVE_SLOP_PX, roveIndex } from './chips.js'
+import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js'
 import { resolveLocale, t } from './i18n.js'
 import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
 import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
+import { dispatch, outbox } from './outbox.js'
 import { OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
 import { cyclePosture, isMobileViewport, openPosture } from './posture.js'
+import { isNearBottom } from './scroll.js'
 import {
+  activeChips,
   banners,
   clearPulse,
+  composerDraft,
   composerPrefill,
   connection,
   dir,
@@ -25,6 +31,7 @@ import {
   posture,
   prefillComposer,
   pulseTag,
+  setLocalePersistence,
   settingsOpen,
   shareFrame,
   suggestedQueries,
@@ -48,56 +55,165 @@ export function replayOnboarding() {
   onboarding?.replay()
 }
 
+const reducedMotion = () =>
+  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/**
+ * One suggestion chip. Tap sends; holding LONG_PRESS_MS (or Shift+click)
+ * drops the text into the composer to edit instead — same fill-never-send
+ * path as the "+ New order" hint. Pointer travel past the slop cancels the
+ * press so horizontal chip-scrolling never misfires an edit.
+ */
+function ChipButton({
+  text,
+  tabIndex,
+  onFocus,
+}: {
+  text: string
+  tabIndex?: number
+  onFocus?: () => void
+}) {
+  const timer = useRef(0)
+  const held = useRef(false)
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const cancel = () => {
+    clearTimeout(timer.current)
+    start.current = null
+  }
+  useEffect(() => () => clearTimeout(timer.current), [])
+  return (
+    <button
+      type="button"
+      class="chip"
+      tabIndex={tabIndex}
+      title={t(locale.value, 'chip_edit_hint')}
+      onFocus={onFocus}
+      onPointerDown={(e) => {
+        held.current = false
+        start.current = { x: e.clientX, y: e.clientY }
+        timer.current = window.setTimeout(() => {
+          held.current = true
+          prefillComposer(text)
+        }, LONG_PRESS_MS)
+      }}
+      onPointerMove={(e) => {
+        if (!start.current) return
+        if (
+          Math.abs(e.clientX - start.current.x) > PRESS_MOVE_SLOP_PX ||
+          Math.abs(e.clientY - start.current.y) > PRESS_MOVE_SLOP_PX
+        )
+          cancel()
+      }}
+      onPointerUp={cancel}
+      onPointerLeave={cancel}
+      onContextMenu={(e) => e.preventDefault()}
+      onClick={(e) => {
+        if (held.current) {
+          held.current = false
+          return
+        }
+        if (e.shiftKey) {
+          prefillComposer(text)
+          return
+        }
+        void dispatch({ kind: 'chip_tap', text })
+      }}
+    >
+      {text}
+    </button>
+  )
+}
+
 function Composer() {
-  const [text, setText] = useState('')
+  const text = composerDraft.value
   const [failed, setFailed] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const offline = connection.value === 'offline'
+  const blocked = connection.value !== 'live'
+  const autosize = () => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT_PX)}px`
+  }
+  // Draft survives minimize (it's a signal) — restore the height on remount.
+  useEffect(() => autosize(), [])
   // New-order example intents FILL the input — never auto-send (baseline §3:
   // order placement stays conversational; the trader always hits send).
   const pending = composerPrefill.value
   useEffect(() => {
     if (!pending) return
-    const t = takeComposerPrefill()
-    if (t) {
-      setText(t)
+    const v = takeComposerPrefill()
+    if (v) {
+      composerDraft.value = v
       setFailed(false)
       inputRef.current?.focus()
+      requestAnimationFrame(autosize)
     }
   }, [pending])
-  const submit = async (e: Event) => {
-    e.preventDefault()
-    const t = text.trim()
-    if (!t || connection.value === 'offline') return
-    setText('')
+  const submit = async (e?: Event) => {
+    e?.preventDefault()
+    const v = text.trim()
+    if (!v || blocked) return
+    composerDraft.value = ''
     setFailed(false)
-    const ok = await send({ kind: 'user_text', text: t })
+    requestAnimationFrame(autosize)
+    const ok = await send({ kind: 'user_text', text: v })
     if (!ok) {
       // Edge state №6: nothing the trader wrote is ever lost.
-      setText(t)
+      composerDraft.value = v
       setFailed(true)
+    } else {
+      inputRef.current?.focus()
     }
   }
   const L = locale.value
+  const count = counterLabel(text.length)
+  const queued = outbox.value.length
+  const placeholder = offline
+    ? t(L, 'composer_placeholder_offline')
+    : blocked
+      ? t(L, 'composer_placeholder_connecting')
+      : t(L, 'composer_placeholder')
   return (
     <div class="cwrap">
-      {failed && <div class="sendfail">{t(L, 'send_failed')}</div>}
+      {failed && (
+        <div class="sendfail" role="status">
+          {t(L, 'send_failed')}
+        </div>
+      )}
+      {queued > 0 && (
+        <div class="qrow" role="status">
+          {t(L, 'queued_note', { n: String(queued) })}
+        </div>
+      )}
+      {count && <div class={`ccount${text.length >= 2000 ? ' max' : ''}`}>{count}</div>}
       <form class="composer" onSubmit={submit}>
-        <input
+        <textarea
           ref={inputRef}
           value={text}
+          rows={1}
+          maxLength={2000}
           disabled={offline}
           onInput={(e) => {
-            setText((e.target as HTMLInputElement).value)
+            composerDraft.value = (e.target as HTMLTextAreaElement).value
             setFailed(false)
+            autosize()
           }}
-          placeholder={t(L, offline ? 'composer_placeholder_offline' : 'composer_placeholder')}
+          onKeyDown={(e) => {
+            if (enterAction(e.key, e.shiftKey) === 'send') {
+              e.preventDefault()
+              void submit()
+            }
+            // Shift+Enter falls through to the native newline.
+          }}
+          placeholder={placeholder}
           aria-label={t(L, 'brand_ask')}
         />
         <button
           type="submit"
           class="send"
-          disabled={offline}
+          disabled={blocked}
           title={failed ? t(L, 'retry_send') : undefined}
           aria-label={failed ? t(L, 'retry_send') : t(L, 'send')}
         >
@@ -126,7 +242,7 @@ function OrderExpandCard({ order }: { order: OrdersSnapshot['open'][number] }) {
       <button
         type="button"
         class="omanage"
-        onClick={() => send({ kind: 'chip_tap', text: `manage:${order.orderId}` })}
+        onClick={() => void dispatch({ kind: 'chip_tap', text: `manage:${order.orderId}` })}
       >
         {t(locale.value, 'manage_on', { venue: venueName.value })}
       </button>
@@ -213,7 +329,7 @@ function PinnedBanners() {
   return (
     <div class="pins">
       {list.map((b) => (
-        <div class={`banner ${b.kind}`} key={b.id}>
+        <div class={`banner ${b.kind}`} key={b.id} role="status">
           <div>
             <b>{b.title}</b>
             {b.text}
@@ -234,14 +350,7 @@ function EmptyHero() {
       <h2>{t(locale.value, 'hero_title')}</h2>
       <div class="echips">
         {list.map((q) => (
-          <button
-            type="button"
-            class="chip"
-            key={q}
-            onClick={() => send({ kind: 'chip_tap', text: q })}
-          >
-            {q}
-          </button>
+          <ChipButton text={q} key={q} />
         ))}
       </div>
     </div>
@@ -250,28 +359,65 @@ function EmptyHero() {
 
 function Thread() {
   const ref = useRef<HTMLDivElement>(null)
+  const atBottom = useRef(true)
+  const [hasNew, setHasNew] = useState(false)
   const items = thread.value
+  // Depend on the array IDENTITY, not length: pushFrame replaces the array
+  // on every mutation — including brief_delta merges — so streaming growth
+  // autoscrolls too. The trader reading history is never yanked down.
   useEffect(() => {
-    // The thread always rests at the newest message.
-    ref.current?.scrollTo({ top: ref.current.scrollHeight })
-  }, [items.length])
+    const el = ref.current
+    if (!el) return
+    if (atBottom.current) {
+      el.scrollTo({ top: el.scrollHeight })
+      setHasNew(false)
+    } else if (items.length > 0) {
+      setHasNew(true)
+    }
+  }, [items])
+  const onScroll = () => {
+    const el = ref.current
+    if (!el) return
+    atBottom.current = isNearBottom(el.scrollTop, el.clientHeight, el.scrollHeight)
+    if (atBottom.current) setHasNew(false)
+  }
+  const jump = () => {
+    const el = ref.current
+    if (!el) return
+    atBottom.current = true
+    setHasNew(false)
+    el.scrollTo({ top: el.scrollHeight, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  }
   return (
-    <div class="thread" ref={ref}>
-      {items.length === 0 && <EmptyHero />}
-      {items.map((item) =>
-        item.kind === 'frame' ? (
-          <FrameWrap key={item.frame.id}>{renderFrame(item.frame)}</FrameWrap>
-        ) : (
-          <FallbackCard key={item.frame.id} frame={item.frame} />
-        ),
-      )}
-      {connection.value === 'offline' && (
-        <div class="banner offline">
-          <div>
-            <b>{t(locale.value, 'connection_lost')}</b>
-            {t(locale.value, 'connection_lost_body')}
+    <div class="threadwrap">
+      <div
+        class="thread"
+        role="log"
+        aria-label={t(locale.value, 'thread_label')}
+        ref={ref}
+        onScroll={onScroll}
+      >
+        {items.length === 0 && <EmptyHero />}
+        {items.map((item) =>
+          item.kind === 'frame' ? (
+            <FrameWrap key={item.frame.id}>{renderFrame(item.frame)}</FrameWrap>
+          ) : (
+            <FallbackCard key={item.frame.id} frame={item.frame} />
+          ),
+        )}
+        {connection.value === 'offline' && (
+          <div class="banner offline" role="status">
+            <div>
+              <b>{t(locale.value, 'connection_lost')}</b>
+              {t(locale.value, 'connection_lost_body')}
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+      {hasNew && (
+        <button type="button" class="jump" onClick={jump}>
+          ↓ {t(locale.value, 'jump_latest')}
+        </button>
       )}
     </div>
   )
@@ -281,20 +427,39 @@ function FrameWrap({ children }: { children: ComponentChildren }) {
   return <>{children}</>
 }
 
+/** Contextual suggestion bar: server-sent followups after each answer,
+ * session chips as the floor. Roving tabindex, arrows follow reading order. */
 function Chips() {
-  const chips = suggestedQueries.value
+  const chips = activeChips.value
+  const [focusIdx, setFocusIdx] = useState(0)
+  const ref = useRef<HTMLDivElement>(null)
+  const chipsKey = chips.join(' ')
+  // Reset the roving focus whenever the chip set itself changes.
+  useEffect(() => setFocusIdx(0), [chipsKey])
   if (chips.length === 0) return null
+  const onKeyDown = (e: KeyboardEvent) => {
+    const next = roveIndex(focusIdx, chips.length, e.key, dir.value === 'rtl')
+    if (next === focusIdx) return
+    e.preventDefault()
+    setFocusIdx(next)
+    const buttons = ref.current?.querySelectorAll<HTMLButtonElement>('.chip')
+    buttons?.[next]?.focus()
+  }
   return (
-    <div class="chips">
-      {chips.map((q) => (
-        <button
-          type="button"
-          class="chip"
+    <div
+      class="chips"
+      role="toolbar"
+      aria-label={t(locale.value, 'suggestions_label')}
+      ref={ref}
+      onKeyDown={onKeyDown}
+    >
+      {chips.map((q, i) => (
+        <ChipButton
+          text={q}
           key={q}
-          onClick={() => send({ kind: 'chip_tap', text: q })}
-        >
-          {q}
-        </button>
+          tabIndex={i === focusIdx ? 0 : -1}
+          onFocus={() => setFocusIdx(i)}
+        />
       ))}
     </div>
   )
@@ -305,8 +470,36 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
   // posture we hold is a concrete on-screen one; drive the class straight off it.
   const p = posture.value
   const L = locale.value
+  // Esc folds inward-out: overlay → settings → intro (= "Not now") → minimize.
+  // Attached via ref (not JSX) and scoped to the panel root, so the host
+  // page never sees a handled Esc.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      if (shareFrame.value) {
+        shareFrame.value = null
+        return
+      }
+      if (settingsOpen.value) {
+        settingsOpen.value = false
+        return
+      }
+      if (ob.active.value) {
+        ob.dismiss()
+        onMinimize()
+        return
+      }
+      onMinimize()
+    }
+    el.addEventListener('keydown', onKey)
+    return () => el.removeEventListener('keydown', onKey)
+  }, [ob, onMinimize])
   return (
-    <div class={`panel ${p}`} dir={dir.value}>
+    <div class={`panel ${p}`} dir={dir.value} ref={rootRef}>
       <div class="hd">
         <span class="mark">H</span>
         <div class="name">
@@ -364,8 +557,23 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
 }
 
 export function mountPanel({ shadow, pill, config }: MountOpts) {
-  // Chrome locale from the embed config; content language stays server-decided.
-  locale.value = resolveLocale(config.locale)
+  // Chrome locale: the trader's persisted choice (settings) wins over the
+  // embed config. Content language stays server-decided either way.
+  const localeKey = `hippo:${config.key}:locale`
+  let storedLocale: string | null = null
+  try {
+    storedLocale = localStorage.getItem(localeKey)
+  } catch {
+    // Storage may be unavailable (private mode) — config locale applies.
+  }
+  locale.value = resolveLocale(storedLocale ?? config.locale)
+  setLocalePersistence((l) => {
+    try {
+      localStorage.setItem(localeKey, l)
+    } catch {
+      // Non-persistent environments simply reset to the config locale.
+    }
+  })
 
   const sheet = new CSSStyleSheet()
   sheet.replaceSync(panelCss)
@@ -374,7 +582,7 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
   const root = document.createElement('div')
   shadow.appendChild(root)
 
-  // Onboarding completion is the only thing the SDK persists here —
+  // Onboarding completion is the only other thing the SDK persists here —
   // namespaced like all hippo storage. "Not now" writes nothing.
   const doneKey = `hippo:${config.key}:onboarded`
   const ob = createOnboardingStore({
@@ -405,11 +613,17 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
     // First open (and every open until consent is given) leads with the flow.
     ob.offerIfNeeded()
     rerender()
+    // Keyboard users land in the composer; mobile skips it (no surprise
+    // virtual keyboard over the fresh panel).
+    if (!isMobileViewport() && !ob.active.value) {
+      requestAnimationFrame(() => root.querySelector('textarea')?.focus())
+    }
   }
   const minimize = () => {
     posture.value = 'pill'
     pill.style.display = ''
     rerender()
+    pill.focus()
   }
 
   const rerender = () => {

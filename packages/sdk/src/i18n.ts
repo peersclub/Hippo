@@ -46,6 +46,26 @@ export type MessageKey =
   | 'ob_not_now'
   | 'ob_agree_start'
   | 'ob_replay'
+  | 'suggestions_label'
+  | 'chip_edit_hint'
+  | 'composer_placeholder_connecting'
+  | 'jump_latest'
+  | 'queued_note' // interpolates {n}
+  | 'ticket_offline_hint'
+  | 'thread_label'
+  | 'intro_dialog'
+  | 'share_card'
+  | 'close_settings'
+  | 'close_share'
+  | 'settings_language'
+  | 'settings_memory_title'
+  | 'settings_memory_body'
+  | 'clear_memory'
+  | 'clear_memory_confirm'
+  | 'clear_memory_cancel'
+  | 'clear_memory_done'
+  | 'copy_brief'
+  | 'copied'
 
 type Catalog = Record<MessageKey, string>
 
@@ -74,6 +94,26 @@ const en: Catalog = {
   ob_not_now: 'Not now',
   ob_agree_start: 'Agree & start',
   ob_replay: 'Replay the intro',
+  suggestions_label: 'Suggested questions',
+  chip_edit_hint: 'Hold to edit before sending',
+  composer_placeholder_connecting: 'Connecting…',
+  jump_latest: 'LATEST',
+  queued_note: '{n} QUEUED — will send when reconnected',
+  ticket_offline_hint: 'Reconnect to confirm orders',
+  thread_label: 'Conversation',
+  intro_dialog: 'Introduction',
+  share_card: 'Share card',
+  close_settings: 'Close settings',
+  close_share: 'Close share card',
+  settings_language: 'Answer language',
+  settings_memory_title: 'Personal memory',
+  settings_memory_body: 'Hippo remembers your preferences and past questions.',
+  clear_memory: 'Clear everything Hippo remembers',
+  clear_memory_confirm: 'Yes, clear it',
+  clear_memory_cancel: 'Keep it',
+  clear_memory_done: 'CLEARED ✓',
+  copy_brief: 'Copy this brief',
+  copied: 'Copied',
 }
 
 // First pass — pending native review.
@@ -102,6 +142,26 @@ const hi: Catalog = {
   ob_not_now: 'अभी नहीं',
   ob_agree_start: 'सहमत हूँ, शुरू करें',
   ob_replay: 'परिचय दोबारा देखें',
+  suggestions_label: 'सुझाए गए प्रश्न',
+  chip_edit_hint: 'भेजने से पहले बदलने के लिए दबाए रखें',
+  composer_placeholder_connecting: 'जुड़ रहे हैं…',
+  jump_latest: 'नवीनतम',
+  queued_note: '{n} कतार में — दोबारा जुड़ते ही भेज दिए जाएँगे',
+  ticket_offline_hint: 'ऑर्डर कन्फर्म करने के लिए दोबारा जुड़ें',
+  thread_label: 'बातचीत',
+  intro_dialog: 'परिचय',
+  share_card: 'शेयर कार्ड',
+  close_settings: 'सेटिंग्स बंद करें',
+  close_share: 'शेयर कार्ड बंद करें',
+  settings_language: 'उत्तर की भाषा',
+  settings_memory_title: 'व्यक्तिगत मेमोरी',
+  settings_memory_body: 'Hippo आपकी पसंद और पिछले प्रश्न याद रखता है।',
+  clear_memory: 'Hippo की सारी यादें मिटाएँ',
+  clear_memory_confirm: 'हाँ, मिटाएँ',
+  clear_memory_cancel: 'रहने दें',
+  clear_memory_done: 'मिटा दिया ✓',
+  copy_brief: 'यह ब्रीफ़ कॉपी करें',
+  copied: 'कॉपी हो गया',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -132,6 +192,26 @@ const hiLatn: Catalog = {
   ob_not_now: 'Abhi nahi',
   ob_agree_start: 'Agree karke shuru karo',
   ob_replay: 'Intro dobara dekho',
+  suggestions_label: 'Suggested questions',
+  chip_edit_hint: 'Bhejne se pehle edit karne ke liye dabaye rakho',
+  composer_placeholder_connecting: 'Connect ho raha hai…',
+  jump_latest: 'LATEST',
+  queued_note: '{n} QUEUE mein — reconnect hote hi bhej denge',
+  ticket_offline_hint: 'Order confirm karne ke liye reconnect karo',
+  thread_label: 'Baat-cheet',
+  intro_dialog: 'Intro',
+  share_card: 'Share card',
+  close_settings: 'Settings band karo',
+  close_share: 'Share card band karo',
+  settings_language: 'Answer language',
+  settings_memory_title: 'Personal memory',
+  settings_memory_body: 'Hippo aapki preferences aur pichhle questions yaad rakhta hai.',
+  clear_memory: 'Hippo ki saari memory clear karo',
+  clear_memory_confirm: 'Haan, clear karo',
+  clear_memory_cancel: 'Rehne do',
+  clear_memory_done: 'CLEAR HO GAYA ✓',
+  copy_brief: 'Yeh brief copy karo',
+  copied: 'Copy ho gaya',
 }
 
 /** ar: RTL groundwork only — no copy yet, falls back to en, but flips layout. */
