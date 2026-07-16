@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hippo Design Language — Dark Glass Instrument</title>
+<meta name="description" content="The Hippo design language: one amber accent, semantic up/down, dark locked hero with a light lean as a pure token swap, and a server-driven card vocabulary." />
+<link rel="icon" type="image/png" href="./assets/hippo-mascot.png" />
+<script>/* pre-paint theme boot — avoids a dark→light flash */
+try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./site.css" />
+<style>
+  .hero{padding:72px 0 24px;text-align:center}
+  .hero h1{font-family:var(--hippo-font-display);font-size:clamp(30px,4vw,46px);font-weight:700;letter-spacing:-.015em;line-height:1.1;margin:14px 0 16px}
+  .hero .lede{margin:0 auto}
+
+  /* token swatches */
+  .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px;margin-top:22px}
+  .sw{border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-cell);overflow:hidden;background:var(--hippo-panel)}
+  .sw .fill{height:64px;border-bottom:1px solid var(--hippo-hairline)}
+  .sw .meta{padding:9px 11px}
+  .sw .name{font-family:var(--hippo-font-mono);font-size:10px;color:var(--hippo-text-hi)}
+  .sw .val{font-family:var(--hippo-font-mono);font-size:9.5px;color:var(--hippo-text-faint);margin-top:2px}
+  .group-label{font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.14em;color:var(--hippo-text-faint);margin:30px 0 0}
+
+  /* type specimens */
+  .spec{border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);background:var(--hippo-panel);padding:22px;margin-top:14px}
+  .spec .k{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-faint);margin-bottom:10px}
+  .spec .s-disp{font-family:var(--hippo-font-display);font-size:30px;font-weight:700;letter-spacing:-.015em}
+  .spec .s-body{font-size:14.5px;color:var(--hippo-text-mid);max-width:44em}
+  .spec .s-mono{font-family:var(--hippo-font-mono);font-size:13px}
+  .spec .s-eyebrow{font-family:var(--hippo-font-mono);font-size:var(--hippo-eyebrow-size);letter-spacing:var(--hippo-eyebrow-track);color:var(--hippo-text-faint)}
+
+  /* shape & motion */
+  .shape-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}
+  .shape{background:var(--hippo-card);border:1px solid var(--hippo-hairline);width:120px;height:76px;display:grid;place-items:center;font-family:var(--hippo-font-mono);font-size:9.5px;color:var(--hippo-text-faint)}
+  .motion-demo{display:flex;align-items:center;gap:18px;margin-top:14px;flex-wrap:wrap}
+  .pulse-dot{width:10px;height:10px;border-radius:5px;background:var(--hippo-amber);animation:pulse var(--hippo-motion-pulse)}
+
+  /* specimens grid */
+  .voc{display:flex;flex-direction:column;gap:11px}
+  .voc-label{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-amber);margin-bottom:2px}
+
+  /* theme table + snippet */
+  table.status{width:100%;border-collapse:collapse;margin-top:20px;font-size:13px}
+  table.status th{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-faint);text-align:left;padding:9px 12px;border-bottom:1px solid var(--hippo-hairline)}
+  table.status td{padding:10px 12px;border-bottom:1px dashed var(--hippo-dash);color:var(--hippo-text-mid)}
+  table.status td:first-child{color:var(--hippo-text-hi);font-weight:500}
+  .ok{color:var(--hippo-up)} .na{color:var(--hippo-text-faint)}
+  pre.snippet{background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-cell);padding:16px;font-family:var(--hippo-font-mono);font-size:11.5px;line-height:1.7;color:var(--hippo-text-mid);overflow-x:auto;margin-top:16px}
+  pre.snippet .hl{color:var(--hippo-amber)}
+
+  .rules{margin-top:16px;display:grid;gap:0;border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);overflow:hidden}
+  .rules>div{padding:14px 18px;background:var(--hippo-panel);border-bottom:1px solid var(--hippo-hairline);font-size:13.5px;color:var(--hippo-text-mid)}
+  .rules>div:last-child{border-bottom:none}
+  .rules b{color:var(--hippo-text-hi);font-weight:600}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav">
+    <a class="lockup display" href="/"><span class="chip"><img src="./assets/hippo-mascot.png" alt="Hippo" /></span>Ask Hippo</a>
+    <nav>
+      <a href="/#loop">Product</a>
+      <a href="/#exchanges">For Exchanges</a>
+      <a href="/#trust">Trust</a>
+      <a class="on" href="/design">Design</a>
+    </nav>
+    <button class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
+    <a class="btn amber" href="/#cta">Talk to us</a>
+  </div>
+</header>
+
+<!-- ═══ Hero ═══ -->
+<div class="wrap hero">
+  <div class="chipXL"><img src="./assets/hippo-mascot.png" alt="Hippo mascot" /></div>
+  <div class="eyebrow">HIPPO DESIGN LANGUAGE</div>
+  <h1>Dark Glass Instrument<span style="color:var(--hippo-amber)">.</span></h1>
+  <p class="lede">One amber accent on deep glass surfaces, data set in mono, answers stamped in time. Dark is the locked hero; light is a secondary lean — a pure token swap, never a redesign. Try the toggle ☀ above: this page, and the Ask Hippo pill, re-skin from the same tokens.</p>
+</div>
+
+<!-- ═══ Principles ═══ -->
+<section class="block" id="principles">
+  <div class="wrap">
+    <div class="eyebrow dim">THE RULES THAT DON'T BEND</div>
+    <h2>Six principles.</h2>
+    <div class="grid3">
+      <div class="fcard"><div class="n">01</div><h3>Amber is the only accent</h3><p>#F0B94A is the single brand signal — CTAs, focus, the mark. If something else wants to be amber, it's wrong.</p></div>
+      <div class="fcard"><div class="n">02</div><h3>Up and down are semantics</h3><p>Green means gains/buy, red means losses/sell — never decoration. A colour that carries meaning can't be spent on style.</p></div>
+      <div class="fcard"><div class="n">03</div><h3>Dark is the locked hero</h3><p>The product ships dark-first. Light is a supported lean, produced by swapping tokens only — zero layout or rule changes.</p></div>
+      <div class="fcard"><div class="n">04</div><h3>Answers are facts about a moment</h3><p>Every brief carries a timestamp and sources. Data is set in IBM Plex Mono so numbers read as instrument, not prose.</p></div>
+      <div class="fcard"><div class="n">05</div><h3>Solid cards, no blur in scroll</h3><p>Card backgrounds inside the scroll container are solid; backdrop-filter is reserved for full-surface overlays (iOS/WebKit rule).</p></div>
+      <div class="fcard"><div class="n">06</div><h3>The client only draws</h3><p>Cards and capabilities are server-driven. The SDK renders what it's sent — unknown frames get a fallback card, never a crash.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Color tokens ═══ -->
+<section class="block" id="color" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">TOKENS · --hippo-*</div>
+    <h2>Colour.</h2>
+    <p class="lede">The brand core lives at <span class="mono" style="font-size:13px">Reference/brand/hippo-tokens.css</span> in the vault; the SDK's shadow-root set is its superset. Swatches below read the live CSS variables — flip the theme and watch them swap.</p>
+
+    <div class="group-label">SURFACES</div>
+    <div class="swatches" data-tokens="--hippo-bg,--hippo-panel,--hippo-card,--hippo-card-2"></div>
+    <div class="group-label">ACCENT — THE ONLY BRAND ACCENT</div>
+    <div class="swatches" data-tokens="--hippo-amber,--hippo-amber-ink"></div>
+    <div class="group-label">SEMANTIC STATUS — NOT BRAND ACCENTS</div>
+    <div class="swatches" data-tokens="--hippo-up,--hippo-down"></div>
+    <div class="group-label">TEXT TIERS</div>
+    <div class="swatches" data-tokens="--hippo-text-hi,--hippo-text-mid,--hippo-text-dim,--hippo-text-faint"></div>
+    <div class="group-label">LINES</div>
+    <div class="swatches" data-tokens="--hippo-hairline"></div>
+  </div>
+</section>
+
+<!-- ═══ Type ═══ -->
+<section class="block" id="type" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">TYPE</div>
+    <h2>Three voices.</h2>
+    <div class="spec">
+      <div class="k">DISPLAY — OUTFIT 700 · HEADLINES, MARKS, CTAS</div>
+      <div class="s-disp">Ask. Understand. Confirm. Act.</div>
+    </div>
+    <div class="spec">
+      <div class="k">BODY — INTER 400/500 · PROSE, EXPLANATIONS</div>
+      <div class="s-body">Spot ETFs saw their largest single-day outflow in six weeks, and long liquidations added pressure overnight. No protocol or exchange incident behind the move.</div>
+    </div>
+    <div class="spec">
+      <div class="k">DATA — IBM PLEX MONO 400/500/600 · NUMBERS, LABELS, STATUS, EYEBROWS</div>
+      <div class="s-mono">BTC/INR · SPOT &nbsp; ₹5,31,904 &nbsp; <span class="v down mono">−4.2%</span> &nbsp; <span class="v up mono">+2.8%</span> &nbsp; AS OF 14:32:08 IST</div>
+      <div class="s-eyebrow" style="margin-top:12px">EYEBROWS RUN 10PX WITH 0.12EM TRACKING — ALWAYS MONO, ALWAYS QUIET</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Shape & motion ═══ -->
+<section class="block" id="motion" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">SHAPE &amp; MOTION</div>
+    <h2>Quiet geometry, one heartbeat.</h2>
+    <div class="shape-row">
+      <div class="shape" style="border-radius:var(--hippo-radius-card)">card · 16px</div>
+      <div class="shape" style="border-radius:var(--hippo-radius-cell)">cell · 10px</div>
+      <div class="shape" style="border-radius:var(--hippo-radius-button)">button · 12px</div>
+      <div class="shape" style="border-radius:var(--hippo-radius-pill);width:150px">pill · 999px</div>
+    </div>
+    <div class="motion-demo">
+      <span class="pulse-dot"></span>
+      <span class="mono" style="font-size:11px;color:var(--hippo-text-dim)">pulse 1.6s — waiting / live</span>
+      <button class="btn ghost" id="replayIn" style="font-size:12px;padding:8px 14px">▶ replay card-in (0.32s ease, fade + 10px rise)</button>
+      <span class="mono" style="font-size:10px;color:var(--hippo-text-faint)">prefers-reduced-motion: everything stops</span>
+    </div>
+    <div id="cardInStage" style="max-width:420px;margin-top:14px"></div>
+  </div>
+</section>
+
+<!-- ═══ Card vocabulary ═══ -->
+<section class="block" id="cards" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">THE CARD VOCABULARY</div>
+    <h2>The server speaks in cards.</h2>
+    <p class="lede">Protocol frames render into a fixed vocabulary — the SDK draws, it never computes. Money arrives as pre-formatted display strings; a hallucinated figure cannot reach a stat cell because numbers are retrieval, prose is generation.</p>
+    <div class="grid2" style="align-items:start">
+      <div class="voc">
+        <div class="voc-label">USER ECHO</div>
+        <div class="d-user">why is BTC down today?</div>
+        <div class="voc-label" style="margin-top:10px">THINKING</div>
+        <div class="d-card d-think"><span class="pulse"></span>Parsing intent…</div>
+        <div class="voc-label" style="margin-top:10px">RESEARCH BRIEF</div>
+        <div class="d-card">
+          <div class="d-eyebrow">RESEARCH BRIEF <span class="tag-live">LIVE</span></div>
+          <div class="d-headline">BTC is down 4.2% on ETF outflows</div>
+          <div class="d-body">Spot ETFs saw their largest single-day outflow in six weeks, and long liquidations added pressure overnight.</div>
+          <div class="d-stats">
+            <div><div class="k">PRICE</div><div class="v">$61,240</div></div>
+            <div><div class="k">24H</div><div class="v down">−4.2%</div></div>
+            <div><div class="k">FUNDING</div><div class="v down">−0.008%</div></div>
+          </div>
+          <svg width="100%" height="40" viewBox="0 0 280 40" preserveAspectRatio="none" style="display:block"><path d="M0,7 L23,11 L46,9 L70,15 L93,18 L116,17 L140,22 L163,25 L186,23 L210,28 L233,31 L256,29 L280,34" fill="none" style="stroke:var(--hippo-down)" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          <div class="d-livebar"><span>AS OF 14:32:08 IST</span><span class="act">↻ REFRESH</span><span class="act">↗ SHARE</span></div>
+        </div>
+      </div>
+      <div class="voc">
+        <div class="voc-label">ORDER TICKET · PREPARED</div>
+        <div class="d-ticket">
+          <div class="d-eyebrow" style="color:var(--hippo-amber)">ORDER TICKET · PREPARED</div>
+          <div class="d-trow"><span class="k">INSTRUMENT</span><span class="v">BTC/INR · SPOT</span></div>
+          <div class="d-trow"><span class="k">SIDE / SIZE</span><span class="v" style="color:var(--hippo-up)">BUY · 0.1 BTC</span></div>
+          <div class="d-trow" style="border-bottom:none"><span class="k">EST. COST</span><span class="v" style="color:var(--hippo-amber)">₹5,31,904 incl. fees</span></div>
+          <button class="d-cta display" tabindex="-1">Review &amp; confirm in your app →</button>
+          <div class="d-note">NOTHING EXECUTES WITHOUT YOUR CONFIRM</div>
+        </div>
+        <div class="voc-label" style="margin-top:10px">ADVICE DECLINE — THE GUARDRAIL, VISIBLE</div>
+        <div class="d-decline">
+          <div class="d-eyebrow" style="color:var(--hippo-amber)">◇ NO ADVICE — BY DESIGN</div>
+          <div class="d-body" style="color:var(--hippo-text-hi);margin:8px 0 10px">I can't tell you whether to buy — that's a call Hippo never makes. Here's what's true about BTC right now.</div>
+          <div class="d-trow"><span class="k">PRICE</span><span class="v">$61,240</span></div>
+          <div class="d-trow" style="border-bottom:none"><span class="k">24H</span><span class="v down">−4.2%</span></div>
+          <div class="d-chips"><span>Why is BTC moving today?</span><span>What's BTC's volume?</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Voice ═══ -->
+<section class="block" id="voice" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">VOICE</div>
+    <h2>Confident. Factual. Never a shill.</h2>
+    <div class="rules">
+      <div><b>Explains, never advises.</b> No signals, no predictions, no "what would you do?" Declines are delivered with conviction — no apology — then pivot to facts that actually help.</div>
+      <div><b>Speak the trader's language.</b> English in → English out. हिन्दी in → हिन्दी out. Hinglish in → Hinglish out. RTL scripts get a mirrored chrome.</div>
+      <div><b>Answers are facts about a moment.</b> Timestamps and sources on every brief; a cached answer says so, and keeps its original "as of".</div>
+      <div><b>Money is never computed client-side.</b> All amounts arrive as pre-formatted strings — Indian digit grouping where the venue trades in ₹.</div>
+      <div><b>Failure is honest.</b> Degraded mode says "fresh research may take longer" and keeps orders, prices and saved briefs live. Errors keep the user's words: "Your question is saved — nothing you wrote is lost."</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Theme system ═══ -->
+<section class="block" id="theming" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow dim">THEME SYSTEM</div>
+    <h2>Theme-aware by token swap.</h2>
+    <p class="lede">Every surface resolves through <span class="mono" style="font-size:13px">--hippo-*</span> custom properties. Light mode redeclares token values only — no layout, no new rules — so the dark hero stays pixel-locked and a theme can never fork the design. The choice is a manual, persisted toggle (like the exchange apps we embed in), not a media query.</p>
+
+    <table class="status">
+      <thead><tr><th>SURFACE</th><th>MECHANISM</th><th>STATUS</th></tr></thead>
+      <tbody>
+        <tr><td>Brand core (vault)</td><td><span class="mono">Reference/brand/hippo-tokens.css + .json</span> — dark hero + light lean, source of truth</td><td class="ok">✓ DONE</td></tr>
+        <tr><td>Thin-client SDK</td><td>Tokenized shadow-root styles; <span class="mono">:host([data-theme="light"])</span> pure swap (PR #12, merged)</td><td class="ok">✓ DONE</td></tr>
+        <tr><td>Partner opt-in</td><td>One attribute on the embed tag — <span class="mono">data-hippo-theme="light"</span>; host can flip it live on <span class="mono">&lt;hippo-root&gt;</span></td><td class="ok">✓ DONE</td></tr>
+        <tr><td>Marketing site + /design</td><td>Same tokens via <span class="mono">site.css</span>; persisted toggle syncs the page and the embedded pill</td><td class="ok">✓ DONE</td></tr>
+        <tr><td>host-demo</td><td>Deliberately plain fake-partner page — the noise the SDK must coexist with</td><td class="na">N/A BY DESIGN</td></tr>
+        <tr><td>Partner accent theming</td><td>Venue-branded accents beyond light/dark — a <span class="mono">hippo init</span> design-extraction question</td><td class="na">FUTURE · CLI PHASE 4</td></tr>
+      </tbody>
+    </table>
+
+    <pre class="snippet">&lt;!-- the entire partner-side theme decision --&gt;
+&lt;script src="https://cdn.hippo.app/loader.js" async
+        data-hippo-key="pk_yourvenue"
+        <span class="hl">data-hippo-theme="light"</span>&gt;&lt;/script&gt;
+
+/* or flip it live from the host app's own theme toggle */
+document.querySelector('hippo-root').dataset.theme = 'light'</pre>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="row">
+      <a class="lockup display" href="/"><span class="chip"><img src="./assets/hippo-mascot.png" alt="" /></span>Ask Hippo</a>
+      <nav>
+        <a href="/#loop">Product</a>
+        <a href="/#exchanges">For Exchanges</a>
+        <a href="/#trust">Trust</a>
+        <a class="on" href="/design">Design</a>
+      </nav>
+    </div>
+    <div class="fine">DARK GLASS INSTRUMENT · ONE ACCENT · UP/DOWN ARE SEMANTICS · DARK IS THE LOCKED HERO</div>
+  </div>
+</footer>
+
+<script type="module" src="./theme.js"></script>
+<script>
+  // Live swatches: read each token off :root so the grid always shows the
+  // CURRENT theme's resolved value — the toggle demos the swap for free.
+  function paintSwatches() {
+    const cs = getComputedStyle(document.documentElement)
+    for (const grid of document.querySelectorAll('[data-tokens]')) {
+      grid.innerHTML = ''
+      for (const name of grid.dataset.tokens.split(',')) {
+        const val = cs.getPropertyValue(name).trim()
+        grid.insertAdjacentHTML('beforeend', `
+          <div class="sw">
+            <div class="fill" style="background:var(${name})"></div>
+            <div class="meta"><div class="name">${name}</div><div class="val">${val}</div></div>
+          </div>`)
+      }
+    }
+  }
+  paintSwatches()
+  new MutationObserver(paintSwatches).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+
+  // Replayable card-in specimen.
+  const stage = document.getElementById('cardInStage')
+  const sample = '<div class="d-card in"><div class="d-eyebrow">MOTION SPECIMEN</div><div class="d-headline">Cards enter with a 10px rise.</div><div class="d-body">0.32s ease, opacity 0→1. That is the entire entrance vocabulary — nothing slides, nothing bounces.</div></div>'
+  document.getElementById('replayIn').addEventListener('click', () => {
+    stage.innerHTML = ''
+    requestAnimationFrame(() => requestAnimationFrame(() => { stage.innerHTML = sample }))
+  })
+  stage.innerHTML = sample
+</script>
+</body>
+</html>

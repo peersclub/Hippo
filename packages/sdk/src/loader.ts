@@ -12,6 +12,29 @@ type LoaderConfig = {
   key: string
   gateway: string
   panelUrl: string
+  locale: string
+}
+
+/** Pill label per locale — inlined (the loader stays zero-dep and under its
+ * size gate; it must NOT import the full i18n catalog). The panel chunk uses
+ * the real catalog + resolveLocale for everything else. */
+const PILL_LABEL: Record<string, string> = {
+  en: 'Ask Hippo',
+  hi: 'Hippo से पूछें',
+  'hi-Latn': 'Hippo se poochho',
+  ar: 'Ask Hippo', // RTL groundwork: layout flips, copy pending
+}
+const RTL = new Set(['ar'])
+
+/** Minimal locale normalize (the panel does the full version). */
+function normalizeLocale(raw: string): string {
+  if (raw in PILL_LABEL) return raw
+  const lower = raw.toLowerCase()
+  if (lower === 'hi-latn' || lower === 'hi_latn') return 'hi-Latn'
+  const primary = lower.split(/[-_]/)[0]
+  if (primary === 'hi') return 'hi'
+  if (primary === 'ar') return 'ar'
+  return 'en'
 }
 
 ;(() => {
@@ -22,6 +45,7 @@ type LoaderConfig = {
       key: script.dataset.hippoKey ?? '',
       gateway: script.dataset.hippoGateway ?? 'https://gw.hippo.app',
       panelUrl: script.dataset.hippoPanel ?? new URL('panel.js', script.src).href,
+      locale: normalizeLocale(script.dataset.hippoLocale ?? 'en'),
     }
     if (!config.key) return
 
@@ -29,6 +53,11 @@ type LoaderConfig = {
       const host = document.createElement('hippo-root')
       // Fixed stacking context of our own; the host's layout never shifts.
       host.style.cssText = 'position:fixed;z-index:2147483000;inset:auto 0 0 auto;'
+      // Optional light theme — a pure token swap in the panel (default: dark).
+      if (script.dataset.hippoTheme === 'light') host.dataset.theme = 'light'
+      // Locale + direction. dir on the host propagates RTL into the shadow tree.
+      host.dataset.locale = config.locale
+      if (RTL.has(config.locale)) host.setAttribute('dir', 'rtl')
       const shadow = host.attachShadow({ mode: 'closed' })
 
       const style = document.createElement('style')
@@ -50,10 +79,12 @@ type LoaderConfig = {
       `
       shadow.appendChild(style)
 
+      const label = PILL_LABEL[config.locale] ?? PILL_LABEL.en
       const pill = document.createElement('button')
       pill.className = 'pill'
-      pill.setAttribute('aria-label', 'Ask Hippo')
-      pill.innerHTML = '<span class="mark">H</span>Ask Hippo<span class="evt"></span>'
+      pill.setAttribute('aria-label', label)
+      // label is a static constant (no user input) — safe as innerHTML.
+      pill.innerHTML = `<span class="mark">H</span>${label}<span class="evt"></span>`
       shadow.appendChild(pill)
       document.body.appendChild(host)
 
@@ -72,6 +103,18 @@ type LoaderConfig = {
             .then(() => pill.dispatchEvent(new CustomEvent('hippo:open')))
             .catch(() => (pill.style.display = 'none')),
       )
+
+      // External open surface. WebView shells and host apps sit OUTSIDE the
+      // closed shadow root, so the pill is unreachable to them. Two additive
+      // hooks, both routed through the exact same path as a pill click:
+      //   <script … data-hippo-open="auto">                  → open once mounted
+      //   hippoRoot.dispatchEvent(new Event('hippo:open'))   → open on demand
+      const openPanel = () =>
+        void loadPanel()
+          .then(() => pill.dispatchEvent(new CustomEvent('hippo:open')))
+          .catch(() => {})
+      host.addEventListener('hippo:open', openPanel)
+      if (script.dataset.hippoOpen === 'auto') openPanel()
     }
 
     if (document.readyState === 'complete') {

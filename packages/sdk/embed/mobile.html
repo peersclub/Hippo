@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>Ask Hippo</title>
+<!--
+  Hippo mobile embed shell — what native WebViews load.
+
+  A WebView is just a browser, so the entire thin-client contract holds:
+  the same loader, the same panel, the same server-driven cards. This page
+  adds only what a native container needs:
+
+    1. Config via query string (a native app can't set script dataset attrs):
+         mobile.html?key=pk_…&gateway=https://gw.hippo.app
+                    &theme=light&locale=hi&open=auto|pill&loader=/loader.js
+    2. Auto-open (default) — inside an app there is no host page to float a
+       pill over; the panel opens straight into the mobile posture set
+       (sheet → full, ≤640px viewport rules in the SDK's posture matrix).
+    3. A unified native bridge (window.HippoShell) that speaks whichever
+       channel the container provides: WKWebView script-message handlers,
+       Android @JavascriptInterface, React Native WebView, Flutter
+       JavaScript channels.
+
+  JS → native events (HippoShell.post):
+    { type: "ready" }              shell booted, pill mounted
+    { type: "open" }               panel opened
+    plus a forward-compatible relay: any CustomEvent named "hippo:event"
+    dispatched on <hippo-root> is forwarded verbatim — the execution seam's
+    confirm-surface events (Open Decision #6) will arrive through this.
+
+  Native → JS calls (evaluateJavaScript / evaluateJavascript / injectJavaScript):
+    HippoShell.setTheme('light'|'dark')   live token swap, no reload
+    HippoShell.open()                     open the panel on demand
+-->
+<style>
+  :root { color-scheme: dark; --bg: #0E1014; }
+  :root[data-theme="light"] { color-scheme: light; --bg: #E9ECF1; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); }
+  /* Respect notches / home indicators; the panel is fixed-position inside. */
+  body {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+</style>
+</head>
+<body>
+<script>
+  (() => {
+    const q = new URLSearchParams(location.search)
+    const theme = q.get('theme') === 'light' ? 'light' : 'dark'
+    if (theme === 'light') document.documentElement.dataset.theme = 'light'
+
+    /* ── Unified native bridge ─────────────────────────────────────────── */
+    function channel() {
+      if (window.webkit?.messageHandlers?.hippo) {
+        return (json) => window.webkit.messageHandlers.hippo.postMessage(json) // iOS WKWebView
+      }
+      if (window.HippoAndroid?.postMessage) {
+        return (json) => window.HippoAndroid.postMessage(JSON.stringify(json)) // Android @JavascriptInterface
+      }
+      if (window.ReactNativeWebView?.postMessage) {
+        return (json) => window.ReactNativeWebView.postMessage(JSON.stringify(json)) // react-native-webview
+      }
+      if (window.HippoFlutter?.postMessage) {
+        return (json) => window.HippoFlutter.postMessage(JSON.stringify(json)) // Flutter JavascriptChannel
+      }
+      return () => {} // plain browser (dev/preview) — bridge is a no-op
+    }
+    const send = channel()
+
+    window.HippoShell = {
+      post: (event) => { try { send(event) } catch {} },
+      setTheme(t) {
+        if (t === 'light') document.documentElement.dataset.theme = 'light'
+        else delete document.documentElement.dataset.theme
+        const host = document.querySelector('hippo-root')
+        if (host) {
+          if (t === 'light') host.dataset.theme = 'light'
+          else delete host.dataset.theme
+        }
+      },
+      open() {
+        document.querySelector('hippo-root')?.dispatchEvent(new Event('hippo:open'))
+      },
+    }
+
+    /* ── Boot the real SDK — the identical two-stage loader the web uses ── */
+    const s = document.createElement('script')
+    // Shell ships beside the bundles as dist/embed/mobile.html → ../loader.js.
+    s.src = q.get('loader') ?? new URL('../loader.js', location.href).href
+    s.async = true
+    s.dataset.hippoKey = q.get('key') ?? ''
+    if (q.get('gateway')) s.dataset.hippoGateway = q.get('gateway')
+    if (q.get('locale')) s.dataset.hippoLocale = q.get('locale')
+    if (theme === 'light') s.dataset.hippoTheme = 'light'
+    // Inside an app there is no host page — open straight into the panel
+    // unless the container explicitly asks for the pill (?open=pill).
+    if (q.get('open') !== 'pill') s.dataset.hippoOpen = 'auto'
+    document.body.appendChild(s)
+
+    /* ── Signal readiness + forward SDK events to the container ─────────── */
+    new MutationObserver((_, obs) => {
+      const host = document.querySelector('hippo-root')
+      if (!host) return
+      obs.disconnect()
+      HippoShell.post({ type: 'ready' })
+      host.addEventListener('hippo:open', () => HippoShell.post({ type: 'open' }))
+      // Forward-compatible relay for seam/confirm-surface events.
+      host.addEventListener('hippo:event', (e) => HippoShell.post(e.detail ?? { type: 'event' }))
+    }).observe(document.body, { childList: true })
+  })()
+</script>
+</body>
+</html>

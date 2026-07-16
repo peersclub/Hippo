@@ -14,9 +14,14 @@
     "@fastify/cors": "^11.0.0",
     "@hippo/protocol": "workspace:*",
     "@hippo/stores": "workspace:*",
-    "fastify": "^5.4.0"
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-metrics": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
+    "fastify": "^5.4.0",
+    "ioredis": "^5.11.0"
   },
   "devDependencies": {
+    "ioredis-mock": "^8.13.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"

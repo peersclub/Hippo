@@ -7,9 +7,10 @@
 import type { ResearchBrief } from '@hippo/protocol'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { SparklineSvg } from './cards.js'
+import { t } from './i18n.js'
 import { consentRows, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
 import { COPIED_FLASH_MS, shareLink } from './share.js'
-import { memoryOptIn, settingsOpen, shareFrame, venueName } from './state.js'
+import { locale, memoryOptIn, settingsOpen, shareFrame, venueName } from './state.js'
 import { send } from './transport.js'
 
 const reducedMotion = () =>
@@ -251,13 +252,13 @@ export function OnboardingOverlay({
               </div>
             </div>
             <button type="button" class="obcta" onClick={agree}>
-              Agree &amp; start
+              {t(locale.value, 'ob_agree_start')}
             </button>
           </>
         )}
         <Dots step={step} />
         <button type="button" class="obnotnow" onClick={notNow}>
-          Not now
+          {t(locale.value, 'ob_not_now')}
         </button>
       </div>
     </div>
@@ -348,7 +349,7 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
           </div>
         </div>
         <button type="button" class="shitem" onClick={onReplay}>
-          ↺ Replay the intro
+          ↺ {t(locale.value, 'ob_replay')}
         </button>
       </div>
     </div>

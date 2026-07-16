@@ -347,8 +347,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   // ── per-turn routing ───────────────────────────────────────────────────
 
   async function processTurn(session: Session, text: string): Promise<void> {
+    const turnStart = Date.now()
     let intentRes: IntentResult
     let degraded = false
+    // Span + latency around intent classification (intent-p95 rate-card number).
+    const span = telemetry.startSpan('hippo.turn')
+    const intentStart = Date.now()
     try {
       intentRes = await intel.intent({ text, language: session.language })
       telemetry.markHealthy()
@@ -359,7 +363,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       enterDegraded(session, err)
       intentRes = guessIntent(text)
     }
-    telemetry.recordIntent(intentRes.intent)
+    telemetry.recordIntent(intentRes.intent, Date.now() - intentStart)
+    span.setAttribute('hippo.intent', intentRes.intent)
+    span.setAttribute('hippo.degraded', degraded)
+    span.end()
 
     // Low confidence: don't act on a guess — nudge. (Never applies to the
     // deterministic fallback, which pins confidence at 0.5.)
@@ -399,6 +406,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           let pending = ''
           let lastFlush = 0
           let finished = false
+          let firstTokenSent = false
+          // First readable token → the first-token-p95 rate-card number.
+          const markFirstToken = () => {
+            if (firstTokenSent) return
+            firstTokenSent = true
+            telemetry.recordFirstToken(Date.now() - turnStart, intentRes.intent)
+          }
           for await (const ev of intel.respondStream({
             text,
             intent: intentRes.intent,
@@ -411,16 +425,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
               pending += ev.data.text
               const now = Date.now()
               if (pending.trim() && now - lastFlush >= DELTA_FLUSH_MS) {
+                markFirstToken()
                 emit(session, { type: 'brief_delta', text: pending })
                 pending = ''
                 lastFlush = now
               }
             } else if (ev.event === 'done') {
+              // Cache-hit path streams straight to done — that's still the
+              // first token the trader sees.
+              markFirstToken()
               telemetry.recordCache(ev.data.cached)
               emit(session, briefFrame(ev.data, intentRes.intent))
               telemetry.recordResearchAnswered(userKey(session))
               finished = true
             } else if (ev.event === 'replace' || ev.event === 'decline') {
+              // Guardrail trip mid-brief is an advice decline too.
+              telemetry.recordAdvice(true)
               emit(session, declineFrame(ev.data))
               finished = true
             }
@@ -437,6 +457,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
       case 'advice': {
         if (degraded) {
+          telemetry.recordAdvice(true)
           emit(session, staticDeclineFrame())
           return
         }
@@ -446,9 +467,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             intent: 'advice',
             symbol: symbolFromText(text),
           })
-          emit(session, res.kind === 'decline' ? declineFrame(res) : briefFrame(res, 'research'))
+          const declined = res.kind === 'decline'
+          telemetry.recordAdvice(declined)
+          emit(session, declined ? declineFrame(res) : briefFrame(res, 'research'))
         } catch (err) {
           enterDegraded(session, err)
+          telemetry.recordAdvice(true)
           emit(session, staticDeclineFrame())
         }
         return

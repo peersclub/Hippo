@@ -1,0 +1,15 @@
+{
+  "name": "@hippo/site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AskHippo marketing landing page — what Hippo is, with the real SDK embedded as the live demo",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174 --strictPort",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@hippo/sdk": "workspace:*",
+    "vite": "^7.0.0"
+  }
+}

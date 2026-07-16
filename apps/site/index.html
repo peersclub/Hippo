@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AskHippo — The trading agent your traders will ask for</title>
+<meta name="description" content="Hippo lives inside your app and answers the question every trader has — with live facts, then preps the order. On your rails, under your brand, in one conversation." />
+<link rel="icon" type="image/png" href="./assets/hippo-mascot.png" />
+<script>/* pre-paint theme boot — avoids a dark→light flash */
+try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./site.css" />
+<style>
+  /* ── page-specific: hero ── */
+  .hero{padding:84px 0 64px;display:grid;grid-template-columns:1.1fr .9fr;gap:56px;align-items:center}
+  @media(max-width:920px){.hero{grid-template-columns:1fr;padding-top:56px}}
+  .hero h1{font-family:var(--hippo-font-display);font-size:clamp(34px,4.6vw,54px);font-weight:700;line-height:1.08;letter-spacing:-.015em;margin:16px 0 20px}
+  .hero h1 .dot{color:var(--hippo-amber)}
+  .hero .sub{font-size:16.5px;color:var(--hippo-text-mid);max-width:33em}
+  .hero .sub em{color:var(--hippo-text-hi);font-style:normal}
+  .hero .ctas{display:flex;gap:12px;margin:28px 0 36px;flex-wrap:wrap}
+  .statstrip{display:flex;border:1px solid var(--hippo-hairline);border-radius:14px;overflow:hidden;max-width:520px}
+  .statstrip>div{flex:1;padding:13px 16px;background:var(--hippo-panel)}
+  .statstrip>div+div{border-left:1px solid var(--hippo-hairline)}
+  .statstrip .k{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-faint)}
+  .statstrip .v{font-family:var(--hippo-font-mono);font-size:12.5px;font-weight:600;color:var(--hippo-amber);margin-top:3px}
+
+  /* hero demo panel */
+  .demo{background:var(--hippo-panel);border:1px solid var(--hippo-hairline);border-radius:18px;overflow:hidden;box-shadow:var(--hippo-shadow-panel)}
+  .demo-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--hippo-hairline)}
+  .demo-head .t{font-family:var(--hippo-font-display);font-weight:600;font-size:14px;line-height:1.1}
+  .demo-head .s{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-faint)}
+  .demo-thread{padding:16px;display:flex;flex-direction:column;gap:11px;min-height:378px}
+
+  /* trust band */
+  #trust{border-top:1px solid var(--hippo-hairline);border-bottom:1px solid var(--hippo-hairline);background:var(--hippo-panel)}
+  #trust .decline{border-left:3px solid var(--hippo-amber);padding:4px 0 4px 20px;margin:26px 0 8px;max-width:46em;font-size:16.5px;color:var(--hippo-text-hi)}
+  #trust .fcard{background:var(--hippo-card)}
+
+  .final{text-align:center;padding:100px 0}
+  .final h2{margin-bottom:10px}
+  .final p{color:var(--hippo-text-mid);margin-bottom:26px}
+
+  .try-hint{position:fixed;right:26px;bottom:84px;z-index:2147483000;background:var(--hippo-panel);border:1px solid rgba(var(--hippo-amber-rgb),.4);border-radius:12px;padding:9px 13px;font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-amber);pointer-events:none;opacity:0;transition:opacity .4s}
+  .try-hint.show{opacity:1}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav">
+    <a class="lockup display" href="#top"><span class="chip"><img src="./assets/hippo-mascot.png" alt="Hippo" /></span>Ask Hippo</a>
+    <nav>
+      <a href="#loop">Product</a>
+      <a href="#exchanges">For Exchanges</a>
+      <a href="#trust">Trust</a>
+      <a href="#" title="Coming soon">About</a>
+      <a href="#" title="Coming soon">Insights</a>
+    </nav>
+    <button class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
+    <a class="btn amber" href="#cta">Talk to us</a>
+  </div>
+</header>
+
+<!-- ═══ Hero ═══ -->
+<div class="wrap hero" id="top">
+  <div>
+    <div class="eyebrow">FOR EXCHANGES &amp; BROKERS</div>
+    <h1>The trading agent your traders will ask for<span class="dot">.</span></h1>
+    <p class="sub">Hippo lives inside your app and answers the question every trader has — <em>“what’s going on, and what do I do about it?”</em> — with live facts, then preps the order. On your rails, under your brand, in one conversation.</p>
+    <div class="ctas">
+      <a class="btn amber" href="#cta">Talk to us</a>
+      <a class="btn ghost" href="#loop">See how it works</a>
+    </div>
+    <div class="statstrip">
+      <div><div class="k">EMBEDS IN</div><div class="v">WEEKS</div></div>
+      <div><div class="k">EXECUTES ON</div><div class="v">YOUR RAILS</div></div>
+      <div><div class="k">EXPLAINS,</div><div class="v">NEVER ADVISES</div></div>
+    </div>
+  </div>
+
+  <!-- scripted demo loop — the same card vocabulary the real SDK draws -->
+  <div class="demo" aria-label="Hippo demo conversation">
+    <div class="demo-head">
+      <span class="chip md"><img src="./assets/hippo-mascot.png" alt="" /></span>
+      <div><div class="t">Ask Hippo</div><div class="s">MARKET INTELLIGENCE</div></div>
+    </div>
+    <div class="demo-thread" id="demoThread"></div>
+  </div>
+</div>
+
+<!-- ═══ The loop ═══ -->
+<section class="block" id="loop">
+  <div class="wrap">
+    <div class="eyebrow dim">ONE CONVERSATION, THE WHOLE JOURNEY</div>
+    <h2>Ask. Understand. Confirm. Act.</h2>
+    <p class="lede">Traders don’t want another dashboard. They want to ask a question the way they’d ask a sharp friend — and act on the answer without going anywhere. Hippo makes that one loop.</p>
+    <div class="grid4">
+      <div class="fcard">
+        <div class="n">01</div>
+        <h3>Plain language in</h3>
+        <p>“Why is BTC down?” “Any news on SOL?” “What’s a funding rate?” English, हिन्दी, or Hinglish — Hippo gets it.</p>
+      </div>
+      <div class="fcard">
+        <div class="n">02</div>
+        <h3>Live facts out</h3>
+        <p>Sourced answers grounded in real-time price action, news, and market structure. With a timestamp — because answers are facts about a moment.</p>
+      </div>
+      <div class="fcard">
+        <div class="n">03</div>
+        <h3>A ticket, not a guess</h3>
+        <p>State an intent and Hippo preps a structured ticket — instrument, size, price, fees — before anything happens. Estimates end at the confirm.</p>
+      </div>
+      <div class="fcard">
+        <div class="n">04</div>
+        <h3>On your rails</h3>
+        <p>Execution runs through your APIs, your licenses, your custody. Hippo prepares; your venue executes. Funds never touch us.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Trust ═══ -->
+<section class="block" id="trust">
+  <div class="wrap">
+    <div class="eyebrow">PRODUCT LAW, NOT FINE PRINT</div>
+    <h2>Explains. Never advises.</h2>
+    <p class="decline">Ask Hippo whether to buy and it will say no — with conviction — then hand you the facts that actually help. No signals, no predictions, no “what would you do?” An agent that never shills is an agent traders can trust.</p>
+    <div class="grid3">
+      <div class="fcard">
+        <h3>Your compliance team will like us</h3>
+        <p>Information, never investment advice — a tested, measured product behavior with a score attached, not a policy PDF.</p>
+      </div>
+      <div class="fcard">
+        <h3>Data stays home</h3>
+        <p>Your users’ data lives in-region, in your pod, and never leaves. India data in India. Gulf data in the Gulf.</p>
+      </div>
+      <div class="fcard">
+        <h3>Never critical infrastructure</h3>
+        <p>If Hippo pauses, trading continues. We’re the enhancement in your risk review, not a dependency.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ For exchanges ═══ -->
+<section class="block" id="exchanges">
+  <div class="wrap">
+    <div class="eyebrow dim">FOR EXCHANGES</div>
+    <h2>Thin where it touches you. Heavy where it counts.</h2>
+    <p class="lede">You embed a lightweight SDK; we run the intelligence. No models in your stack, no database in your infra, no quarter-long integration project.</p>
+    <div class="grid3">
+      <div class="fcard stat">
+        <div class="big">weeks</div>
+        <h3>Not quarters</h3>
+        <p>The partner-side work is UI embedding and API credentials. If your trading API is production-grade, you’re most of the way there already.</p>
+      </div>
+      <div class="fcard stat">
+        <div class="big">zero</div>
+        <h3>Upgrade effort, ever</h3>
+        <p>Cards and capabilities are server-driven. Every improvement ships to your app the moment we ship it — zero work on your side.</p>
+      </div>
+      <div class="fcard stat">
+        <div class="big">flat</div>
+        <h3>One fee. No meters.</h3>
+        <p>A flat monthly fee linked to active users. No query metering, no per-use charges, no surprise bill after a volatile month.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Final CTA ═══ -->
+<div class="wrap final" id="cta">
+  <div class="chipXL"><img src="./assets/hippo-mascot.png" alt="Hippo mascot" /></div>
+  <h2 class="display">Your traders are going to ask for this.</h2>
+  <p>Be the exchange that already has it.</p>
+  <a class="btn amber" href="mailto:hello@askhippo.example">Talk to us</a>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="row">
+      <a class="lockup display" href="#top"><span class="chip"><img src="./assets/hippo-mascot.png" alt="" /></span>Ask Hippo</a>
+      <nav>
+        <a href="#loop">Product</a>
+        <a href="#exchanges">For Exchanges</a>
+        <a href="#trust">Trust</a>
+        <a href="/design">Design</a>
+        <a href="#">About</a>
+        <a href="#">Insights</a>
+      </nav>
+    </div>
+    <div class="fine">EXPLAINS MARKETS · NEVER ADVISES · NOTHING EXECUTES WITHOUT YOUR CONFIRM ON THE VENUE</div>
+  </div>
+</footer>
+
+<div class="try-hint" id="tryHint">TRY IT LIVE — DEMO ACCOUNT, NO SIGNUP ↘</div>
+
+<script type="module" src="./theme.js"></script>
+<script>
+  /* ── Hero demo: scripted loop of the real card vocabulary ──
+     Content mirrors the review-bundle homepage exactly. Pure theatre —
+     the REAL product demo is the SDK pill (bottom-right), booted below. */
+  const thread = document.getElementById('demoThread')
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  const SPARK = 'M0,8 L23,12 L46,10 L70,16 L93,20 L116,18 L140,24 L163,27 L186,25 L210,31 L233,34 L256,32 L280,38'
+  const brief = `
+    <div class="d-card in">
+      <div class="d-eyebrow">RESEARCH BRIEF <span class="tag-live">LIVE</span></div>
+      <div class="d-headline">BTC is down 4.2% on ETF outflows</div>
+      <div class="d-body">Spot ETFs saw their largest single-day outflow in six weeks, and long liquidations added pressure overnight. No protocol or exchange incident behind the move.</div>
+      <div class="d-stats">
+        <div><div class="k">PRICE</div><div class="v">$61,240</div></div>
+        <div><div class="k">24H</div><div class="v down">−4.2%</div></div>
+        <div><div class="k">FUNDING</div><div class="v down">−0.008%</div></div>
+      </div>
+      <svg width="100%" height="44" viewBox="0 0 280 44" preserveAspectRatio="none" style="display:block"><path d="${SPARK}" fill="none" style="stroke:var(--hippo-down)" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      <div class="d-livebar"><span>AS OF 14:32:08 IST</span><span class="act">↻ REFRESH</span><span class="act">↗ SHARE</span></div>
+    </div>`
+  const ticket = `
+    <div class="d-ticket in">
+      <div class="d-eyebrow" style="color:var(--hippo-amber)">ORDER TICKET · PREPARED</div>
+      <div class="d-trow"><span class="k">INSTRUMENT</span><span class="v">BTC/INR · SPOT</span></div>
+      <div class="d-trow"><span class="k">SIDE / SIZE</span><span class="v" style="color:var(--hippo-up)">BUY · 0.1 BTC</span></div>
+      <div class="d-trow" style="border-bottom:none"><span class="k">EST. COST</span><span class="v" style="color:var(--hippo-amber)">₹5,31,904 incl. fees</span></div>
+      <button class="d-cta display" tabindex="-1">Review &amp; confirm in your app →</button>
+      <div class="d-note">NOTHING EXECUTES WITHOUT YOUR CONFIRM</div>
+    </div>`
+  const think = (txt) => `<div class="d-card d-think in" data-think><span class="pulse"></span>${txt}</div>`
+  const user = (txt) => `<div class="d-user in">${txt}</div>`
+
+  const timeline = [
+    [0, () => { thread.innerHTML = user('why is BTC down today?') }],
+    [600, () => thread.insertAdjacentHTML('beforeend', think('Parsing intent…'))],
+    [1900, () => { thread.querySelector('[data-think]')?.remove(); thread.insertAdjacentHTML('beforeend', brief) }],
+    [5400, () => thread.insertAdjacentHTML('beforeend', user('ok. buy 0.1 btc at market'))],
+    [6100, () => thread.insertAdjacentHTML('beforeend', think('Preparing ticket…'))],
+    [7300, () => { thread.querySelector('[data-think]')?.remove(); thread.insertAdjacentHTML('beforeend', ticket) }],
+  ]
+  const LOOP_MS = 13500
+
+  function play() {
+    for (const [at, fn] of timeline) setTimeout(fn, at)
+  }
+  if (reduced) {
+    // No motion: render the full conversation statically.
+    thread.innerHTML = user('why is BTC down today?') + brief + user('ok. buy 0.1 btc at market') + ticket
+  } else {
+    play()
+    setInterval(play, LOOP_MS)
+  }
+
+  /* ── The REAL demo: the actual Hippo SDK, exactly as a partner embeds it.
+     ?gw=real points at the production gateway (:8788); default is the
+     mock gateway (:8787). Demo account (pk_demo) — no signup. ── */
+  ;(() => {
+    const real = new URLSearchParams(location.search).get('gw') === 'real'
+    const s = document.createElement('script')
+    s.src = '/loader.js'
+    s.async = true
+    s.dataset.hippoKey = 'pk_demo'
+    s.dataset.hippoGateway = real ? 'http://localhost:8788' : 'http://localhost:8787'
+    // Boot the pill in the visitor's chosen theme (theme.js keeps it in step).
+    try { if (localStorage.getItem('hippo_theme') === 'light') s.dataset.hippoTheme = 'light' } catch {}
+    document.body.appendChild(s)
+
+    // Nudge visitors toward the live pill once they've scrolled a bit.
+    const hint = document.getElementById('tryHint')
+    let shown = false
+    addEventListener('scroll', () => {
+      if (!shown && scrollY > 400) {
+        shown = true
+        hint.classList.add('show')
+        setTimeout(() => hint.classList.remove('show'), 6000)
+      }
+    }, { passive: true })
+  })()
+</script>
+</body>
+</html>
