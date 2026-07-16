@@ -1,5 +1,6 @@
 import type { Banner, Frame, OrdersSnapshot, ResearchBrief, UnknownFrame } from '@hippo/protocol'
 import { computed, signal } from '@preact/signals'
+import { isRtl, type Locale } from './i18n.js'
 import type { Posture } from './posture.js'
 
 /** A thread entry: a known frame, or an unknown one destined for FallbackCard. */
@@ -8,6 +9,11 @@ export type ThreadItem = { kind: 'frame'; frame: Frame } | { kind: 'unknown'; fr
 export const sessionId = signal<string | null>(null)
 export const venueName = signal('your exchange')
 export const suggestedQueries = signal<string[]>([])
+
+/** Active chrome locale (embed config or server). Content language is separate
+ * — that's decided server-side. `dir` follows the locale for RTL layout. */
+export const locale = signal<Locale>('en')
+export const dir = computed<'ltr' | 'rtl'>(() => (isRtl(locale.value) ? 'rtl' : 'ltr'))
 
 export const thread = signal<ThreadItem[]>([])
 export const orders = signal<OrdersSnapshot | null>(null)
