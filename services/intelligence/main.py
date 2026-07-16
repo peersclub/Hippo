@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Literal
 
@@ -17,17 +18,20 @@ from pydantic import BaseModel, Field
 
 import intent as intent_engine
 import research
-from cache import AnswerCache
+from cache import make_answer_cache
+from observability import first_token_duration, intent_duration, setup_otel, tracer
 from providers import ProviderRouter
 
 log = logging.getLogger("intelligence")
 
 router = ProviderRouter()
-answer_cache = AnswerCache()
+# In-memory by default; Redis-backed when REDIS_URL is set (same surface).
+answer_cache = make_answer_cache()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    setup_otel()
     await router.startup_probe()
     log.info("intelligence up — provider mode=%s model=%s", router.mode, router.model)
     yield
@@ -62,11 +66,18 @@ class RespondRequest(BaseModel):
 async def classify_intent(req: IntentRequest) -> dict[str, Any]:
     # Never 500 because a model is down: classify() falls back to the mock
     # provider and then to deterministic rules.
-    try:
-        return await intent_engine.classify(req.text, router, req.language)
-    except Exception:  # last-ditch: deterministic rules never raise
-        log.exception("intent pipeline error; serving rule classification")
-        return intent_engine.rule_classify(req.text)
+    start = time.perf_counter()
+    with tracer.start_as_current_span("hippo.intent.classify") as span:
+        try:
+            result = await intent_engine.classify(req.text, router, req.language)
+        except Exception:  # last-ditch: deterministic rules never raise
+            log.exception("intent pipeline error; serving rule classification")
+            result = intent_engine.rule_classify(req.text)
+        intent = str(result.get("intent", "unknown"))
+        span.set_attribute("hippo.intent", intent)
+    # Intent-p95 rate-card number.
+    intent_duration.record((time.perf_counter() - start) * 1000.0, {"intent": intent})
+    return result
 
 
 @app.post("/v1/respond")
@@ -107,6 +118,8 @@ async def respond_stream(req: RespondRequest) -> StreamingResponse:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     async def generate() -> AsyncIterator[str]:
+        start = time.perf_counter()
+        first_token_sent = False
         try:
             async for ev in research.respond_stream(
                 req.text,
@@ -117,6 +130,13 @@ async def respond_stream(req: RespondRequest) -> StreamingResponse:
                 language=req.language,
                 experience_level=req.persona.experienceLevel if req.persona else None,
             ):
+                # First readable output (any event past the retrieval-only
+                # `meta`) → the first-token-p95 rate-card number.
+                if not first_token_sent and ev["event"] != "meta":
+                    first_token_duration.record(
+                        (time.perf_counter() - start) * 1000.0, {"intent": req.intent}
+                    )
+                    first_token_sent = True
                 yield sse(ev["event"], ev["data"])
         except Exception:
             log.exception("respond stream error; emitting fallback decline")

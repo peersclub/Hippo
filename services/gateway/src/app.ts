@@ -12,7 +12,7 @@ import { createIntelligenceClient } from './orchestrator/intelligence.js'
 import { createMarketClient } from './orchestrator/market.js'
 import { createMemoryClient } from './orchestrator/memory.js'
 import { createSeamClient } from './orchestrator/seam.js'
-import { authenticate, SessionStore } from './plugins/auth.js'
+import { authenticate, createSessionStore, type SessionStore } from './plugins/auth.js'
 import { createEmitter, streamSession } from './plugins/sse.js'
 import { Telemetry } from './plugins/telemetry.js'
 
@@ -27,6 +27,9 @@ export type GatewayOptions = {
   strictFrames?: boolean
   /** Allow anonymous {partnerKey} sessions. Defaults to HIPPO_DEV !== '0'. */
   devMode?: boolean
+  /** Override the session store (tests inject a Redis-backed one). Defaults to
+   * Redis when REDIS_URL is set, else in-memory. */
+  sessions?: SessionStore
 }
 
 export async function buildApp(opts: GatewayOptions = {}) {
@@ -36,7 +39,12 @@ export async function buildApp(opts: GatewayOptions = {}) {
   const app = Fastify({ logger: { level: isTest ? 'silent' : 'info' } })
   await app.register(cors, { origin: true })
 
-  const sessions = new SessionStore()
+  const sessions =
+    opts.sessions ??
+    createSessionStore({
+      ...(process.env.REDIS_URL ? { redisUrl: process.env.REDIS_URL } : {}),
+      log: app.log,
+    })
   const telemetry = new Telemetry()
   const emit = createEmitter({ strict: opts.strictFrames ?? isTest, log: app.log })
   const orchestrator = createOrchestrator({
@@ -69,7 +77,11 @@ export async function buildApp(opts: GatewayOptions = {}) {
 
   app.get('/v1/stream', async (req, reply) => {
     const { session: sessionId } = req.query as { session?: string }
-    const session = sessionId ? sessions.get(sessionId) : null
+    // Live object first; on a Redis-backed store, fall back to a durable cold
+    // resume (rebuild + replay the frame journal) so a reconnect survives a
+    // pod restart. In-memory stores have no `resume` — a miss stays a miss.
+    let session = sessionId ? sessions.get(sessionId) : null
+    if (!session && sessionId && sessions.resume) session = await sessions.resume(sessionId)
     if (!session) {
       reply.code(404)
       return { error: 'unknown session' }

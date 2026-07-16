@@ -14,6 +14,7 @@ from typing import Any, AsyncIterator
 
 from cache import AnswerCache, volatility_scaled_ttl
 from guardrail import detect_advice_language
+from observability import record_respond_outcome
 from marketdata import extract_symbol, fetch_snapshot, to_pair
 from prompts import (
     BRIEF_FORMAT_INSTRUCTIONS,
@@ -351,6 +352,7 @@ async def respond(
     lang = language if language in ("en", "hi", "hinglish") else "en"
 
     if intent == "advice":
+        record_respond_outcome("decline")  # advice-decline rate
         return await build_decline(text, asset, lang)
 
     concept_mode = intent in ("concept", "smalltalk")
@@ -362,6 +364,7 @@ async def respond(
     if hit is not None:
         # Serve the stored brief labeled honestly: cached=true, and the
         # ORIGINAL asOfIso — a cached answer is a fact about ITS moment.
+        record_respond_outcome(str(hit.get("kind", "brief")))
         return {**hit, "cached": True}
 
     answer = await build_brief(
@@ -372,6 +375,7 @@ async def respond(
         language=lang,
         experience_level=experience_level if concept_mode else None,
     )
+    record_respond_outcome(str(answer.get("kind", "brief")))
     if answer.get("kind") == "brief":
         # TTL scaled by realized volatility from the spark line: calm markets
         # serve the brief longer, moving markets expire it fast.
@@ -426,6 +430,7 @@ async def respond_stream(
     lang = language if language in ("en", "hi", "hinglish") else "en"
 
     if intent == "advice":
+        record_respond_outcome("decline")  # advice-decline rate
         yield {"event": "decline", "data": await build_decline(text, asset, lang)}
         return
 
@@ -433,6 +438,7 @@ async def respond_stream(
     cache_scope = _cache_scope(asset, concept_mode, lang, experience_level)
     hit = cache.get(text, cache_scope)
     if hit is not None:
+        record_respond_outcome(str(hit.get("kind", "brief")))
         yield {"event": "meta", "data": _meta_from_brief(hit)}
         yield {"event": "done", "data": {**hit, "cached": True}}
         return
@@ -475,6 +481,7 @@ async def respond_stream(
         " ".join([prose["headline"], *prose["paragraphs"], *prose["followups"]])
     )
     if flagged:
+        record_respond_outcome("decline")  # guardrail trip is a decline too
         yield {
             "event": "replace",
             "data": await build_decline(text, asset, lang, snapshot=snapshot),
@@ -488,4 +495,5 @@ async def respond_stream(
         brief,
         ttl_s=volatility_scaled_ttl(brief.get("sparkPoints")),
     )
+    record_respond_outcome("brief")
     yield {"event": "done", "data": brief}

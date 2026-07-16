@@ -14,10 +14,13 @@ bucket makes "as of" honest: two users in the same window share a moment.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 import time
-from typing import Any, Sequence
+from typing import Any, Protocol, Sequence
 
+from observability import record_cache
 from textutil import canonical_text
 
 DEFAULT_TTL_S = 120.0
@@ -108,8 +111,10 @@ class AnswerCache:
             if entry is not None:
                 del self._store[key]
             self.misses += 1
+            record_cache(False)
             return None
         self.hits += 1
+        record_cache(True)
         return entry[1]
 
     def set(
@@ -133,3 +138,108 @@ class AnswerCache:
             "entries": len(self._store),
             "hitRate": round(self.hits / total, 4) if total else 0.0,
         }
+
+
+class AnswerCacheLike(Protocol):
+    """The cache surface the research engine depends on. Both the in-memory
+    AnswerCache and the Redis backend satisfy it, so the swap is invisible."""
+
+    def get(
+        self, text: str, symbol: str, now: float | None = None
+    ) -> dict[str, Any] | None: ...
+
+    def set(
+        self,
+        text: str,
+        symbol: str,
+        answer: dict[str, Any],
+        now: float | None = None,
+        ttl_s: float | None = None,
+    ) -> None: ...
+
+    def stats(self) -> dict[str, Any]: ...
+
+
+class RedisAnswerCache:
+    """Redis-backed answer cache — same surface as AnswerCache, selected when
+    REDIS_URL is set (AnswerCache stays the default fallback otherwise).
+
+    Key-compatible with the in-memory shape: `cache:{canonical}:{window}`,
+    where canonical already folds phrasing/language/symbol (see canonicalize),
+    and the 5-minute window bucket keeps "as of" honest. The volatility-scaled
+    TTL is preserved verbatim — `set()` forwards ttl_s to Redis PX, so a calm
+    market's brief lives longer and a moving market's expires fast, exactly as
+    in-memory. Redis handles expiry; the window bucket bounds staleness.
+
+    The command surface is the sync `redis` client (get/set PX/scan_iter), so
+    the cache stays synchronous like the surface research.py calls into.
+    """
+
+    PREFIX = "cache:"
+
+    def __init__(self, client: Any, ttl_s: float = DEFAULT_TTL_S) -> None:
+        self.client = client
+        self.ttl_s = ttl_s
+        self.hits = 0
+        self.misses = 0
+
+    def _key(self, text: str, symbol: str, now: float) -> str:
+        return f"{self.PREFIX}{canonicalize(text, symbol)}:{window_bucket(now)}"
+
+    def get(
+        self, text: str, symbol: str, now: float | None = None
+    ) -> dict[str, Any] | None:
+        now = now if now is not None else time.time()
+        raw = self.client.get(self._key(text, symbol, now))
+        if raw is None:
+            self.misses += 1
+            record_cache(False)
+            return None
+        self.hits += 1
+        record_cache(True)
+        return json.loads(raw)
+
+    def set(
+        self,
+        text: str,
+        symbol: str,
+        answer: dict[str, Any],
+        now: float | None = None,
+        ttl_s: float | None = None,
+    ) -> None:
+        now = now if now is not None else time.time()
+        ttl = self.ttl_s if ttl_s is None else ttl_s
+        self.client.set(
+            self._key(text, symbol, now), json.dumps(answer), px=int(ttl * 1000)
+        )
+
+    def stats(self) -> dict[str, Any]:
+        total = self.hits + self.misses
+        try:
+            entries = sum(1 for _ in self.client.scan_iter(match=f"{self.PREFIX}*"))
+        except Exception:
+            entries = 0
+        return {
+            "entries": entries,
+            "hitRate": round(self.hits / total, 4) if total else 0.0,
+        }
+
+
+def make_answer_cache(
+    redis_url: str | None = None,
+    client: Any | None = None,
+    ttl_s: float = DEFAULT_TTL_S,
+) -> AnswerCacheLike:
+    """Pick the cache backend: Redis when configured (REDIS_URL or an injected
+    client — the latter is how tests use fakeredis), else in-memory. The
+    `redis` import is lazy so the default path never needs it installed."""
+    url = redis_url if redis_url is not None else os.getenv("REDIS_URL")
+    if client is not None:
+        return RedisAnswerCache(client, ttl_s=ttl_s)
+    if url:
+        import redis  # lazy: only when Redis is actually configured
+
+        return RedisAnswerCache(
+            redis.Redis.from_url(url, decode_responses=True), ttl_s=ttl_s
+        )
+    return AnswerCache(ttl_s=ttl_s)

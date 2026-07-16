@@ -16,7 +16,8 @@
  * surface — see Build Plan/10 BE Architecture §4.
  */
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
-import { InMemoryJournal, type Journal, type JournalEntry } from './sse.js'
+import { createRedisClient, type RedisClient } from './redis.js'
+import { InMemoryJournal, type Journal, type JournalEntry, RedisJournal } from './sse.js'
 
 export type PartnerConfig = {
   partnerId: string
@@ -89,7 +90,31 @@ export type Session = {
 const SESSION_TTL_MS = 30 * 60_000
 const SWEEP_INTERVAL_MS = 60_000
 
-export class SessionStore {
+function newSessionId(): string {
+  return `s_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+}
+
+function clearTicketTimers(session: Session): void {
+  for (const ticket of session.tickets.values()) {
+    if (ticket.fillTimer) clearTimeout(ticket.fillTimer)
+  }
+}
+
+/**
+ * Session store surface. In-memory by default; a Redis-backed implementation
+ * (selected by REDIS_URL) sits behind the SAME interface — see BE doc §4.
+ * `resume` is the optional cold-reconnect path: reconstruct a session (and
+ * replay its durable frame journal) on a pod that never saw its `create`.
+ */
+export interface SessionStore {
+  create(partner: PartnerConfig, venueUserId: string | null): Session
+  /** The live session, TTL refreshed; null if unknown/expired on this pod. */
+  get(id: string): Session | null
+  /** Durable cold-start resume (Redis only); undefined for in-memory. */
+  resume?(id: string): Promise<Session | null>
+}
+
+export class InMemorySessionStore implements SessionStore {
   private sessions = new Map<string, Session>()
 
   constructor() {
@@ -99,7 +124,7 @@ export class SessionStore {
 
   create(partner: PartnerConfig, venueUserId: string | null): Session {
     const session: Session = {
-      id: `s_${randomUUID().replaceAll('-', '').slice(0, 12)}`,
+      id: newSessionId(),
       partner,
       venueUserId,
       seq: 0,
@@ -126,9 +151,7 @@ export class SessionStore {
   }
 
   private evict(session: Session): void {
-    for (const ticket of session.tickets.values()) {
-      if (ticket.fillTimer) clearTimeout(ticket.fillTimer)
-    }
+    clearTicketTimers(session)
     this.sessions.delete(session.id)
   }
 
@@ -138,6 +161,163 @@ export class SessionStore {
       if (session.expiresAt < now) this.evict(session)
     }
   }
+}
+
+type StoreLog = { error: (obj: object, msg: string) => void }
+
+/** Serialized session metadata mirrored to Redis (`session:{id}:meta`). */
+type SessionMeta = {
+  partnerId: string
+  venueUserId: string | null
+  seq: number
+  language: string | null
+  degradedBannerShown: boolean
+}
+
+/**
+ * Redis-backed session store (BE doc §4). Live session OBJECTS stay pod-local
+ * (they carry the live SSE writer + in-process fill timers, so SSE is sticky-
+ * routed) while their metadata and frame journal are mirrored to Redis with a
+ * TTL-refreshed key. That durability powers `resume`: a cold pod rebuilds the
+ * session from `session:{id}:meta` and replays `session:{id}:frames`, so
+ * Last-Event-ID reconnects survive a restart. The synchronous `create`/`get`
+ * surface is identical to the in-memory store.
+ */
+export class RedisSessionStore implements SessionStore {
+  private local = new Map<string, Session>()
+  private pending: Promise<unknown> = Promise.resolve()
+
+  constructor(
+    private readonly redis: RedisClient,
+    private readonly log?: StoreLog,
+  ) {
+    setInterval(() => this.sweep(), SWEEP_INTERVAL_MS).unref()
+  }
+
+  private metaKey(id: string): string {
+    return `session:${id}:meta`
+  }
+
+  private framesKey(id: string): string {
+    return `session:${id}:frames`
+  }
+
+  create(partner: PartnerConfig, venueUserId: string | null): Session {
+    const id = newSessionId()
+    const session: Session = {
+      id,
+      partner,
+      venueUserId,
+      seq: 0,
+      journal: new RedisJournal(this.redis, this.framesKey(id), this.log),
+      live: null,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+      degradedBannerShown: false,
+      tickets: new Map(),
+    }
+    this.local.set(id, session)
+    this.persist(session)
+    return session
+  }
+
+  get(id: string): Session | null {
+    const session = this.local.get(id)
+    if (!session) return null
+    if (session.expiresAt < Date.now()) {
+      this.evict(session)
+      return null
+    }
+    session.expiresAt = Date.now() + SESSION_TTL_MS
+    this.enqueue(() => this.redis.pexpire(this.metaKey(id), SESSION_TTL_MS))
+    return session
+  }
+
+  async resume(id: string): Promise<Session | null> {
+    const live = this.local.get(id)
+    if (live && live.expiresAt >= Date.now()) return this.get(id)
+
+    const raw = await this.redis.get(this.metaKey(id))
+    if (!raw) return null
+    let meta: SessionMeta
+    try {
+      meta = JSON.parse(raw) as SessionMeta
+    } catch {
+      return null
+    }
+    const partner = partnerById(meta.partnerId)
+    if (!partner) return null
+
+    const journal = new RedisJournal(this.redis, this.framesKey(id), this.log)
+    await journal.hydrate()
+    const session: Session = {
+      id,
+      partner,
+      venueUserId: meta.venueUserId ?? null,
+      // The journal is the source of truth for the sequence high-water mark.
+      seq: journal.lastSeq(),
+      journal,
+      live: null,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+      ...(meta.language ? { language: meta.language } : {}),
+      degradedBannerShown: Boolean(meta.degradedBannerShown),
+      tickets: new Map(),
+    }
+    this.local.set(id, session)
+    this.persist(session)
+    return session
+  }
+
+  /** Await all pending metadata + journal writes (resume + tests need this). */
+  async flush(): Promise<void> {
+    await this.pending
+    for (const session of this.local.values()) {
+      if (session.journal instanceof RedisJournal) await session.journal.flush()
+    }
+  }
+
+  private persist(session: Session): void {
+    const meta: SessionMeta = {
+      partnerId: session.partner.partnerId,
+      venueUserId: session.venueUserId,
+      seq: session.seq,
+      language: session.language ?? null,
+      degradedBannerShown: session.degradedBannerShown,
+    }
+    this.enqueue(() =>
+      this.redis.set(this.metaKey(session.id), JSON.stringify(meta), 'PX', SESSION_TTL_MS),
+    )
+  }
+
+  private enqueue(op: () => Promise<unknown>): void {
+    this.pending = this.pending
+      .then(op)
+      .catch((err) => this.log?.error({ err }, 'redis session store write failed'))
+  }
+
+  private evict(session: Session): void {
+    clearTicketTimers(session)
+    this.local.delete(session.id)
+    this.enqueue(() => this.redis.del(this.metaKey(session.id), this.framesKey(session.id)))
+  }
+
+  private sweep(): void {
+    const now = Date.now()
+    for (const session of this.local.values()) {
+      if (session.expiresAt < now) this.evict(session)
+    }
+  }
+}
+
+/**
+ * Pick the session store: Redis when configured (REDIS_URL or an injected
+ * client — the latter is how tests use ioredis-mock), else in-memory. Local
+ * dev and the test suite run with no Redis at all.
+ */
+export function createSessionStore(
+  opts: { redis?: RedisClient; redisUrl?: string; log?: StoreLog } = {},
+): SessionStore {
+  const redis = opts.redis ?? (opts.redisUrl ? createRedisClient(opts.redisUrl) : undefined)
+  return redis ? new RedisSessionStore(redis, opts.log) : new InMemorySessionStore()
 }
 
 // ── JWT (HS256, compact serialization) ──────────────────────────────────────

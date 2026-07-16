@@ -1,0 +1,4 @@
+# Test-only deps. Runtime deps come from requirements.txt.
+#   fakeredis — in-process Redis double so cache tests need no real server.
+-r requirements.txt
+fakeredis>=2.20
