@@ -82,6 +82,14 @@ class OpenAICompatProvider:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        # OpenRouter attribution (optional, recommended by OpenRouter for its
+        # dashboard + model rankings). Harmless to send only there, so we gate
+        # on the host; referer is opt-in to avoid asserting a URL we don't own.
+        if "openrouter.ai" in self.base_url:
+            headers["X-Title"] = os.environ.get("OPENROUTER_APP_TITLE", "Hippo")
+            referer = os.environ.get("OPENROUTER_APP_URL", "")
+            if referer:
+                headers["HTTP-Referer"] = referer
         return headers
 
     async def _detect_flavor(self, client: httpx.AsyncClient) -> str:

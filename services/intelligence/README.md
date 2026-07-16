@@ -30,14 +30,16 @@ This service is deliberately **not** part of the JS workspace — `pnpm build`
 | `PORT` | `8791` | HTTP port |
 | `LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint (Ollama default) |
 | `LLM_MODEL` | `qwen3:4b` | Model name passed to `/chat/completions` |
-| `LLM_API_KEY` | — | Optional Bearer token (vLLM deployments) |
+| `LLM_API_KEY` | — | Optional Bearer token (vLLM / OpenRouter) |
 | `LLM_TIMEOUT` | `30` | Per-call timeout, seconds |
 | `MARKET_DATA_URL` | `http://localhost:8790` | `services/market-data` snapshot API |
+| `OPENROUTER_APP_TITLE` | `Hippo` | OpenRouter only: `X-Title` attribution header |
+| `OPENROUTER_APP_URL` | — | OpenRouter only: `HTTP-Referer` header (opt-in) |
 
-## Ollama vs vLLM vs mock
+## Ollama vs vLLM vs OpenRouter vs mock
 
-Both Ollama and vLLM serve `POST /v1/chat/completions`; the service is built
-against that abstraction only.
+Ollama, vLLM and OpenRouter all serve `POST /v1/chat/completions`; the service
+is built against that abstraction only.
 
 - **Local (Ollama):** `ollama pull qwen3:4b`, start Ollama, run `./dev.sh`.
   Detected automatically (`GET /api/version`); calls route through Ollama's
@@ -50,6 +52,17 @@ against that abstraction only.
 - **Production (vLLM):** the swap is pure config —
   `LLM_BASE_URL=http://<vllm-pod>/v1 LLM_MODEL=Qwen/Qwen3-32B LLM_API_KEY=…`.
   No code changes.
+- **Cloud OSS models (OpenRouter):** hosted open-source models, no local GPU.
+  Also pure config —
+  `LLM_BASE_URL=https://openrouter.ai/api/v1 LLM_MODEL=qwen/qwen-2.5-7b-instruct LLM_API_KEY=sk-or-…`.
+  Takes the standard OpenAI path (the Ollama flavor probe won't match). Two
+  things to get right: (1) `LLM_MODEL` must be OpenRouter's **exact** model
+  slug or the `/models` startup probe fails and the service silently stays in
+  mock mode; (2) intent + brief calls use `response_format: json_object`, so
+  pick a model that honors structured output (Qwen2.5-instruct,
+  Llama-3.3-70b-instruct are safe) — otherwise the JSON-parse fallbacks carry
+  more load. `OPENROUTER_APP_TITLE` / `OPENROUTER_APP_URL` set the optional
+  attribution headers.
 - **Mock:** if the endpoint is down (startup probe or any per-request
   failure), the service transparently degrades to a deterministic mock
   provider — canned but well-shaped, snapshot-grounded outputs, seeded by
