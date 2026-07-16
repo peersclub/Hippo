@@ -7,6 +7,8 @@ import { currentOperator, get, post } from './api.js'
 import { AuditPage } from './pages/audit.js'
 import { DashboardPage } from './pages/dashboard.js'
 import { LoginPage } from './pages/login.js'
+import { OperatorsPage } from './pages/operators.js'
+import { PartnerDetailPage } from './pages/partner-detail.js'
 import { PartnersPage } from './pages/partners.js'
 import { PlansPage } from './pages/plans.js'
 import { UserDetailPage, UsersPage } from './pages/users.js'
@@ -18,6 +20,7 @@ const NAV = [
   ['plans', 'Plans'],
   ['users', 'Users'],
   ['memory', 'Memory'],
+  ['operators', 'Operators'],
   ['audit', 'Audit'],
 ] as const
 
@@ -25,9 +28,15 @@ function Page() {
   const { page, params } = route.value
   switch (page) {
     case 'partners':
-      return <PartnersPage />
+      return params.length >= 1 ? (
+        <PartnerDetailPage partnerId={params[0] ?? ''} />
+      ) : (
+        <PartnersPage />
+      )
     case 'plans':
       return <PlansPage />
+    case 'operators':
+      return <OperatorsPage />
     case 'users':
       return params.length >= 2 ? (
         <UserDetailPage partnerId={params[0] ?? ''} userId={params[1] ?? ''} />

@@ -4,6 +4,7 @@
  * services/mock-gateway): POST /v1/session, GET /v1/stream (SSE),
  * POST /v1/turns, GET /health. See Build Plan/10 BE Architecture §1–2.
  */
+import { timingSafeEqual } from 'node:crypto'
 import cors from '@fastify/cors'
 import { Uplink } from '@hippo/protocol'
 import {
@@ -39,6 +40,9 @@ export type GatewayOptions = {
   strictFrames?: boolean
   /** Allow anonymous {partnerKey} sessions. Defaults to HIPPO_DEV !== '0'. */
   devMode?: boolean
+  /** Shared secret for /internal/sessions (admin panel). Fail-closed when
+   * unset. Defaults to INTERNAL_API_TOKEN. */
+  internalToken?: string
   /** Partner/plan/user registries. Postgres when DATABASE_URL is set,
    * in-memory (koinbx-dev seed) otherwise. */
   partnerStore?: PartnerStore
@@ -173,6 +177,40 @@ export async function buildApp(opts: GatewayOptions = {}) {
 
   // In-memory counters for dev; OTel + telemetry_events replace this in pods.
   app.get('/internal/metrics', async () => telemetry.snapshot())
+
+  // ── live-session inventory + kill switch (admin panel) ──────────────────
+  // Guarded by INTERNAL_API_TOKEN (timing-safe, fail-closed) — unlike the
+  // mTLS-assumed routes above, revoking sessions is a mutating power.
+  const internalToken = opts.internalToken ?? process.env.INTERNAL_API_TOKEN ?? ''
+  function internalGuard(
+    req: { headers: Record<string, unknown> },
+    reply: { code: (n: number) => { send: (b: unknown) => unknown } },
+  ): boolean {
+    if (!internalToken) {
+      reply.code(503).send({ error: 'sessions surface disabled: INTERNAL_API_TOKEN not set' })
+      return false
+    }
+    const presented = req.headers['x-hippo-internal-token']
+    const actual = Buffer.from(typeof presented === 'string' ? presented : '')
+    const expected = Buffer.from(internalToken)
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      reply.code(401).send({ error: 'invalid internal token' })
+      return false
+    }
+    return true
+  }
+
+  app.get<{ Querystring: { partnerId?: string } }>('/internal/sessions', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const all = sessions.list()
+    const { partnerId } = req.query
+    return partnerId ? all.filter((s) => s.partnerId === partnerId) : all
+  })
+
+  app.delete<{ Params: { id: string } }>('/internal/sessions/:id', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    return { revoked: sessions.revoke(req.params.id) }
+  })
 
   return { app, sessions, emit, telemetry, partners, plans, users }
 }

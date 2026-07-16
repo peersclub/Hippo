@@ -67,6 +67,18 @@ export class Telemetry {
     return n
   }
 
+  /** Current-month MAU per partner — the admin panel's quota view. */
+  mauByPartner(): Record<string, number> {
+    const month = monthKey()
+    const out: Record<string, number> = {}
+    for (const k of this.partnerMauSet) {
+      if (!k.endsWith(`:${month}`)) continue
+      const partnerId = k.slice(0, k.indexOf('\u0000'))
+      out[partnerId] = (out[partnerId] ?? 0) + 1
+    }
+    return out
+  }
+
   recordOrderExecuted(userKey: string): void {
     this.orderMau.add(`${userKey}:${monthKey()}`)
   }
@@ -104,6 +116,7 @@ export class Telemetry {
         month,
         research_answered: countMonth(this.researchMau),
         order_executed: countMonth(this.orderMau),
+        byPartner: this.mauByPartner(),
       },
       cache: {
         hits: this.cacheHits,

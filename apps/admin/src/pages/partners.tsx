@@ -143,6 +143,13 @@ export function PartnersPage() {
                 </select>
               </td>
               <td style="text-align:right; white-space:nowrap">
+                <a
+                  class="btn ghost sm"
+                  style="text-decoration:none"
+                  href={`#/partners/${p.partnerId}`}
+                >
+                  Detail
+                </a>{' '}
                 <button
                   class="btn ghost sm"
                   type="button"

@@ -246,7 +246,12 @@ describe('users + memory proxy', () => {
   })
 
   it('proxies memory list/update/purge with the internal token attached', async () => {
-    const seen: Array<{ url: string; token: string | null; method: string; contentType: string | null }> = []
+    const seen: Array<{
+      url: string
+      token: string | null
+      method: string
+      contentType: string | null
+    }> = []
     const fetchImpl = (async (url: unknown, init?: RequestInit) => {
       const headers = new Headers(init?.headers)
       seen.push({
@@ -345,6 +350,199 @@ describe('metrics + audit', () => {
       action: 'plan.create',
       operatorEmail: 'ops@hippo.dev',
     })
+    await app.close()
+  })
+})
+
+describe('operator management (owner-only)', () => {
+  it('owner can list/create/delete operators; passwordHash never leaves', async () => {
+    const { app, audit } = await testAdmin()
+    const cookie = await login(app)
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/operators',
+      headers: { cookie },
+      payload: { email: 'analyst@hippo.dev', password: 'a-long-password-123', role: 'operator' },
+    })
+    expect(created.statusCode).toBe(200)
+    expect(JSON.stringify(created.json())).not.toContain('passwordHash')
+
+    const list = await app.inject({ method: 'GET', url: '/v1/operators', headers: { cookie } })
+    expect(list.json()).toHaveLength(2)
+    expect(JSON.stringify(list.json())).not.toContain('passwordHash')
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: '/v1/operators/analyst%40hippo.dev',
+      headers: { cookie },
+    })
+    expect(del.json()).toEqual({ deleted: true })
+
+    const actions = (await audit.list({})).rows.map((r) => r.action)
+    expect(actions).toContain('operator.create')
+    expect(actions).toContain('operator.delete')
+    await app.close()
+  })
+
+  it('plain operators get 403; self-delete and last-owner-delete refused', async () => {
+    const { app, operators } = await testAdmin()
+    const ownerCookie = await login(app)
+
+    // Create a non-owner and sign in as them.
+    await app.inject({
+      method: 'POST',
+      url: '/v1/operators',
+      headers: { cookie: ownerCookie },
+      payload: { email: 'viewer@hippo.dev', password: 'another-long-pass-1', role: 'operator' },
+    })
+    const viewerLogin = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'viewer@hippo.dev', password: 'another-long-pass-1' },
+    })
+    const viewerCookie = String(viewerLogin.headers['set-cookie']).split(';')[0] ?? ''
+
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/operators', headers: { cookie: viewerCookie } }))
+        .statusCode,
+    ).toBe(403)
+
+    // Owner cannot delete themselves, nor the last owner.
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: '/v1/operators/ops%40hippo.dev',
+          headers: { cookie: ownerCookie },
+        })
+      ).statusCode,
+    ).toBe(400)
+    expect(await operators.get('ops@hippo.dev')).toBeDefined()
+    await app.close()
+  })
+})
+
+describe('live sessions proxy + partner detail + quota alerts', () => {
+  it('proxies session list/revoke to the gateway with the internal token', async () => {
+    const seen: Array<{ url: string; method: string; token: string | null }> = []
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      seen.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        token: headers.get('x-hippo-internal-token'),
+      })
+      if (String(url).includes('/internal/sessions')) {
+        return new Response(
+          init?.method === 'DELETE'
+            ? '{"revoked":true}'
+            : '[{"id":"s_1","partnerId":"koinbx-dev","venueUserId":"u1","expiresAt":1,"connected":true}]',
+          { status: 200 },
+        )
+      }
+      return new Response('{}', { status: 200 })
+    }) as typeof fetch
+
+    const { app, audit } = await testAdmin({
+      fetchImpl,
+      internalToken: 'itok',
+      gatewayUrl: 'http://gw',
+    })
+    const cookie = await login(app)
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/v1/sessions?partnerId=koinbx-dev',
+      headers: { cookie },
+    })
+    expect(list.json()).toHaveLength(1)
+    expect(seen[0]?.url).toBe('http://gw/internal/sessions?partnerId=koinbx-dev')
+    expect(seen[0]?.token).toBe('itok')
+
+    const kill = await app.inject({
+      method: 'DELETE',
+      url: '/v1/sessions/s_1',
+      headers: { cookie },
+    })
+    expect(kill.json()).toEqual({ revoked: true })
+    expect((await audit.list({})).rows.map((r) => r.action)).toContain('session.revoke')
+    await app.close()
+  })
+
+  it('partner detail aggregates plan, users, MAU-vs-quota and sessions', async () => {
+    const users = new InMemoryUserStore()
+    await users.upsertSeen('koinbx-dev', 'u1')
+    await users.upsertSeen('koinbx-dev', 'u2')
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).includes('/internal/metrics'))
+        return new Response(JSON.stringify({ mau: { byPartner: { 'koinbx-dev': 2 } } }), {
+          status: 200,
+        })
+      return new Response('[]', { status: 200 })
+    }) as typeof fetch
+
+    const { app, plans } = await testAdmin({ users, fetchImpl })
+    const cookie = await login(app)
+    await plans.create({
+      planId: 'pilot',
+      name: 'Pilot',
+      tier: 'pilot',
+      mauQuota: 3,
+      priceMonthlyUsd: null,
+      entitlements: {},
+    })
+    await app.inject({
+      method: 'POST',
+      url: '/v1/partners/koinbx-dev/plan',
+      headers: { cookie },
+      payload: { planId: 'pilot' },
+    })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/partners/koinbx-dev/detail',
+      headers: { cookie },
+    })
+    const detail = res.json()
+    expect(detail.partner.partnerId).toBe('koinbx-dev')
+    expect(detail.partner.jwtSecret).toBeUndefined()
+    expect(detail.plan.planId).toBe('pilot')
+    expect(detail.users.total).toBe(2)
+    expect(detail.mau).toEqual({ current: 2, quota: 3 })
+    await app.close()
+  })
+
+  it('metrics surfaces quota alerts at >=80% usage', async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).includes('/internal/metrics'))
+        return new Response(JSON.stringify({ mau: { byPartner: { 'koinbx-dev': 5 } } }), {
+          status: 200,
+        })
+      return new Response('[]', { status: 200 })
+    }) as typeof fetch
+
+    const { app, plans } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+    await plans.create({
+      planId: 'tiny',
+      name: 'Tiny',
+      tier: 'pilot',
+      mauQuota: 5,
+      priceMonthlyUsd: null,
+      entitlements: {},
+    })
+    await app.inject({
+      method: 'POST',
+      url: '/v1/partners/koinbx-dev/plan',
+      headers: { cookie },
+      payload: { planId: 'tiny' },
+    })
+
+    const res = await app.inject({ method: 'GET', url: '/v1/metrics', headers: { cookie } })
+    const { alerts } = res.json()
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]).toMatchObject({ partnerId: 'koinbx-dev', mau: 5, quota: 5, pct: 100 })
     await app.close()
   })
 })

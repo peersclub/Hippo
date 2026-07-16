@@ -65,6 +65,18 @@ export type Session = {
   degradedBannerShown: boolean
   /** Prepared tickets awaiting confirm/cancel. */
   tickets: Map<string, TicketQuote>
+  /** Force-close the live SSE socket (set by streamSession) — admin revoke. */
+  closeStream?: (() => void) | null
+}
+
+/** What the admin panel sees per live session — no journal, no tickets. */
+export type SessionSummary = {
+  id: string
+  partnerId: string
+  venueUserId: string | null
+  expiresAt: number
+  /** An SSE client is currently attached. */
+  connected: boolean
 }
 
 const SESSION_TTL_MS = 30 * 60_000
@@ -104,6 +116,33 @@ export class SessionStore {
     }
     session.expiresAt = Date.now() + SESSION_TTL_MS
     return session
+  }
+
+  /** Live-session inventory for the admin panel (expired entries skipped). */
+  list(): SessionSummary[] {
+    const now = Date.now()
+    const out: SessionSummary[] = []
+    for (const s of this.sessions.values()) {
+      if (s.expiresAt < now) continue
+      out.push({
+        id: s.id,
+        partnerId: s.partner.partnerId,
+        venueUserId: s.venueUserId,
+        expiresAt: s.expiresAt,
+        connected: s.live !== null,
+      })
+    }
+    return out.sort((a, b) => b.expiresAt - a.expiresAt)
+  }
+
+  /** Admin kill switch: close the SSE socket (if any) and evict. The next
+   * /v1/turns or reconnect 404s — the client must mint a fresh session. */
+  revoke(id: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    session.closeStream?.()
+    this.evict(session)
+    return true
   }
 
   private evict(session: Session): void {

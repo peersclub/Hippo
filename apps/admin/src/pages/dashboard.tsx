@@ -7,6 +7,7 @@ type Metrics = {
     cache?: { hitRate: number | null }
     degraded?: { active: boolean; seconds: number }
   } | null
+  alerts: Array<{ partnerId: string; venueName: string; mau: number; quota: number; pct: number }>
   counts: { partners: number; plans: number; users: number }
 }
 
@@ -32,6 +33,22 @@ export function DashboardPage() {
         <h1>Dashboard</h1>
         {gw?.mau?.month && <span class="dim">MAU month: {gw.mau.month}</span>}
       </div>
+
+      {metrics.alerts.length > 0 && (
+        <div class="alerts">
+          {metrics.alerts.map((a) => (
+            <a
+              key={a.partnerId}
+              class={`alert ${a.pct >= 100 ? 'crit' : 'warn'}`}
+              href={`#/partners/${a.partnerId}`}
+            >
+              <strong>{a.venueName}</strong> is at {a.pct}% of its MAU quota ({a.mau}/{a.quota})
+              {a.pct >= 100 ? ' — new users are being rejected (429)' : ''}
+            </a>
+          ))}
+        </div>
+      )}
+
       <div class="cards">
         <div class="stat">
           <div class="n">{metrics.counts.partners}</div>

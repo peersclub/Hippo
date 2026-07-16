@@ -19,6 +19,7 @@
 import {
   AssignPlanBody,
   LoginBody,
+  OperatorBody,
   PartnerBody,
   PartnerPatch,
   PersonaAdminUpdate,
@@ -29,6 +30,7 @@ import type { AuditStore, OperatorStore, PartnerStore, PlanStore, UserStore } fr
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import {
   clearedSessionCookie,
+  hashPassword,
   mintSessionToken,
   type OperatorSession,
   readSession,
@@ -97,6 +99,26 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       },
       signal: AbortSignal.timeout(5_000),
     })
+  }
+
+  /** Gateway /internal proxy (sessions list/kill) — same token discipline. */
+  async function gatewayFetch(path: string, init: RequestInit = {}): Promise<Response> {
+    return fetchImpl(`${gatewayUrl}${path}`, {
+      ...init,
+      headers: { 'x-hippo-internal-token': internalToken, ...(init.headers ?? {}) },
+      signal: AbortSignal.timeout(5_000),
+    })
+  }
+
+  /** Owner-gated routes (operator management). 403 for plain operators. */
+  function ownerOnly(req: FastifyRequest, reply: FastifyReply): OperatorSession | null {
+    const op = operator(req, reply)
+    if (!op) return null
+    if (op.role !== 'owner') {
+      reply.code(403).send({ error: 'owner role required' })
+      return null
+    }
+    return op
   }
 
   // ── auth ─────────────────────────────────────────────────────────────────
@@ -330,6 +352,112 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     return reply.code(res.status).send(await res.json())
   })
 
+  // ── operators (owner-only) ───────────────────────────────────────────────
+  app.get('/v1/operators', async (req, reply) => {
+    const op = ownerOnly(req, reply)
+    if (!op) return reply
+    // passwordHash never leaves this service.
+    return (await operators.list()).map(({ passwordHash: _, ...rest }) => rest)
+  })
+
+  app.post('/v1/operators', async (req, reply) => {
+    const op = ownerOnly(req, reply)
+    if (!op) return reply
+    const parsed = OperatorBody.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid operator body' })
+    try {
+      const created = await operators.create({
+        email: parsed.data.email,
+        passwordHash: hashPassword(parsed.data.password),
+        role: parsed.data.role,
+      })
+      void record(op, 'operator.create', created.email, { role: created.role })
+      return { email: created.email, role: created.role, createdAt: created.createdAt }
+    } catch (err) {
+      return reply.code(409).send({ error: String(err instanceof Error ? err.message : err) })
+    }
+  })
+
+  app.delete<{ Params: { email: string } }>('/v1/operators/:email', async (req, reply) => {
+    const op = ownerOnly(req, reply)
+    if (!op) return reply
+    const email = decodeURIComponent(req.params.email)
+    // Two footguns removed: no self-delete, never delete the last owner.
+    if (email === op.email) return reply.code(400).send({ error: 'cannot delete yourself' })
+    const target = await operators.get(email)
+    if (!target) return reply.code(404).send({ error: 'unknown operator' })
+    if (target.role === 'owner') {
+      const owners = (await operators.list()).filter((o) => o.role === 'owner')
+      if (owners.length <= 1) return reply.code(400).send({ error: 'cannot delete the last owner' })
+    }
+    await operators.delete(email)
+    void record(op, 'operator.delete', email)
+    return { deleted: true }
+  })
+
+  // ── live sessions (gateway proxy) ────────────────────────────────────────
+  app.get<{ Querystring: { partnerId?: string } }>('/v1/sessions', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    try {
+      const qs = req.query.partnerId ? `?partnerId=${encodeURIComponent(req.query.partnerId)}` : ''
+      const res = await gatewayFetch(`/internal/sessions${qs}`)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  app.delete<{ Params: { id: string } }>('/v1/sessions/:id', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    try {
+      const res = await gatewayFetch(`/internal/sessions/${encodeURIComponent(req.params.id)}`, {
+        method: 'DELETE',
+      })
+      void record(op, 'session.revoke', req.params.id)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  // ── partner detail (aggregated drill-down) ───────────────────────────────
+  app.get<{ Params: { id: string } }>('/v1/partners/:id/detail', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    const partner = await partners.get(req.params.id)
+    if (!partner) return reply.code(404).send({ error: 'unknown partner' })
+    const { jwtSecret: _, ...safe } = partner
+
+    const plan = partner.planId ? await plans.get(partner.planId) : null
+    const userPage = await users.list({ partnerId: partner.partnerId, limit: 50 })
+
+    let mau = 0
+    let sessions: unknown[] = []
+    try {
+      const [metricsRes, sessionsRes] = await Promise.all([
+        fetchImpl(`${gatewayUrl}/internal/metrics`, { signal: AbortSignal.timeout(3_000) }),
+        gatewayFetch(`/internal/sessions?partnerId=${encodeURIComponent(partner.partnerId)}`),
+      ])
+      if (metricsRes.ok) {
+        const m = (await metricsRes.json()) as { mau?: { byPartner?: Record<string, number> } }
+        mau = m.mau?.byPartner?.[partner.partnerId] ?? 0
+      }
+      if (sessionsRes.ok) sessions = (await sessionsRes.json()) as unknown[]
+    } catch {
+      /* gateway down — DB-backed parts still render */
+    }
+
+    return {
+      partner: safe,
+      plan,
+      users: userPage,
+      mau: { current: mau, quota: plan?.mauQuota ?? null },
+      sessions,
+    }
+  })
+
   // ── metrics + audit ──────────────────────────────────────────────────────
   app.get('/v1/metrics', async (req, reply) => {
     const op = operator(req, reply)
@@ -343,8 +471,37 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     } catch {
       /* gateway down — counts still render */
     }
+
+    // Quota alerts: any planned partner at ≥80% of its MAU ceiling.
+    const byPartner =
+      (gateway as { mau?: { byPartner?: Record<string, number> } } | null)?.mau?.byPartner ?? {}
+    const alerts: Array<{
+      partnerId: string
+      venueName: string
+      mau: number
+      quota: number
+      pct: number
+    }> = []
+    for (const p of await partners.list()) {
+      if (!p.planId || p.status !== 'active') continue
+      const plan = await plans.get(p.planId)
+      if (plan?.mauQuota == null) continue
+      const mau = byPartner[p.partnerId] ?? 0
+      const pct = Math.round((mau / plan.mauQuota) * 100)
+      if (pct >= 80)
+        alerts.push({
+          partnerId: p.partnerId,
+          venueName: p.venueName,
+          mau,
+          quota: plan.mauQuota,
+          pct,
+        })
+    }
+    alerts.sort((a, b) => b.pct - a.pct)
+
     return {
       gateway,
+      alerts,
       counts: {
         partners: (await partners.list()).length,
         plans: (await plans.list()).length,

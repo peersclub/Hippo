@@ -111,6 +111,15 @@ export function streamSession(session: Session, req: FastifyRequest, reply: Fast
     writeEntry(entry)
   }
   session.live = writeEntry
+  // Admin revoke needs a way to force this socket shut.
+  const closeStream = () => {
+    try {
+      reply.raw.end()
+    } catch {
+      /* already closed */
+    }
+  }
+  session.closeStream = closeStream
 
   const heartbeat = setInterval(() => {
     try {
@@ -124,6 +133,7 @@ export function streamSession(session: Session, req: FastifyRequest, reply: Fast
     clearInterval(heartbeat)
     // Only detach if a newer connection hasn't already replaced us.
     if (session.live === writeEntry) session.live = null
+    if (session.closeStream === closeStream) session.closeStream = null
   })
 
   return reply

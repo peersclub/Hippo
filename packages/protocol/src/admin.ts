@@ -43,6 +43,13 @@ export const LoginBody = z.object({
 })
 export type LoginBody = z.infer<typeof LoginBody>
 
+export const OperatorBody = z.object({
+  email: z.string().email(),
+  password: z.string().min(12).max(200),
+  role: z.enum(['owner', 'operator']),
+})
+export type OperatorBody = z.infer<typeof OperatorBody>
+
 /** Admin persona edit — superset of the end-user PersonaUpdate: the panel may
  * also set experienceLevel directly (no user-facing write path exists). */
 export const PersonaAdminUpdate = z.object({

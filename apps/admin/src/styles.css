@@ -366,3 +366,30 @@ textarea:focus {
 .kv .k {
   color: var(--dim);
 }
+
+.alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.alert {
+  display: block;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-decoration: none;
+  color: var(--ink);
+  border: 1px solid;
+}
+.alert.warn {
+  background: rgba(240, 185, 74, 0.1);
+  border-color: rgba(240, 185, 74, 0.35);
+}
+.alert.crit {
+  background: rgba(255, 133, 133, 0.1);
+  border-color: rgba(255, 133, 133, 0.35);
+}
+.alert:hover {
+  filter: brightness(1.15);
+}

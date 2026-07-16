@@ -9,6 +9,8 @@ import type { AuditEntry, OperatorRecord, OperatorRole, Page } from './types.js'
 export interface OperatorStore {
   get(email: string): Promise<OperatorRecord | undefined>
   create(op: Omit<OperatorRecord, 'createdAt'>): Promise<OperatorRecord>
+  list(): Promise<OperatorRecord[]>
+  delete(email: string): Promise<boolean>
   count(): Promise<number>
 }
 
@@ -29,6 +31,14 @@ export class InMemoryOperatorStore implements OperatorStore {
     const record: OperatorRecord = { ...op, createdAt: Date.now() }
     this.ops.set(record.email, record)
     return record
+  }
+
+  async list(): Promise<OperatorRecord[]> {
+    return [...this.ops.values()].sort((a, b) => a.email.localeCompare(b.email))
+  }
+
+  async delete(email: string): Promise<boolean> {
+    return this.ops.delete(email)
   }
 
   async count(): Promise<number> {
@@ -73,6 +83,21 @@ export class PostgresOperatorStore implements OperatorStore {
       [record.email, record.passwordHash, record.role, record.createdAt],
     )
     return record
+  }
+
+  async list(): Promise<OperatorRecord[]> {
+    const res = await this.pool.query('SELECT * FROM admin_operators ORDER BY email')
+    return res.rows.map((r) => ({
+      email: r.email as string,
+      passwordHash: r.password_hash as string,
+      role: r.role as OperatorRole,
+      createdAt: Number(r.created_at),
+    }))
+  }
+
+  async delete(email: string): Promise<boolean> {
+    const res = await this.pool.query('DELETE FROM admin_operators WHERE email = $1', [email])
+    return (res.rowCount ?? 0) > 0
   }
 
   async count(): Promise<number> {
