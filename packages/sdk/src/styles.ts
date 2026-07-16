@@ -41,29 +41,32 @@ export const panelCss = /* css */ `
   /* ── radius ── */
   --hippo-radius-card:16px;--hippo-radius-cell:10px;--hippo-radius-button:12px;--hippo-radius-pill:999px}
 *{margin:0;padding:0;box-sizing:border-box}
-.panel{position:fixed;right:0;top:0;bottom:0;width:360px;z-index:2147483001;
-  background:linear-gradient(175deg,var(--hippo-panel-top),var(--hippo-panel-bottom));border-left:1px solid var(--hippo-hairline);
+/* Logical inset/border properties so dir="rtl" mirrors the dock to the
+   opposite edge automatically (RTL groundwork for the Gulf market). In LTR
+   these resolve exactly as the previous right/left/border-left rules did. */
+.panel{position:fixed;inset-inline-end:0;inset-block:0;width:360px;z-index:2147483001;
+  background:linear-gradient(175deg,var(--hippo-panel-top),var(--hippo-panel-bottom));border-inline-start:1px solid var(--hippo-hairline);
   display:flex;flex-direction:column;color:var(--hippo-text-hi);
   font-family:var(--hippo-font-body);font-size:14px}
-.panel.max{width:620px;box-shadow:-30px 0 60px rgba(var(--hippo-black-rgb),.45);border-left-color:rgba(var(--hippo-amber-rgb),.25)}
+.panel.max{width:620px;box-shadow:-30px 0 60px rgba(var(--hippo-black-rgb),.45);border-inline-start-color:rgba(var(--hippo-amber-rgb),.25)}
 .panel.hidden{display:none}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* ── posture matrix ── client presentation only; dock is the default (base
    .panel above). Non-dock postures are additive overrides, so the dock/dark
    rendering the server sees is unchanged. */
-.panel.overlay{top:auto;left:auto;right:22px;bottom:22px;width:380px;height:min(760px,88vh);
+.panel.overlay{inset-block-start:auto;inset-block-end:22px;inset-inline-start:auto;inset-inline-end:22px;width:380px;height:min(760px,88vh);
   border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);
   box-shadow:0 30px 80px rgba(var(--hippo-black-rgb),.55);overflow:hidden}
-.panel.sheet{top:auto;left:0;right:0;bottom:0;width:100%;height:min(84vh,760px);
-  border-left:none;border-top:1px solid var(--hippo-hairline);border-radius:18px 18px 0 0;
+.panel.sheet{inset-block-start:auto;inset-block-end:0;inset-inline:0;width:100%;height:min(84vh,760px);
+  border-inline-start:none;border-top:1px solid var(--hippo-hairline);border-radius:18px 18px 0 0;
   box-shadow:0 -24px 60px rgba(var(--hippo-black-rgb),.5);animation:sheetIn .28s ease both}
-.panel.full{inset:0;width:100%;border-left:none;border-radius:0}
+.panel.full{inset:0;width:100%;border-inline-start:none;border-radius:0}
 @keyframes sheetIn{from{transform:translateY(100%)}to{transform:none}}
 @media (prefers-reduced-motion:reduce){.panel.sheet{animation:none}}
 /* narrow viewport safety net: web geometry collapses into the mobile set */
 @media (max-width:640px){
-  .panel,.panel.max{width:100%;border-left:none}
-  .panel.overlay{inset:0;right:0;bottom:0;width:100%;height:100%;border:none;border-radius:0}
+  .panel,.panel.max{width:100%;border-inline-start:none}
+  .panel.overlay{inset:0;width:100%;height:100%;border:none;border-radius:0}
 }
 /* header */
 .hd{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--hippo-hairline);flex-shrink:0}
@@ -71,7 +74,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   display:grid;place-items:center;font-family:var(--hippo-font-display);font-weight:700;font-size:12px}
 .hd .name{font-family:var(--hippo-font-display);font-weight:600;font-size:13.5px}
 .hd .name small{display:block;font-family:var(--hippo-font-mono);font-weight:400;font-size:8.5px;letter-spacing:.12em;color:var(--hippo-text-faint);margin-top:1px}
-.hd .ctl{margin-left:auto;display:flex;gap:6px}
+.hd .ctl{margin-inline-start:auto;display:flex;gap:6px}
 .hd .ctl button{width:26px;height:26px;border-radius:8px;border:1px solid var(--hippo-hairline);
   background:rgba(var(--hippo-white-rgb),.03);color:var(--hippo-text-dim);font-size:12px;display:grid;place-items:center}
 .hd .ctl button:hover{color:var(--hippo-text-hi);border-color:rgba(var(--hippo-white-rgb),.18)}
@@ -140,7 +143,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 /* live bar */
 .livebar{display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:9px;
   border-top:1px dashed rgba(var(--hippo-white-rgb),.08);font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em}
-.livebar .asof{color:var(--hippo-text-faint);margin-right:auto;transition:color .3s}
+.livebar .asof{color:var(--hippo-text-faint);margin-inline-end:auto;transition:color .3s}
 .livebar .asof.flash{color:var(--hippo-amber)}
 .livebar button{color:var(--hippo-text-dim-2);font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em;padding:2px 0}
 .livebar button:hover{color:var(--hippo-amber)}
@@ -159,7 +162,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .fbchip{border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:3px 9px;background:rgba(var(--hippo-white-rgb),.04);
   font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.05em;color:var(--hippo-text-mid)}
 .fbchip:hover{border-color:rgba(var(--hippo-amber-rgb),.4);color:var(--hippo-text-hi)}
-.fbskip{margin-left:auto;font-family:var(--hippo-font-mono);font-size:8.5px;color:var(--hippo-text-faint);padding:2px 0}
+.fbskip{margin-inline-start:auto;font-family:var(--hippo-font-mono);font-size:8.5px;color:var(--hippo-text-faint);padding:2px 0}
 .fbskip:hover{color:var(--hippo-text-hi)}
 .cache-badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--hippo-font-mono);font-size:8px;
   letter-spacing:.12em;color:var(--hippo-amber);background:rgba(var(--hippo-amber-rgb),.1);border-radius:var(--hippo-radius-pill);padding:3px 8px;margin-bottom:8px}
@@ -183,7 +186,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
   font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-amber)}
 .await .pulse{width:7px;height:7px;border-radius:50%;background:var(--hippo-amber);animation:hpulse 1.2s ease infinite}
 @keyframes hpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.75)}}
-.await .cxl{margin-left:auto;color:var(--hippo-text-faint);font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em}
+.await .cxl{margin-inline-start:auto;color:var(--hippo-text-faint);font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em}
 .await .cxl:hover{color:var(--hippo-down)}
 .ticket.ok{border-color:rgba(var(--hippo-up-rgb),.45)}
 .oid{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em;color:var(--hippo-text-faint);text-align:center;padding-bottom:11px}
@@ -311,7 +314,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
   display:grid;place-items:center;font-family:var(--hippo-font-display);font-weight:700;font-size:10px}
 .shrbrand b{font-family:var(--hippo-font-display);font-size:12.5px;font-weight:600}
 .shrbrand .on{color:var(--hippo-text-dim);font-size:11px}
-.shrlive{margin-left:auto;font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.12em;color:var(--hippo-up)}
+.shrlive{margin-inline-start:auto;font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.12em;color:var(--hippo-up)}
 .shrcard h3{font-family:var(--hippo-font-display);font-size:15px;font-weight:600;line-height:1.3}
 .shrcard p{font-size:12px;line-height:1.55;color:var(--hippo-text-mid)}
 .shrfoot{display:flex;justify-content:space-between;gap:8px;font-family:var(--hippo-font-mono);font-size:8.5px;

@@ -27,7 +27,8 @@ import {
   feedbackTransition,
 } from './feedback.js'
 import { isStale, STALE_CHECK_INTERVAL_MS } from './freshness.js'
-import { shareFrame } from './state.js'
+import { t } from './i18n.js'
+import { locale, shareFrame } from './state.js'
 import { send } from './transport.js'
 
 /** Exported for the share overlay — the co-branded card reuses the exact spark. */
@@ -104,14 +105,14 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
               <>
                 <button
                   type="button"
-                  aria-label="Helpful"
+                  aria-label={t(locale.value, 'feedback_helpful')}
                   onClick={() => dispatch({ type: 'vote', vote: 'up' })}
                 >
                   👍
                 </button>
                 <button
                   type="button"
-                  aria-label="Not helpful"
+                  aria-label={t(locale.value, 'feedback_not_helpful')}
                   onClick={() => dispatch({ type: 'vote', vote: 'down' })}
                 >
                   👎
@@ -246,7 +247,9 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
   return (
     <div class={`ticket${frame.phase === 'filled' ? ' ok' : ''}`}>
       <div class="th">
-        <span class="tt">{frame.phase === 'filled' ? 'Order filled' : frame.statusLine}</span>
+        <span class="tt">
+          {frame.phase === 'filled' ? t(locale.value, 'order_filled') : frame.statusLine}
+        </span>
         <span class="side buy">{frame.phase.toUpperCase()}</span>
       </div>
       {frame.rows.length > 0 && (
