@@ -7,7 +7,7 @@
 <meta name="description" content="Hippo lives inside your app and answers the question every trader has — with live facts, then preps the order. On your rails, under your brand, in one conversation." />
 <link rel="icon" type="image/png" href="./assets/hippo-mascot.png" />
 <script>/* pre-paint theme boot — avoids a dark→light flash */
-try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch{}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -57,10 +57,12 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
       <a href="#exchanges">For Exchanges</a>
       <a href="#trust">Trust</a>
       <a href="/sdk">SDK</a>
-      <a href="#" title="Coming soon">About</a>
-      <a href="#" title="Coming soon">Insights</a>
+      <!-- biome-ignore lint/a11y/useValidAnchor: deliberate "coming soon" placeholder -->
+      <a title="Coming soon">About</a>
+      <!-- biome-ignore lint/a11y/useValidAnchor: deliberate "coming soon" placeholder -->
+      <a title="Coming soon">Insights</a>
     </nav>
-    <button class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
+    <button type="button" class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
     <a class="btn amber" href="#cta">Talk to us</a>
   </div>
 </header>
@@ -83,13 +85,13 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   </div>
 
   <!-- scripted demo loop — the same card vocabulary the real SDK draws -->
-  <div class="demo" aria-label="Hippo demo conversation">
+  <section class="demo" aria-label="Hippo demo conversation">
     <div class="demo-head">
       <span class="chip md"><img src="./assets/hippo-mascot.png" alt="" /></span>
       <div><div class="t">Ask Hippo</div><div class="s">MARKET INTELLIGENCE</div></div>
     </div>
     <div class="demo-thread" id="demoThread"></div>
-  </div>
+  </section>
 </div>
 
 <!-- ═══ The loop ═══ -->
@@ -190,8 +192,10 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
         <a href="#trust">Trust</a>
         <a href="/design">Design</a>
         <a href="/sdk">SDK</a>
-        <a href="#">About</a>
-        <a href="#">Insights</a>
+        <!-- biome-ignore lint/a11y/useValidAnchor: deliberate "coming soon" placeholder -->
+        <a title="Coming soon">About</a>
+        <!-- biome-ignore lint/a11y/useValidAnchor: deliberate "coming soon" placeholder -->
+        <a title="Coming soon">Insights</a>
       </nav>
     </div>
     <div class="fine">EXPLAINS MARKETS · NEVER ADVISES · NOTHING EXECUTES WITHOUT YOUR CONFIRM ON THE VENUE</div>
