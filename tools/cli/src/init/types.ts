@@ -7,7 +7,7 @@
  * suffices, code only where shapes genuinely diverge. The generated adapter is
  * then graded by `hippo conform`.
  */
-import type { CapabilityId } from '../scan/types.js'
+import type { CapabilityId, VenueCapabilitiesShape } from '../scan/types.js'
 
 export interface AdapterOperation {
   capability: CapabilityId
@@ -32,6 +32,12 @@ export interface AdapterConfig {
     /** Heuristic signing strategy, e.g. "hmac-signed request". */
     strategy: string
   }
+  /**
+   * Trade-type feature set from capability discovery (protocol
+   * VenueCapabilities semantics: enabled iff present). Null when the scan
+   * predates trade-feature detection.
+   */
+  tradeFeatures: VenueCapabilitiesShape | null
   operations: AdapterOperation[]
   /** Capability ids with no discovered endpoint. */
   gaps: CapabilityId[]

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { extractAuthSchemes, mapToCti } from '../src/scan/cti.js'
+import { detectTradeFeatures } from '../src/scan/features.js'
 import { renderReport, renderSummary, verdictFor } from '../src/scan/report.js'
 import type { ScanResult } from '../src/scan/types.js'
-import { exchangeSpec } from './fixtures/exchange-openapi.js'
+import { exchangeSpec, futuresSpec } from './fixtures/exchange-openapi.js'
 
 function makeResult(): ScanResult {
   return {
@@ -121,6 +122,63 @@ describe('integration report rendering', () => {
 
   it('contains no debug noise', () => {
     expect(report).not.toMatch(/undefined|\[object Object\]|NaN/)
+  })
+})
+
+describe('trade features section', () => {
+  const withFeatures = (spec = futuresSpec): ScanResult => ({
+    ...makeResult(),
+    capabilities: mapToCti(spec),
+    tradeFeatures: detectTradeFeatures(spec),
+  })
+
+  it('renders the Trade features section between the CTI map and Gaps', () => {
+    const report = renderReport(withFeatures())
+    const cti = report.indexOf('## CTI capability map')
+    const features = report.indexOf('## Trade features')
+    const gaps = report.indexOf('## Gaps')
+    expect(features).toBeGreaterThan(cti)
+    expect(gaps).toBeGreaterThan(features)
+  })
+
+  it('shows enabled features with extracted params and evidence endpoints', () => {
+    const report = renderReport(withFeatures())
+    expect(report).toContain('| Spot | Enabled | `POST /api/v3/order` |')
+    expect(report).toContain(
+      '| Futures (perp) | Enabled (max leverage 125x; margin: isolated/cross) |',
+    )
+    expect(report).toContain('`POST /futures/v1/leverage`')
+    expect(report).toContain('| Options | Not detected | — |')
+  })
+
+  it('states the honesty policy: candidates, not proof', () => {
+    expect(renderReport(withFeatures())).toContain(
+      'treat "Enabled" as a lead to confirm with the venue, not proof',
+    )
+  })
+
+  it('flags incomplete params in the status cell', () => {
+    const result = withFeatures()
+    result.tradeFeatures = {
+      futures_perp: { endpoints: ['POST /derivatives/leverage'], paramsIncomplete: true },
+    }
+    const report = renderReport(result)
+    expect(report).toContain(
+      '| Futures (perp) | Enabled (params incomplete — confirm with the venue) |',
+    )
+    expect(report).toContain('| Spot | Not detected | — |')
+  })
+
+  it('adds a Features line to the stdout summary', () => {
+    const summary = renderSummary(withFeatures())
+    expect(summary).toContain('Features  spot, futures_perp')
+  })
+
+  it('omits the section and summary line for scans made before the field existed', () => {
+    const legacy = makeResult()
+    expect(legacy.tradeFeatures).toBeUndefined()
+    expect(renderReport(legacy)).not.toContain('## Trade features')
+    expect(renderSummary(legacy)).not.toContain('Features')
   })
 })
 

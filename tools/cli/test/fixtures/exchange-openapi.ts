@@ -61,3 +61,94 @@ export const exchangeSpec: OpenApiDoc = {
     },
   },
 }
+
+/**
+ * Futures-flavored variant: the full spot surface plus a derivatives segment
+ * with leverage (documented 125x cap), margin-type (isolated/crossed enum),
+ * position, and funding-rate endpoints. Expected: spot AND futures_perp
+ * enabled, with maxLeverage/marginModes extracted from the documented params.
+ */
+export const futuresSpec: OpenApiDoc = {
+  openapi: '3.0.1',
+  info: { title: 'Acme Exchange Futures API', version: '2.1.0' },
+  components: exchangeSpec.components,
+  paths: {
+    ...exchangeSpec.paths,
+    '/futures/v1/order': {
+      post: {
+        summary: 'Place a new futures order',
+        operationId: 'createFuturesOrder',
+        tags: ['Futures Trade'],
+      },
+    },
+    '/futures/v1/leverage': {
+      post: {
+        summary: 'Change initial leverage for a symbol',
+        operationId: 'setLeverage',
+        tags: ['Futures Account'],
+        parameters: [
+          { name: 'symbol', in: 'query', required: true, schema: { type: 'string' } },
+          {
+            name: 'leverage',
+            in: 'query',
+            required: true,
+            schema: { type: 'integer', minimum: 1, maximum: 125 },
+          },
+        ],
+      },
+    },
+    '/futures/v1/marginType': {
+      post: {
+        summary: 'Change margin type between isolated and crossed',
+        operationId: 'setMarginType',
+        tags: ['Futures Account'],
+        parameters: [
+          { name: 'symbol', in: 'query', required: true, schema: { type: 'string' } },
+          {
+            name: 'marginType',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', enum: ['ISOLATED', 'CROSSED'] },
+          },
+        ],
+      },
+    },
+    '/futures/v1/positionRisk': {
+      get: { summary: 'Position information', tags: ['Futures Account'] },
+    },
+    '/futures/v1/fundingRate': {
+      get: { summary: 'Funding rate history', tags: ['Futures Market Data'] },
+    },
+  },
+}
+
+/**
+ * Options-flavored variant: an options-only venue (chain, strikes/expiries,
+ * call/put order placement). Expected: ONLY options enabled — the placement
+ * endpoint is options-scoped, so it must not read as spot.
+ */
+export const optionsSpec: OpenApiDoc = {
+  openapi: '3.0.1',
+  info: { title: 'Acme Exchange Options API', version: '0.9.0' },
+  paths: {
+    '/api/v1/options/instruments': {
+      get: {
+        summary: 'List option instruments with strike and expiry',
+        tags: ['Options Market Data'],
+      },
+    },
+    '/api/v1/options/chain': {
+      get: {
+        summary: 'Option chain for an underlying and expiration',
+        tags: ['Options Market Data'],
+      },
+    },
+    '/api/v1/options/order': {
+      post: {
+        summary: 'Place an option order (call or put)',
+        operationId: 'createOptionOrder',
+        tags: ['Options Trade'],
+      },
+    },
+  },
+}

@@ -67,6 +67,43 @@ export interface CapabilityMatch {
   consequence: string
 }
 
+export type TradeFeatureId = 'spot' | 'futures_perp' | 'options'
+
+/** Scan evidence attached to every detected trade feature. */
+export interface TradeFeatureEvidence {
+  /** Candidate endpoints, e.g. "POST /futures/v1/leverage" — capped for readability.
+   * A match means "candidate feature", not proof the venue offers it. */
+  endpoints: string[]
+  /** Present when the feature looks enabled but the validation params the
+   * protocol requires (futures maxLeverage/marginModes) weren't documented in
+   * the spec — flagged honestly instead of guessing values. */
+  paramsIncomplete?: true
+}
+
+export type SpotFeature = TradeFeatureEvidence
+
+export interface FuturesPerpFeature extends TradeFeatureEvidence {
+  /** Documented leverage cap, e.g. 125 (125x), when the spec declares one. */
+  maxLeverage?: number
+  marginModes?: Array<'isolated' | 'cross'>
+}
+
+export interface OptionsFeature extends TradeFeatureEvidence {
+  settlement?: 'cash' | 'physical'
+}
+
+/**
+ * Local mirror of the protocol's `VenueCapabilities`
+ * (packages/protocol/src/orders.ts), annotated with scan evidence. Same
+ * semantics: a trade feature is ENABLED iff its key is present; enabled
+ * features carry the params the capability modules validate against.
+ */
+export interface VenueCapabilitiesShape {
+  spot?: SpotFeature
+  futures_perp?: FuturesPerpFeature
+  options?: OptionsFeature
+}
+
 export interface SpecFinding {
   url: string
   version: string
@@ -107,4 +144,11 @@ export interface ScanResult {
    * field existed and empty when no spec (or no documented errors) was found.
    */
   errorResponses?: ErrorResponseFinding[]
+  /**
+   * Trade-type feature sets (spot / futures_perp / options) detected from the
+   * spec — the scan-side view of the protocol's VenueCapabilities. Optional:
+   * absent for scans made before the field existed; empty when no spec was
+   * found or no trade features matched.
+   */
+  tradeFeatures?: VenueCapabilitiesShape
 }

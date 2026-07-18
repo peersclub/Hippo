@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { draftAdapterConfig, renderAdapterConfigYaml } from '../src/init/config.js'
 import { extractAuthSchemes, mapToCti } from '../src/scan/cti.js'
+import { detectTradeFeatures } from '../src/scan/features.js'
 import type { ScanResult } from '../src/scan/types.js'
-import { exchangeSpec } from './fixtures/exchange-openapi.js'
+import { exchangeSpec, futuresSpec } from './fixtures/exchange-openapi.js'
 
 /** Build a ScanResult from the fixture through the real scan pipeline. */
 function scanFromFixture(): ScanResult {
@@ -79,5 +80,53 @@ describe('renderAdapterConfigYaml', () => {
     // baseUrl was derivable here, so no TODO placeholder
     expect(yaml).not.toContain('TODO: confirm the API base URL')
     expect(yaml).toContain('baseUrl: "https://api.acme.exchange"')
+  })
+
+  it('omits the capabilities block when the scan predates trade-feature detection', () => {
+    expect(yaml).not.toContain('capabilities:')
+  })
+})
+
+describe('capabilities block — trade features in the adapter config', () => {
+  const scanWith = (spec = futuresSpec): ScanResult => ({
+    ...scanFromFixture(),
+    capabilities: mapToCti(spec),
+    tradeFeatures: detectTradeFeatures(spec),
+  })
+
+  it('carries the scan trade features onto the config', () => {
+    const config = draftAdapterConfig(scanWith())
+    expect(config.tradeFeatures?.spot).toBeDefined()
+    expect(config.tradeFeatures?.futures_perp?.maxLeverage).toBe(125)
+    expect(draftAdapterConfig(scanFromFixture()).tradeFeatures).toBeNull()
+  })
+
+  it('renders enabled features with their validation params', () => {
+    const yaml = renderAdapterConfigYaml(draftAdapterConfig(scanWith()))
+    expect(yaml).toContain('capabilities:')
+    expect(yaml).toContain('  spot:\n    enabled: true')
+    expect(yaml).toContain('  futures_perp:\n    enabled: true\n    maxLeverage: 125')
+    expect(yaml).toMatch(/marginModes:\n {6}- isolated\n {6}- cross/)
+    expect(yaml).toContain('  options:\n    enabled: false # not detected')
+  })
+
+  it('renders spot-only detection with futures and options disabled', () => {
+    const yaml = renderAdapterConfigYaml(draftAdapterConfig(scanWith(exchangeSpec)))
+    expect(yaml).toContain('  spot:\n    enabled: true')
+    expect(yaml).toContain('  futures_perp:\n    enabled: false')
+    expect(yaml).toContain('  options:\n    enabled: false')
+    expect(yaml).not.toContain('maxLeverage')
+  })
+
+  it('flags incomplete futures params instead of inventing values', () => {
+    const scan = scanWith()
+    scan.tradeFeatures = {
+      futures_perp: { endpoints: ['POST /derivatives/leverage'], paramsIncomplete: true },
+    }
+    const yaml = renderAdapterConfigYaml(draftAdapterConfig(scan))
+    expect(yaml).toContain(
+      '    paramsIncomplete: true # heuristic candidate — confirm validation params with the venue',
+    )
+    expect(yaml).not.toContain('maxLeverage')
   })
 })
