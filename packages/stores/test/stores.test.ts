@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  devPartner,
   InMemoryAuditStore,
   InMemoryOperatorStore,
   InMemoryPartnerStore,
@@ -8,12 +9,16 @@ import {
 } from '../src/index.js'
 import { signJwtHS256, verifyJwtHS256 } from '../src/jwt.js'
 
+const WELL_KNOWN_DEV_SECRET = 'koinbx-dev-secret-not-for-production'
+
 describe('InMemoryPartnerStore', () => {
   it('seeds the koinbx-dev partner for dev/tests', async () => {
     const store = new InMemoryPartnerStore()
     const byKey = await store.getByKey('pk_demo')
     expect(byKey?.partnerId).toBe('koinbx-dev')
     expect(byKey?.status).toBe('active')
+    // NODE_ENV=test → dev secret is allowed, so local dev keeps working.
+    expect(byKey?.jwtSecret).toBe(WELL_KNOWN_DEV_SECRET)
   })
 
   it('creates, updates, suspends and assigns plans', async () => {
@@ -51,6 +56,46 @@ describe('InMemoryPartnerStore', () => {
     await store.create(base)
     await expect(store.create(base)).rejects.toThrow('already exists')
     await expect(store.create({ ...base, partnerId: 'other' })).rejects.toThrow('already in use')
+  })
+})
+
+describe('devPartner jwtSecret guard', () => {
+  const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {
+    const keys = ['HIPPO_DEV', 'NODE_ENV', 'KOINBX_DEV_JWT_SECRET']
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]))
+    try {
+      for (const k of keys) {
+        if (env[k] === undefined) delete process.env[k]
+        else process.env[k] = env[k]
+      }
+      fn()
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k]
+        else process.env[k] = saved[k]
+      }
+    }
+  }
+
+  it('never ships the well-known secret in a prod configuration', () => {
+    // No explicit secret, not dev, not test → random ephemeral secret instead.
+    withEnv({ HIPPO_DEV: undefined, NODE_ENV: undefined, KOINBX_DEV_JWT_SECRET: undefined }, () => {
+      const p = devPartner()
+      expect(p.jwtSecret).not.toBe(WELL_KNOWN_DEV_SECRET)
+      expect(p.jwtSecret.length).toBeGreaterThanOrEqual(32)
+    })
+  })
+
+  it('honors KOINBX_DEV_JWT_SECRET when explicitly provided', () => {
+    withEnv({ KOINBX_DEV_JWT_SECRET: 'explicit-secret' }, () => {
+      expect(devPartner().jwtSecret).toBe('explicit-secret')
+    })
+  })
+
+  it('uses the well-known secret only when dev mode is opted in', () => {
+    withEnv({ HIPPO_DEV: '1', NODE_ENV: undefined, KOINBX_DEV_JWT_SECRET: undefined }, () => {
+      expect(devPartner().jwtSecret).toBe(WELL_KNOWN_DEV_SECRET)
+    })
   })
 })
 

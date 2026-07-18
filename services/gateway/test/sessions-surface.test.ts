@@ -96,3 +96,41 @@ describe('/internal/sessions', () => {
     await app.close()
   })
 })
+
+describe('/internal/venue-events (same internal guard)', () => {
+  const evt = { ticketId: 't_x', phase: 'filled', statusLine: 'FILLED' }
+
+  it('fail-closed 503 when INTERNAL_API_TOKEN is unset', async () => {
+    const { app } = await testApp({ internalToken: '' })
+    const res = await app.inject({ method: 'POST', url: '/internal/venue-events', payload: evt })
+    expect(res.statusCode).toBe(503)
+    await app.close()
+  })
+
+  it('401 on a missing or wrong token — no forged lifecycle frames', async () => {
+    const { app } = await testApp({ internalToken: TOKEN })
+    const missing = await app.inject({ method: 'POST', url: '/internal/venue-events', payload: evt })
+    expect(missing.statusCode).toBe(401)
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': 'nope' },
+      payload: evt,
+    })
+    expect(bad.statusCode).toBe(401)
+    await app.close()
+  })
+
+  it('accepts a correctly-tokened event (unknown ticket → routed:false)', async () => {
+    const { app } = await testApp({ internalToken: TOKEN })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TOKEN },
+      payload: evt,
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ ok: true, routed: false })
+    await app.close()
+  })
+})

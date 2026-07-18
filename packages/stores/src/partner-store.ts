@@ -3,6 +3,7 @@
  * anticipated. In-memory impl seeds the koinbx-dev partner so dev and tests
  * run unchanged without Postgres.
  */
+import { randomBytes } from 'node:crypto'
 import type pg from 'pg'
 import type { PartnerCreate, PartnerRecord, PartnerStatus, PartnerUpdate } from './types.js'
 
@@ -16,12 +17,48 @@ export interface PartnerStore {
   assignPlan(partnerId: string, planId: string | null): Promise<PartnerRecord | undefined>
 }
 
-/** The dev partner the gateway has always shipped with. */
+/** The well-known dev secret. NEVER shipped in a prod configuration — see
+ * devPartnerSecret() for the guard. */
+const WELL_KNOWN_DEV_SECRET = 'koinbx-dev-secret-not-for-production'
+
+/** Local/dev/test contexts where seeding the well-known dev secret is safe. */
+function devSecretAllowed(): boolean {
+  return process.env.HIPPO_DEV === '1' || process.env.NODE_ENV === 'test'
+}
+
+let ephemeralSecret: string | undefined
+
+/**
+ * jwtSecret for the seeded dev partner. Precedence:
+ *  1. KOINBX_DEV_JWT_SECRET when explicitly set — works in any environment.
+ *  2. the well-known dev secret ONLY in dev/test (HIPPO_DEV=1 or NODE_ENV=test)
+ *     — keeps local dev and the suite running unchanged (pk_demo / koinbx-dev).
+ *  3. otherwise a random per-process secret + a loud warning, so a prod deploy
+ *     that forgot to configure real partners can never be authenticated against
+ *     with the well-known secret — forging a partner token becomes infeasible.
+ */
+function devPartnerSecret(): string {
+  const explicit = process.env.KOINBX_DEV_JWT_SECRET
+  if (explicit) return explicit
+  if (devSecretAllowed()) return WELL_KNOWN_DEV_SECRET
+  if (!ephemeralSecret) {
+    ephemeralSecret = randomBytes(32).toString('hex')
+    console.warn(
+      '[stores] koinbx-dev seeded with an EPHEMERAL random jwtSecret: neither ' +
+        'KOINBX_DEV_JWT_SECRET nor dev mode (HIPPO_DEV=1) is set, and NODE_ENV is not "test". ' +
+        'Configure real partners (DATABASE_URL) or set KOINBX_DEV_JWT_SECRET for a usable dev partner.',
+    )
+  }
+  return ephemeralSecret
+}
+
+/** The dev partner the gateway has always shipped with. The hardcoded
+ * well-known secret is only used in dev/test — see devPartnerSecret(). */
 export function devPartner(): PartnerRecord {
   return {
     partnerId: 'koinbx-dev',
     partnerKey: 'pk_demo',
-    jwtSecret: process.env.KOINBX_DEV_JWT_SECRET ?? 'koinbx-dev-secret-not-for-production',
+    jwtSecret: devPartnerSecret(),
     venueName: 'KoinBX',
     locales: ['en', 'hi', 'hinglish'],
     suggestedQueries: [

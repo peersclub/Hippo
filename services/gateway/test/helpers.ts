@@ -227,14 +227,37 @@ export const deadMarket: MarketClient = {
 
 export type TestGateway = Awaited<ReturnType<typeof buildApp>>
 
+const stubClients = (): Parameters<typeof buildApp>[0] => ({
+  intel: stubIntel({}),
+  market: stubMarket,
+  memory: stubMemory(),
+  seam: stubSeam(),
+})
+
+/** Shared internal token the test suite mints internal-route requests with. */
+export const TEST_INTERNAL_TOKEN = 'test-internal'
+
+/**
+ * Default test gateway. devMode is forced ON (the suite exercises anonymous
+ * dev sessions) and an internal token is configured (so /internal/* routes are
+ * reachable). Rate limiting is OFF by default so functional tests aren't
+ * throttled — the rate-limit suite opts back in with an explicit small limit.
+ * All three are plain defaults any caller can override via `opts`.
+ */
 export async function testApp(opts: Parameters<typeof buildApp>[0] = {}): Promise<TestGateway> {
   return buildApp({
-    intel: stubIntel({}),
-    market: stubMarket,
-    memory: stubMemory(),
-    seam: stubSeam(),
+    ...stubClients(),
+    devMode: true,
+    internalToken: TEST_INTERNAL_TOKEN,
+    rateLimit: false,
     ...opts,
   })
+}
+
+/** Like testApp but WITHOUT the dev-mode / internal-token / rate-limit
+ * defaults — used to assert the production-safe defaults (opt-in dev mode). */
+export async function testAppRaw(opts: Parameters<typeof buildApp>[0] = {}): Promise<TestGateway> {
+  return buildApp({ ...stubClients(), ...opts })
 }
 
 export async function createSession(

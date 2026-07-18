@@ -30,6 +30,7 @@ import { createMarketClient } from './orchestrator/market.js'
 import { createMemoryClient } from './orchestrator/memory.js'
 import { createSeamClient } from './orchestrator/seam.js'
 import { authenticate, createSessionStore, type SessionStore } from './plugins/auth.js'
+import { createRateLimiter, type RateLimitOptions } from './plugins/rate-limit.js'
 import { createEmitter, streamSession } from './plugins/sse.js'
 import { Telemetry } from './plugins/telemetry.js'
 
@@ -42,8 +43,14 @@ export type GatewayOptions = {
   seam?: import('./orchestrator/seam.js').SeamClient
   /** Throw on invalid frames instead of log+drop. Defaults to true in tests. */
   strictFrames?: boolean
-  /** Allow anonymous {partnerKey} sessions. Defaults to HIPPO_DEV !== '0'. */
+  /** Allow anonymous {partnerKey} sessions. OPT-IN: defaults to
+   * HIPPO_DEV === '1' so a prod deploy that forgets the env var is closed. */
   devMode?: boolean
+  /** Per-IP rate limit for the partner-facing mint/turn surface. Defaults to
+   * RATE_LIMIT_MAX / RATE_LIMIT_WINDOW (60 requests / 60s). Pass `false` to
+   * disable (tests that fan out many mints). Never applied to /internal/* or
+   * the SSE stream. */
+  rateLimit?: RateLimitOptions | false
   /** Shared secret for /internal/sessions (admin panel). Fail-closed when
    * unset. Defaults to INTERNAL_API_TOKEN. */
   internalToken?: string
@@ -60,10 +67,30 @@ export type GatewayOptions = {
 
 export async function buildApp(opts: GatewayOptions = {}) {
   const isTest = process.env.NODE_ENV === 'test'
-  const devMode = opts.devMode ?? process.env.HIPPO_DEV !== '0'
+  // Dev mode is OPT-IN (anonymous sessions) so a prod deploy that forgets the
+  // env var is safe by default. Previously it defaulted ON (HIPPO_DEV !== '0').
+  const devMode = opts.devMode ?? process.env.HIPPO_DEV === '1'
 
   const app = Fastify({ logger: { level: isTest ? 'silent' : 'info' } })
+  if (devMode && !isTest) {
+    app.log.warn(
+      'HIPPO_DEV mode ON — anonymous {partnerKey} sessions are allowed. Never enable this in production.',
+    )
+  }
   await app.register(cors, { origin: true })
+
+  // Coarse per-IP abuse guard for the partner-facing surface (mint fans out to
+  // LLM/market/seam → DoS + cost amplification). Env-tunable, injectable/off.
+  const rateLimit =
+    opts.rateLimit === false
+      ? undefined
+      : createRateLimiter(
+          opts.rateLimit ?? {
+            max: Number(process.env.RATE_LIMIT_MAX ?? 60),
+            windowMs: Number(process.env.RATE_LIMIT_WINDOW ?? 60_000),
+          },
+        )
+  const rateLimited = rateLimit ? { preHandler: rateLimit } : {}
 
   const usePg = Boolean(process.env.DATABASE_URL) && !isTest
   const partners =
@@ -101,7 +128,30 @@ export async function buildApp(opts: GatewayOptions = {}) {
     log: app.log,
   })
 
-  app.post('/v1/session', async (req, reply) => {
+  // Shared guard for internal routes: INTERNAL_API_TOKEN, timing-safe and
+  // fail-closed. 503 when the token is unset (surface disabled), 401 on a
+  // missing/bad token. Guards both /internal/sessions and the seam callback
+  // /internal/venue-events (which injects lifecycle frames into a user thread).
+  const internalToken = opts.internalToken ?? process.env.INTERNAL_API_TOKEN ?? ''
+  function internalGuard(
+    req: { headers: Record<string, unknown> },
+    reply: { code: (n: number) => { send: (b: unknown) => unknown } },
+  ): boolean {
+    if (!internalToken) {
+      reply.code(503).send({ error: 'internal surface disabled: INTERNAL_API_TOKEN not set' })
+      return false
+    }
+    const presented = req.headers['x-hippo-internal-token']
+    const actual = Buffer.from(typeof presented === 'string' ? presented : '')
+    const expected = Buffer.from(internalToken)
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      reply.code(401).send({ error: 'invalid internal token' })
+      return false
+    }
+    return true
+  }
+
+  app.post('/v1/session', rateLimited, async (req, reply) => {
     const body = (req.body ?? {}) as { partnerKey?: string }
     const auth = await authenticate(partners, req.headers.authorization, body.partnerKey, devMode)
     if (!auth.ok) {
@@ -177,7 +227,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
     return streamSession(session, req, reply)
   })
 
-  app.post('/v1/turns', async (req, reply) => {
+  app.post('/v1/turns', rateLimited, async (req, reply) => {
     const parsed = Uplink.safeParse(req.body)
     if (!parsed.success) {
       reply.code(400)
@@ -194,8 +244,12 @@ export async function buildApp(opts: GatewayOptions = {}) {
 
   /** Venue lifecycle events delivered by the seam (the callbackUrl given at
    * confirm time). Internal route: in pods this sits on the cluster network
-   * behind mTLS, never exposed through the partner-facing ingress. */
+   * behind mTLS, never exposed through the partner-facing ingress. Additionally
+   * guarded by INTERNAL_API_TOKEN (fail-closed) so a network-adjacent attacker
+   * cannot forge "FILLED"/lifecycle frames into a user's thread. The seam sends
+   * this token when posting callbacks. */
   app.post('/internal/venue-events', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
     const event = req.body as import('./orchestrator/seam.js').VenueEvent
     if (typeof event?.ticketId !== 'string' || typeof event?.phase !== 'string') {
       reply.code(400)
@@ -211,27 +265,8 @@ export async function buildApp(opts: GatewayOptions = {}) {
   app.get('/internal/metrics', async () => telemetry.snapshot())
 
   // ── live-session inventory + kill switch (admin panel) ──────────────────
-  // Guarded by INTERNAL_API_TOKEN (timing-safe, fail-closed) — unlike the
-  // mTLS-assumed routes above, revoking sessions is a mutating power.
-  const internalToken = opts.internalToken ?? process.env.INTERNAL_API_TOKEN ?? ''
-  function internalGuard(
-    req: { headers: Record<string, unknown> },
-    reply: { code: (n: number) => { send: (b: unknown) => unknown } },
-  ): boolean {
-    if (!internalToken) {
-      reply.code(503).send({ error: 'sessions surface disabled: INTERNAL_API_TOKEN not set' })
-      return false
-    }
-    const presented = req.headers['x-hippo-internal-token']
-    const actual = Buffer.from(typeof presented === 'string' ? presented : '')
-    const expected = Buffer.from(internalToken)
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-      reply.code(401).send({ error: 'invalid internal token' })
-      return false
-    }
-    return true
-  }
-
+  // Guarded by internalGuard (INTERNAL_API_TOKEN, timing-safe, fail-closed) —
+  // revoking sessions and injecting venue events are mutating powers.
   app.get<{ Querystring: { partnerId?: string } }>('/internal/sessions', async (req, reply) => {
     if (!internalGuard(req, reply)) return reply
     const all = sessions.list()
