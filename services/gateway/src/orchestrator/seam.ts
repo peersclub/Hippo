@@ -11,6 +11,12 @@ const SEAM_URL = process.env.SEAM_URL ?? 'http://localhost:8793'
 const GATEWAY_CALLBACK_URL =
   process.env.GATEWAY_CALLBACK_URL ?? 'http://localhost:8788/internal/venue-events'
 const SEAM_TIMEOUT_MS = 5_000
+/**
+ * Shared secret for the seam's trading surface. The seam guards every
+ * prepare/confirm/cancel/portfolio route with INTERNAL_API_TOKEN (timing-safe,
+ * fail-closed), so every call must present it via x-hippo-internal-token.
+ */
+const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN ?? ''
 
 export type PreparedTicket = {
   ticketId: string
@@ -67,7 +73,10 @@ export interface SeamClient {
 async function json<T>(url: string, init: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(INTERNAL_API_TOKEN ? { 'x-hippo-internal-token': INTERNAL_API_TOKEN } : {}),
+    },
     signal: AbortSignal.timeout(SEAM_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`seam ${res.status} for ${url}`)

@@ -84,17 +84,31 @@ describe('sim venue adapter', () => {
   })
 })
 
+// Shared secret + trusted callback origin for the guarded HTTP surface.
+const TOKEN = 'seam-secret'
+const CALLBACK = 'http://gateway.test/callback'
+const HDR = { 'x-hippo-internal-token': TOKEN }
+/** App with the trust boundary configured (token + callback allowlist). */
+const guarded = (adapter = new SimVenueAdapter({ fillDelayMs: 10 })) =>
+  buildService(adapter, { internalToken: TOKEN, callbackAllowedOrigins: 'http://gateway.test' })
+
 describe('seam service HTTP surface', () => {
   it('prepare → confirm → filled event delivered to the callbackUrl, all audited', async () => {
-    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }))
-    const prep = await app.inject({ method: 'POST', url: '/v1/prepare', payload: prepareBody })
+    const app = guarded()
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
     expect(prep.statusCode).toBe(200)
     const { ticketId } = prep.json() as { ticketId: string }
 
     const confirm = await app.inject({
       method: 'POST',
       url: `/v1/tickets/${ticketId}/confirm`,
-      payload: { callbackUrl: 'http://gateway.test/callback' },
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
     })
     expect(confirm.statusCode).toBe(202)
 
@@ -109,25 +123,26 @@ describe('seam service HTTP surface', () => {
   })
 
   it('rejects malformed prepare requests with 400', async () => {
-    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }))
+    const app = guarded()
     for (const bad of [
       { ...prepareBody, side: 'yolo' },
       { ...prepareBody, instrument: 'BTCUSDT' },
       { ...prepareBody, orderType: 'limit' }, // limit without limitPrice
       { partnerId: 'p' },
     ]) {
-      const res = await app.inject({ method: 'POST', url: '/v1/prepare', payload: bad })
+      const res = await app.inject({ method: 'POST', url: '/v1/prepare', headers: HDR, payload: bad })
       expect(res.statusCode).toBe(400)
     }
     await app.close()
   })
 
   it('confirm of an unknown ticket is a 404, not a silent accept', async () => {
-    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }))
+    const app = guarded()
     const res = await app.inject({
       method: 'POST',
       url: '/v1/tickets/t_nope/confirm',
-      payload: { callbackUrl: 'http://gateway.test/callback' },
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
     })
     expect(res.statusCode).toBe(404)
     await app.close()
@@ -136,17 +151,24 @@ describe('seam service HTTP surface', () => {
   it('cancel stops the lifecycle and audits it', async () => {
     // Fill far in the future: the test cancels immediately after confirm, and a
     // 10ms fill window raced the cancel on loaded CI runners (order filled first).
-    const app = buildService(new SimVenueAdapter({ fillDelayMs: 5_000 }))
-    const prep = await app.inject({ method: 'POST', url: '/v1/prepare', payload: prepareBody })
+    const app = guarded(new SimVenueAdapter({ fillDelayMs: 5_000 }))
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
     const { ticketId } = prep.json() as { ticketId: string }
     await app.inject({
       method: 'POST',
       url: `/v1/tickets/${ticketId}/confirm`,
-      payload: { callbackUrl: 'http://gateway.test/callback' },
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
     })
     const res = await app.inject({
       method: 'POST',
       url: `/v1/tickets/${ticketId}/cancel`,
+      headers: HDR,
       payload: {},
     })
     expect(res.json()).toEqual({ cancelled: true })
@@ -156,11 +178,108 @@ describe('seam service HTTP surface', () => {
   })
 
   it('serves the portfolio (never cached)', async () => {
-    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }))
-    const res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u1' })
+    const app = guarded()
+    const res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u1', headers: HDR })
     const body = res.json() as { positions: unknown[]; openOrders: unknown[] }
     expect(body.positions).toHaveLength(3)
     expect(body.openOrders).toHaveLength(3)
+    await app.close()
+  })
+})
+
+describe('seam trust boundary — INTERNAL_API_TOKEN guard', () => {
+  // Every mutating/reading trading route + /internal/audit is guarded.
+  const routes: Array<{ method: 'GET' | 'POST'; url: string; payload?: unknown }> = [
+    { method: 'POST', url: '/v1/prepare', payload: prepareBody },
+    { method: 'POST', url: '/v1/tickets/t_x/confirm', payload: { callbackUrl: CALLBACK } },
+    { method: 'POST', url: '/v1/tickets/t_x/cancel', payload: {} },
+    { method: 'GET', url: '/v1/portfolio/koinbx-dev/u1' },
+    { method: 'GET', url: '/internal/audit' },
+  ]
+
+  it('is fail-closed: every guarded route is 503 when INTERNAL_API_TOKEN is unset', async () => {
+    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }), {
+      internalToken: '',
+      callbackAllowedOrigins: 'http://gateway.test',
+    })
+    for (const r of routes) {
+      const res = await app.inject({ method: r.method, url: r.url, payload: r.payload })
+      expect(res.statusCode).toBe(503)
+    }
+    await app.close()
+  })
+
+  it('rejects a missing or wrong token with 401 on every guarded route', async () => {
+    const app = guarded()
+    for (const r of routes) {
+      const noTok = await app.inject({ method: r.method, url: r.url, payload: r.payload })
+      expect(noTok.statusCode).toBe(401)
+      const wrongTok = await app.inject({
+        method: r.method,
+        url: r.url,
+        headers: { 'x-hippo-internal-token': 'wrong' },
+        payload: r.payload,
+      })
+      expect(wrongTok.statusCode).toBe(401)
+    }
+    await app.close()
+  })
+
+  it('accepts the correct token (timing-safe) — audit + portfolio return 200', async () => {
+    const app = guarded()
+    const audit = await app.inject({ method: 'GET', url: '/internal/audit', headers: HDR })
+    expect(audit.statusCode).toBe(200)
+    const portfolio = await app.inject({
+      method: 'GET',
+      url: '/v1/portfolio/koinbx-dev/u1',
+      headers: HDR,
+    })
+    expect(portfolio.statusCode).toBe(200)
+    await app.close()
+  })
+})
+
+describe('seam confirm callbackUrl SSRF allowlist', () => {
+  it('rejects a foreign callback origin with 400 (no order confirmed)', async () => {
+    const app = guarded()
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
+    const { ticketId } = prep.json() as { ticketId: string }
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      headers: HDR,
+      payload: { callbackUrl: 'http://169.254.169.254/latest/meta-data' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect((res.json() as { error: string }).error).toMatch(/origin not allowed/)
+    // The order was never confirmed, so no venue events are delivered.
+    await new Promise((r) => setTimeout(r, 40))
+    expect(deliveries).toHaveLength(0)
+    expect(app.audit.some((a) => a.kind === 'confirm')).toBe(false)
+    await app.close()
+  })
+
+  it('accepts a callback whose origin is on the allowlist', async () => {
+    const app = guarded()
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
+    const { ticketId } = prep.json() as { ticketId: string }
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
+    })
+    expect(res.statusCode).toBe(202)
     await app.close()
   })
 })
