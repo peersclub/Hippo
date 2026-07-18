@@ -107,9 +107,7 @@ export function DashboardPage() {
         </div>
       </div>
       {!gw && <div class="dim">Gateway unreachable — live MAU/cache metrics unavailable.</div>}
-      {!intel && (
-        <div class="dim">Intelligence service unreachable — active model unknown.</div>
-      )}
+      {!intel && <div class="dim">Intelligence service unreachable — active model unknown.</div>}
     </>
   )
 }

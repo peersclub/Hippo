@@ -16,7 +16,9 @@ export interface OperatorStore {
 
 export interface AuditStore {
   append(entry: Omit<AuditEntry, 'id' | 'ts'>): Promise<void>
-  list(opts: { offset?: number; limit?: number }): Promise<Page<AuditEntry>>
+  /** partnerId filters to entries whose detail.partnerId matches — the
+   * partner portal's own-activity view. Omitted = the operator's full view. */
+  list(opts: { offset?: number; limit?: number; partnerId?: string }): Promise<Page<AuditEntry>>
 }
 
 export class InMemoryOperatorStore implements OperatorStore {
@@ -54,9 +56,20 @@ export class InMemoryAuditStore implements AuditStore {
     this.entries.push({ ...entry, id: this.nextId++, ts: Date.now() })
   }
 
-  async list({ offset = 0, limit = 50 }): Promise<Page<AuditEntry>> {
+  async list({
+    offset = 0,
+    limit = 50,
+    partnerId,
+  }: {
+    offset?: number
+    limit?: number
+    partnerId?: string
+  }): Promise<Page<AuditEntry>> {
     // Tie-break on id so same-millisecond entries order like Postgres (ts DESC, id DESC).
-    const sorted = [...this.entries].sort((a, b) => b.ts - a.ts || b.id - a.id)
+    const filtered = partnerId
+      ? this.entries.filter((e) => e.detail.partnerId === partnerId)
+      : this.entries
+    const sorted = [...filtered].sort((a, b) => b.ts - a.ts || b.id - a.id)
     return { rows: sorted.slice(offset, offset + limit), total: sorted.length }
   }
 }
@@ -116,12 +129,27 @@ export class PostgresAuditStore implements AuditStore {
     )
   }
 
-  async list({ offset = 0, limit = 50 }): Promise<Page<AuditEntry>> {
+  async list({
+    offset = 0,
+    limit = 50,
+    partnerId,
+  }: {
+    offset?: number
+    limit?: number
+    partnerId?: string
+  }): Promise<Page<AuditEntry>> {
+    const where = partnerId ? "WHERE detail->>'partnerId' = $3" : ''
+    const params: unknown[] = partnerId ? [limit, offset, partnerId] : [limit, offset]
     const rows = await this.pool.query(
-      'SELECT * FROM admin_audit ORDER BY ts DESC, id DESC LIMIT $1 OFFSET $2',
-      [limit, offset],
+      `SELECT * FROM admin_audit ${where} ORDER BY ts DESC, id DESC LIMIT $1 OFFSET $2`,
+      params,
     )
-    const total = await this.pool.query('SELECT count(*) FROM admin_audit')
+    const total = await this.pool.query(
+      partnerId
+        ? "SELECT count(*) FROM admin_audit WHERE detail->>'partnerId' = $1"
+        : 'SELECT count(*) FROM admin_audit',
+      partnerId ? [partnerId] : [],
+    )
     return {
       rows: rows.rows.map((r) => ({
         id: Number(r.id),

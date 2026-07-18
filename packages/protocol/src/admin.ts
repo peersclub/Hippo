@@ -73,3 +73,36 @@ export const PersonaAdminUpdate = z.object({
     .optional(),
 })
 export type PersonaAdminUpdate = z.infer<typeof PersonaAdminUpdate>
+
+// ── Partner portal (services/portal) wire contract ──────────────────────────
+
+/** Operator-side: invite a partner admin. The response carries the one-time
+ * claim token exactly once; only its hash is stored. */
+export const PartnerAdminInviteBody = z.object({
+  email: z.string().email(),
+  role: z.enum(['admin', 'viewer']).default('admin'),
+})
+export type PartnerAdminInviteBody = z.infer<typeof PartnerAdminInviteBody>
+
+/** Portal claim: one-time invite token + the password being set. */
+export const PortalClaimBody = z.object({
+  token: z.string().min(16).max(128),
+  password: z.string().min(12).max(200),
+})
+export type PortalClaimBody = z.infer<typeof PortalClaimBody>
+
+/** Portal integration edit — the partner-owned config ONLY. jwtSecret is
+ * deliberately absent: rotation is its own endpoint with its own audit. */
+export const PortalIntegrationPatch = z
+  .object({
+    venueName: z.string().min(1).max(80),
+    locales: z.array(z.string().min(2).max(10)).max(8),
+    suggestedQueries: z.array(z.string().min(1).max(200)).max(8),
+  })
+  .partial()
+export type PortalIntegrationPatch = z.infer<typeof PortalIntegrationPatch>
+
+export const PortalPlanRequestBody = z.object({
+  message: z.string().min(1).max(1000),
+})
+export type PortalPlanRequestBody = z.infer<typeof PortalPlanRequestBody>

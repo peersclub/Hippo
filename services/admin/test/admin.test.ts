@@ -1,6 +1,7 @@
 import {
   InMemoryAuditStore,
   InMemoryOperatorStore,
+  InMemoryPartnerAdminStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
   InMemoryUserStore,
@@ -28,6 +29,7 @@ async function testAdmin(overrides: Partial<Parameters<typeof buildAdminService>
     ),
     users: new InMemoryUserStore(),
     operators,
+    partnerAdmins: new InMemoryPartnerAdminStore(),
     audit: new InMemoryAuditStore(),
   }
   const app = buildAdminService({ ...stores, jwtSecret: JWT_SECRET, ...overrides })
@@ -659,6 +661,90 @@ describe('sandbox provisioning (hippo register)', () => {
       payload: { email: 'a@b.co', venueName: 'One Too Many' },
     })
     expect(limited.statusCode).toBe(429)
+    await app.close()
+  })
+})
+
+describe('partner admin invites (portal seats)', () => {
+  async function withPartner(app: Awaited<ReturnType<typeof testAdmin>>['app'], cookie: string) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/partners',
+      headers: { cookie },
+      payload: {
+        partnerId: 'kbx',
+        partnerKey: 'pk_kbx',
+        jwtSecret: 'kbx-secret-123',
+        venueName: 'KoinBX',
+        locales: ['en'],
+        suggestedQueries: [],
+      },
+    })
+    expect(res.statusCode).toBe(200)
+  }
+
+  it('mints a one-time invite, lists the seat unclaimed, and revokes it', async () => {
+    const { app, partnerAdmins } = await testAdmin()
+    const cookie = await login(app)
+    await withPartner(app, cookie)
+
+    const invite = await app.inject({
+      method: 'POST',
+      url: '/v1/partners/kbx/admins',
+      headers: { cookie },
+      payload: { email: 'admin@koinbx.com', role: 'admin' },
+    })
+    expect(invite.statusCode).toBe(200)
+    const body = invite.json() as { inviteToken: string; email: string }
+    expect(body.inviteToken.length).toBeGreaterThan(20)
+
+    // Store never holds the plaintext token.
+    const stored = await partnerAdmins.get('admin@koinbx.com')
+    expect(stored?.inviteTokenHash).not.toBe(body.inviteToken)
+    expect(stored?.passwordHash).toBeNull()
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/v1/partners/kbx/admins',
+      headers: { cookie },
+    })
+    expect(list.json()).toMatchObject([{ email: 'admin@koinbx.com', claimed: false }])
+
+    const revoke = await app.inject({
+      method: 'DELETE',
+      url: '/v1/partners/kbx/admins/admin@koinbx.com',
+      headers: { cookie },
+    })
+    expect(revoke.statusCode).toBe(200)
+    expect(await partnerAdmins.get('admin@koinbx.com')).toBeUndefined()
+    await app.close()
+  })
+
+  it('409s a duplicate seat and 404s an unknown partner', async () => {
+    const { app } = await testAdmin()
+    const cookie = await login(app)
+    await withPartner(app, cookie)
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/partners/kbx/admins',
+      headers: { cookie },
+      payload: { email: 'admin@koinbx.com' },
+    })
+    expect(first.statusCode).toBe(200)
+    const dup = await app.inject({
+      method: 'POST',
+      url: '/v1/partners/kbx/admins',
+      headers: { cookie },
+      payload: { email: 'admin@koinbx.com' },
+    })
+    expect(dup.statusCode).toBe(409)
+    const ghost = await app.inject({
+      method: 'POST',
+      url: '/v1/partners/nope/admins',
+      headers: { cookie },
+      payload: { email: 'x@y.com' },
+    })
+    expect(ghost.statusCode).toBe(404)
     await app.close()
   })
 })
