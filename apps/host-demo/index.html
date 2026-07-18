@@ -72,12 +72,13 @@
   </script>
 
   <!-- ═══ The Hippo embed — the entire partner-side integration ═══
-       ?gw=real points the SDK at the real gateway (:8788) instead of the
-       mock (:8787, default). A partner ships the single static <script> tag;
+       The REAL gateway (:8788) is the default so the plain URL demos the
+       full product; ?gw=mock flips to the scripted mock (:8787) for offline
+       or zero-cost runs. A partner ships the single static <script> tag;
        the dynamic injection here exists only so demos can flip gateways. -->
   <script>
     (() => {
-      const real = new URLSearchParams(location.search).get('gw') === 'real'
+      const real = new URLSearchParams(location.search).get('gw') !== 'mock'
       const s = document.createElement('script')
       s.src = '/loader.js'
       s.async = true
@@ -85,16 +86,33 @@
       s.dataset.hippoGateway = real ? 'http://localhost:8788' : 'http://localhost:8787'
       document.body.appendChild(s)
 
-      // Tiny badge so it's always unambiguous which gateway a demo is on.
-      const badge = document.createElement('div')
+      // Tiny badge so it's always unambiguous which gateway a demo is on,
+      // plus quick links to the test guide and operator panel.
+      const bar = document.createElement('div')
+      bar.style.cssText =
+        'position:fixed;left:10px;bottom:10px;z-index:2147483001;display:flex;gap:6px;' +
+        'font:600 10px ui-monospace,monospace;letter-spacing:.08em'
+      const badge = document.createElement('span')
       badge.textContent = `GW: ${real ? 'REAL' : 'MOCK'}`
       badge.style.cssText =
-        'position:fixed;left:10px;bottom:10px;z-index:2147483001;padding:3px 8px;' +
-        'border:1px solid rgba(255,255,255,.14);border-radius:5px;' +
+        'padding:3px 8px;border:1px solid rgba(255,255,255,.14);border-radius:5px;' +
         `background:${real ? 'rgba(46,196,141,.16)' : 'rgba(255,255,255,.05)'};` +
-        `color:${real ? '#2EC48D' : '#8A8F9C'};` +
-        'font:600 10px ui-monospace,monospace;letter-spacing:.08em;pointer-events:none'
-      document.body.appendChild(badge)
+        `color:${real ? '#2EC48D' : '#8A8F9C'}`
+      bar.appendChild(badge)
+      for (const [label, href] of [
+        ['HOW TO TEST', '/how'],
+        ['ADMIN', 'http://localhost:5175/'],
+      ]) {
+        const a = document.createElement('a')
+        a.textContent = label
+        a.href = href
+        a.target = '_blank'
+        a.style.cssText =
+          'padding:3px 8px;border:1px solid rgba(255,255,255,.14);border-radius:5px;' +
+          'background:rgba(255,255,255,.05);color:#8A8F9C;text-decoration:none'
+        bar.appendChild(a)
+      }
+      document.body.appendChild(bar)
     })()
   </script>
 </body>
