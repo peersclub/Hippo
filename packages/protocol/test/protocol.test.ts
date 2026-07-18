@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Frame, Uplink, parseFrame } from '../src/index.js'
+import { Frame, parseFrame, Uplink } from '../src/index.js'
 
 const base = { v: 1 as const, id: 'f_1', ts: 1_752_480_000_000 }
 
@@ -96,6 +96,21 @@ describe('card protocol v1 — uplinks', () => {
       reason: 'too_shallow',
     })
     expect(up.success).toBe(true)
+  })
+
+  it('parses stream_stop (base envelope only — no payload)', () => {
+    const up = Uplink.safeParse({
+      v: 1,
+      sessionId: 's_1',
+      ts: Date.now(),
+      kind: 'stream_stop',
+    })
+    expect(up.success).toBe(true)
+  })
+
+  it('rejects stream_stop without the base envelope', () => {
+    const up = Uplink.safeParse({ kind: 'stream_stop' })
+    expect(up.success).toBe(false)
   })
 
   it('caps user text at 2000 chars', () => {

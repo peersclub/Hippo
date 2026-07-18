@@ -115,9 +115,16 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .newhint{margin-top:9px;border:1px dashed rgba(var(--hippo-amber-rgb),.5);border-radius:13px;padding:11px 12px}
 .newhint b{display:block;font-family:var(--hippo-font-display);font-weight:600;font-size:12px;color:var(--hippo-amber);margin-bottom:8px}
 .nchips{display:flex;gap:7px;flex-wrap:wrap}
-/* thread */
+/* thread — wrapped so the jump pill can float over the scroll area */
+.threadwrap{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
 .thread{overflow-y:auto;padding:13px;display:flex;flex-direction:column;gap:11px;flex:1;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+/* jump-to-latest — appears only when the trader scrolled up and new content landed */
+.jump{position:absolute;inset-block-end:12px;inset-inline-end:14px;font-family:var(--hippo-font-mono);
+  font-size:9px;letter-spacing:.1em;color:var(--hippo-amber-ink);background:var(--hippo-amber);
+  border-radius:var(--hippo-radius-pill);padding:6px 11px;box-shadow:0 6px 18px rgba(var(--hippo-black-rgb),.35);
+  animation:msgIn .25s ease both}
+@media (prefers-reduced-motion:reduce){.jump{animation:none}}
 .thread>*{flex-shrink:0;animation:msgIn .3s ease both}
 @media (prefers-reduced-motion:reduce){.thread>*{animation:none}}
 @keyframes msgIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
@@ -238,21 +245,32 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .chips{flex-shrink:0;padding:9px 13px 2px;display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;border-top:1px solid var(--hippo-hairline)}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex-shrink:0;background:rgba(var(--hippo-white-rgb),.04);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);
-  padding:7px 13px;font-size:11px;color:var(--hippo-text-mid);white-space:nowrap}
+  padding:7px 13px;font-size:11px;color:var(--hippo-text-mid);white-space:nowrap;
+  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .chip:hover{border-color:rgba(var(--hippo-amber-rgb),.4);color:var(--hippo-text-hi)}
 .cwrap{flex-shrink:0}
 .sendfail{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em;color:var(--hippo-amber);padding:8px 15px 0}
-.composer{display:flex;align-items:center;gap:8px;padding:8px 13px 13px;flex-shrink:0}
-.composer input{flex:1;font:inherit;font-size:12px;padding:10px 13px;border-radius:var(--hippo-radius-pill);
-  background:rgba(var(--hippo-surface-rgb),.7);border:1px solid var(--hippo-hairline);color:var(--hippo-text-hi);outline:none}
-.composer input:focus{border-color:rgba(var(--hippo-amber-rgb),.5)}
-.composer input::placeholder{color:var(--hippo-text-faint)}
+/* queued uplinks — one quiet ambient row, flushed on reconnect */
+.qrow{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em;color:var(--hippo-amber);padding:8px 15px 0}
+/* character counter — invisible until the trader nears the protocol limit */
+.ccount{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.08em;color:var(--hippo-text-faint);
+  padding:6px 15px 0;text-align:end}
+.ccount.max{color:var(--hippo-amber)}
+.composer{display:flex;align-items:flex-end;gap:8px;padding:8px 13px 13px;flex-shrink:0}
+.composer textarea{flex:1;font-family:var(--hippo-font-body);font-size:12px;line-height:1.45;padding:10px 13px;border-radius:16px;
+  background:rgba(var(--hippo-surface-rgb),.7);border:1px solid var(--hippo-hairline);color:var(--hippo-text-hi);outline:none;
+  resize:none;max-height:96px;overflow-y:auto}
+.composer textarea:focus{border-color:rgba(var(--hippo-amber-rgb),.5)}
+.composer textarea::placeholder{color:var(--hippo-text-faint)}
 /* offline — composer locks with a reason; typed text is kept, never cleared */
-.composer input:disabled{opacity:.55}
-.composer input:disabled::placeholder{font-style:italic}
+.composer textarea:disabled{opacity:.55}
+.composer textarea:disabled::placeholder{font-style:italic}
 .composer .send:disabled{opacity:.4;cursor:default}
 .composer .send{width:33px;height:33px;border-radius:11px;display:grid;place-items:center;
   font-size:14px;flex-shrink:0;background:var(--hippo-amber);color:var(--hippo-amber-ink)}
+/* disabled trading actions fail loud, never silent */
+.cta:disabled{opacity:.45;cursor:default}
+.await .cxl:disabled{opacity:.45;cursor:default}
 /* fallback */
 .fallback{align-self:flex-start;max-width:94%;border-radius:15px;padding:12px 13px;
   background:var(--hippo-card);border:1px dashed rgba(var(--hippo-white-rgb),.18)}
@@ -336,6 +354,24 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .shitem{font-family:var(--hippo-font-display);font-weight:600;font-size:12px;text-align:left;padding:11px 12px;
   border:1px solid var(--hippo-hairline);border-radius:12px;background:rgba(var(--hippo-panel-deep-rgb),.7);color:var(--hippo-text-hi)}
 .shitem:hover{border-color:rgba(var(--hippo-amber-rgb),.4)}
+.shitem.danger{border-color:rgba(var(--hippo-down-rgb),.5);color:var(--hippo-down)}
+.shitem.danger:hover{border-color:var(--hippo-down)}
+/* settings: answer-language row + clear-memory confirm */
+.setlab{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.14em;color:var(--hippo-text-faint);margin-top:2px}
+.langrow{display:flex;gap:6px}
+.lang{flex:1;border:1px solid var(--hippo-hairline);border-radius:10px;padding:8px 4px;font-size:11px;
+  color:var(--hippo-text-mid);text-align:center}
+.lang:hover{border-color:rgba(var(--hippo-amber-rgb),.4);color:var(--hippo-text-hi)}
+.lang.on{border-color:rgba(var(--hippo-amber-rgb),.6);background:rgba(var(--hippo-amber-rgb),.08);color:var(--hippo-text-hi)}
+.confirmrow{display:flex;gap:7px}
+.confirmrow .shitem{flex:1;text-align:center}
+.cleared{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.12em;color:var(--hippo-up);text-align:center;padding:11px}
+/* shared focus ring — every interactive element inside the panel */
+.chip:focus-visible,.livebar button:focus-visible,.fbchip:focus-visible,.fbskip:focus-visible,
+.composer textarea:focus-visible,.send:focus-visible,.jump:focus-visible,.shrx:focus-visible,
+.shitem:focus-visible,.lang:focus-visible,.obnotnow:focus-visible,.omanage:focus-visible,
+.cta:focus-visible,.await .cxl:focus-visible,.obcheck:focus-visible{
+  outline:2px solid var(--hippo-amber);outline-offset:1px}
 /* ── light lean — PURE token swap (redeclares tokens only) ── */
 :host([data-theme="light"]){
   --hippo-panel-top:#F7F8FA;--hippo-panel-bottom:#E9ECF1;--hippo-panel:#F7F8FA;

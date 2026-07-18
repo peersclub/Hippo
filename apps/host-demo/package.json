@@ -5,7 +5,7 @@
   "description": "Fake partner exchange terminal — the page the SDK parasites onto during development",
   "type": "module",
   "scripts": {
-    "dev": "vite --port 5173 --strictPort",
+    "dev": "vite --port 4000 --strictPort",
     "build": "vite build"
   },
   "devDependencies": {

@@ -42,6 +42,9 @@ const LOW_CONFIDENCE = 0.4
 /** Coalescing window for streamed brief_delta frames (journal economy). */
 const DELTA_FLUSH_MS = 150
 
+/** Race winner when the trader stops an in-flight stream (stream_stop). */
+const STOPPED = Symbol('stream-stopped')
+
 type Uplink = import('@hippo/protocol').Uplink
 
 type Log = {
@@ -172,6 +175,49 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   }
 
+  /**
+   * Stopped-stream brief: the authoritative frame for a stream the trader
+   * halted. Assembled SERVER-SIDE from the text that already streamed —
+   * honest and truncated. No stats, no spark: the server never fabricates
+   * numbers it didn't retrieve. liveBar appears only when the snapshot meta
+   * (real asOf) was already fetched before the stop.
+   */
+  function stoppedBriefFrame(
+    accumulated: string,
+    intent: string,
+    asOfIso: string | null,
+  ): FrameDraft {
+    const paragraphs = accumulated
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+    return {
+      type: 'research_brief',
+      eyebrow: intent === 'concept' ? 'CONCEPT · STOPPED' : 'MARKET BRIEF · STOPPED',
+      live: false,
+      headline: 'Stopped early — partial brief',
+      paragraphs:
+        paragraphs.length > 0
+          ? paragraphs
+          : ['Stopped before any of the brief had streamed. Ask again for the full picture.'],
+      stats: [],
+      sources: [],
+      followups: [],
+      ...(asOfIso
+        ? {
+            liveBar: {
+              asOf: asOfDisplay(asOfIso),
+              asOfIso,
+              refreshable: true,
+              shareable: true,
+              feedback: true,
+              cached: false,
+            },
+          }
+        : {}),
+    }
+  }
+
   /** Smalltalk / low-confidence: a short, helpful nudge in brief clothing. */
   function nudgeFrame(session: Session): FrameDraft {
     return {
@@ -232,6 +278,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   /** Live tickets → their session, so venue events (which carry only a
    * ticketId) can be routed back into the right thread. */
   const ticketSessions = new Map<string, Session>()
+
+  // ── stop-streaming (stream_stop uplink) ─────────────────────────────────
+
+  /** In-flight research stream per session. The value stops it: the
+   * consuming loop below races every stream event against the stop signal,
+   * aborts consumption, and emits the stopped brief. stream_stop with no
+   * entry here is a silent no-op. */
+  const activeStreams = new Map<string, () => void>()
 
   async function prepareTicket(session: Session, order: OrderIntent, text: string) {
     // The seam owns quoting, fees and validation (per-venue adapter). The
@@ -407,47 +461,86 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           let lastFlush = 0
           let finished = false
           let firstTokenSent = false
+          // Everything that streamed, flushed or not — the stopped brief is
+          // assembled server-side from exactly this.
+          let accumulated = ''
+          let metaAsOfIso: string | null = null
           // First readable token → the first-token-p95 rate-card number.
           const markFirstToken = () => {
             if (firstTokenSent) return
             firstTokenSent = true
             telemetry.recordFirstToken(Date.now() - turnStart, intentRes.intent)
           }
-          for await (const ev of intel.respondStream({
+          // stream_stop: the uplink handler fires this session's stop signal;
+          // every iteration races the next stream event against it, so a stop
+          // lands even while the model is mid-generation between events.
+          let requestStop: () => void = () => {}
+          const stopSignal = new Promise<typeof STOPPED>((resolve) => {
+            requestStop = () => resolve(STOPPED)
+          })
+          activeStreams.set(session.id, requestStop)
+          const stream = intel.respondStream({
             text,
             intent: intentRes.intent,
             symbol,
             ...(persona?.optIn && persona.experienceLevel
               ? { persona: { experienceLevel: persona.experienceLevel } }
               : {}),
-          })) {
-            if (ev.event === 'delta') {
-              pending += ev.data.text
-              const now = Date.now()
-              if (pending.trim() && now - lastFlush >= DELTA_FLUSH_MS) {
-                markFirstToken()
-                emit(session, { type: 'brief_delta', text: pending })
-                pending = ''
-                lastFlush = now
+          })
+          try {
+            while (true) {
+              const nextEvent = stream.next()
+              // Abandoned on stop — must never become an unhandled rejection.
+              nextEvent.catch(() => {})
+              const step = await Promise.race([nextEvent, stopSignal])
+              if (step === STOPPED) {
+                // Abort consumption (AbortController-equivalent for the SSE
+                // generator: return() runs its finally and drops the rest).
+                stream.return(undefined).catch(() => {})
+                // Flush the coalescing buffer, then emit the authoritative
+                // stopped brief — honest, truncated, server-assembled.
+                if (pending.trim()) emit(session, { type: 'brief_delta', text: pending })
+                emit(session, stoppedBriefFrame(accumulated, intentRes.intent, metaAsOfIso))
+                telemetry.recordResearchAnswered(userKey(session))
+                return
               }
-            } else if (ev.event === 'done') {
-              // Cache-hit path streams straight to done — that's still the
-              // first token the trader sees.
-              markFirstToken()
-              telemetry.recordCache(ev.data.cached)
-              emit(session, briefFrame(ev.data, intentRes.intent))
-              telemetry.recordResearchAnswered(userKey(session))
-              finished = true
-            } else if (ev.event === 'replace' || ev.event === 'decline') {
-              // Guardrail trip mid-brief is an advice decline too.
-              telemetry.recordAdvice(true)
-              emit(session, declineFrame(ev.data))
-              finished = true
+              if (step.done) break
+              const ev = step.value
+              if (ev.event === 'delta') {
+                accumulated += ev.data.text
+                pending += ev.data.text
+                const now = Date.now()
+                if (pending.trim() && now - lastFlush >= DELTA_FLUSH_MS) {
+                  markFirstToken()
+                  emit(session, { type: 'brief_delta', text: pending })
+                  pending = ''
+                  lastFlush = now
+                }
+              } else if (ev.event === 'done') {
+                // Cache-hit path streams straight to done — that's still the
+                // first token the trader sees.
+                markFirstToken()
+                telemetry.recordCache(ev.data.cached)
+                emit(session, briefFrame(ev.data, intentRes.intent))
+                telemetry.recordResearchAnswered(userKey(session))
+                finished = true
+              } else if (ev.event === 'replace' || ev.event === 'decline') {
+                // Guardrail trip mid-brief is an advice decline too.
+                telemetry.recordAdvice(true)
+                emit(session, declineFrame(ev.data))
+                finished = true
+              } else if (ev.event === 'meta') {
+                // Snapshot facts land in the final brief either way and the
+                // skeleton is already up — no frame. The real asOf is kept so
+                // a stopped brief can carry a truthful liveBar.
+                const asOf = (ev.data as Record<string, unknown>).asOfIso
+                if (typeof asOf === 'string') metaAsOfIso = asOf
+              }
             }
-            // 'meta' carries the snapshot facts; they land in the final
-            // brief either way and the skeleton is already up — no frame.
+            if (!finished) throw new Error('respond stream ended without done/decline')
+          } finally {
+            activeStreams.delete(session.id)
           }
-          if (!finished) throw new Error('respond stream ended without done/decline')
         } catch (err) {
           enterDegraded(session, err)
           await emitMarketOnlyBrief(session, text)
@@ -589,6 +682,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         case 'feedback': {
           // Recorded for the L2 export pipeline (BE doc §4); counters only here.
           telemetry.recordUplink(uplink.kind)
+          return
+        }
+        case 'stream_stop': {
+          // Stop the session's in-flight research stream: the consuming loop
+          // aborts and emits the stopped brief. No active stream (the brief
+          // already landed, or none was running) → silent no-op.
+          activeStreams.get(session.id)?.()
           return
         }
       }

@@ -498,3 +498,8 @@ textarea:focus {
 .search-box {
   width: 220px;
 }
+
+.badge.sandbox {
+  background: rgba(240, 185, 74, 0.14);
+  color: var(--accent);
+}

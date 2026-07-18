@@ -137,6 +137,65 @@ describe('orchestrator: streaming research (brief_delta)', () => {
     await app.close()
   })
 
+  it('stream_stop mid-stream halts deltas and emits the stopped brief from accumulated text', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* () {
+          yield { event: 'meta', data: { asOfIso: '2026-07-14T09:02:05.000Z' } }
+          yield { event: 'delta', data: { text: 'BTC is down 4.2% ' } }
+          await delay(170)
+          yield { event: 'delta', data: { text: 'after the US inflation print. ' } }
+          await delay(1_000) // the long tail the trader won't sit through
+          yield { event: 'delta', data: { text: 'NEVER-DELIVERED ' } }
+          yield { event: 'done', data: briefFixture }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    await waitForJournal(session, (t) => t.includes('brief_delta'))
+    expect(await sendTurn(app, session.id, { kind: 'stream_stop' })).toBe(200)
+
+    const types = await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(types[types.length - 1]).toBe('research_brief')
+
+    const brief = frameOfType<{
+      eyebrow: string
+      headline: string
+      paragraphs: string[]
+      stats: unknown[]
+      spark?: unknown
+      liveBar?: { asOfIso: string }
+    }>(session, 'research_brief')
+    // Server-assembled from what actually streamed — honest and truncated.
+    expect(brief.eyebrow).toBe('MARKET BRIEF · STOPPED')
+    expect(brief.paragraphs.join(' ')).toContain('BTC is down 4.2%')
+    expect(brief.paragraphs.join(' ')).not.toContain('NEVER-DELIVERED')
+    expect(brief.headline).not.toBe(briefFixture.headline) // never the full brief
+    // The server fabricates no numbers it didn't retrieve…
+    expect(brief.stats).toEqual([])
+    expect(brief.spark).toBeUndefined()
+    // …but the snapshot meta HAD been fetched, so the liveBar asOf is real.
+    expect(brief.liveBar?.asOfIso).toBe('2026-07-14T09:02:05.000Z')
+
+    // Deltas cease: even after the stream's tail would have fired, nothing
+    // else lands in the journal.
+    const seqAtStop = session.journal.lastSeq()
+    await delay(1_300)
+    expect(session.journal.lastSeq()).toBe(seqAtStop)
+    await app.close()
+  })
+
+  it('stream_stop with no active stream is a silent no-op', async () => {
+    const { app, sessions } = await testApp()
+    const session = await createSession(app, sessions)
+    const before = session.journal.lastSeq()
+    expect(await sendTurn(app, session.id, { kind: 'stream_stop' })).toBe(200)
+    await delay(50)
+    expect(session.journal.lastSeq()).toBe(before) // nothing emitted
+    await app.close()
+  })
+
   it('a stream ending without done also degrades truthfully', async () => {
     const { app, sessions } = await testApp({
       intel: stubIntel({

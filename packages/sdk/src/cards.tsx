@@ -18,17 +18,18 @@ import type {
   UserEcho,
 } from '@hippo/protocol'
 import type { JSX } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   FEEDBACK_REASONS,
   type FeedbackEvent,
-  type FeedbackState,
   feedbackDoneLabel,
   feedbackTransition,
 } from './feedback.js'
 import { isStale, STALE_CHECK_INTERVAL_MS } from './freshness.js'
 import { t } from './i18n.js'
-import { locale, shareFrame } from './state.js'
+import { dispatch } from './outbox.js'
+import { briefClipboardText, COPIED_FLASH_MS } from './share.js'
+import { connection, feedbackMap, locale, shareFrame } from './state.js'
 import { send } from './transport.js'
 
 /** Exported for the share overlay — the co-branded card reuses the exact spark. */
@@ -51,8 +52,14 @@ export function SparklineSvg({ points }: { points: number[] }) {
 
 function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   const lb = frame.liveBar
-  const [fb, setFb] = useState<FeedbackState>({ phase: 'idle' })
+  // Feedback lives in a keyed signal map (not component state) so "already
+  // gave feedback" survives minimize/reopen; the reducer's terminal states
+  // guarantee replays can't double-send.
+  const fb = feedbackMap.value[frame.id] ?? { phase: 'idle' as const }
   const [flash, setFlash] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef(0)
+  useEffect(() => () => clearTimeout(copyTimer.current), [])
   // Stale data is declared, never silent (edge state №5): past the threshold
   // the as-of turns amber and REFRESH becomes the loudest element.
   const [stale, setStale] = useState(() => (lb ? isStale(lb.asOfIso) : false))
@@ -67,20 +74,27 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   const refresh = () => {
     setFlash(true)
     setTimeout(() => setFlash(false), 900)
-    send({ kind: 'chip_tap', text: `refresh:${frame.id}` })
+    void dispatch({ kind: 'chip_tap', text: `refresh:${frame.id}` })
   }
   // 👍 stays instant; 👎 asks one follow-up. The three reason chips map 1:1
   // to eval-harness scoring criteria — labels arrive pre-categorized (Layer 2).
-  const dispatch = (event: FeedbackEvent) => {
+  const applyFeedback = (event: FeedbackEvent) => {
     const { state: next, uplink } = feedbackTransition(fb, event)
-    setFb(next)
-    if (uplink) send({ kind: 'feedback', frameId: frame.id, ...uplink })
+    feedbackMap.value = { ...feedbackMap.value, [frame.id]: next }
+    if (uplink) void dispatch({ kind: 'feedback', frameId: frame.id, ...uplink })
   }
   const share = () => {
     shareFrame.value = frame
     // No share backend yet — the overlay renders from frame data alone;
     // this uplink lets the server log share intent.
-    send({ kind: 'chip_tap', text: `share:${frame.id}` })
+    void dispatch({ kind: 'chip_tap', text: `share:${frame.id}` })
+  }
+  const copy = () => {
+    // Clipboard can be unavailable — the button simply doesn't confirm.
+    void navigator.clipboard?.writeText(briefClipboardText(frame)).catch(() => {})
+    setCopied(true)
+    clearTimeout(copyTimer.current)
+    copyTimer.current = window.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
   }
   const done = feedbackDoneLabel(fb)
   return (
@@ -92,6 +106,9 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
             ↻ REFRESH
           </button>
         )}
+        <button type="button" onClick={copy} aria-label={t(locale.value, 'copy_brief')}>
+          {copied ? 'COPIED ✓' : '⧉ COPY'}
+        </button>
         {lb.shareable && (
           <button type="button" onClick={share}>
             ↗ SHARE
@@ -106,14 +123,14 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
                 <button
                   type="button"
                   aria-label={t(locale.value, 'feedback_helpful')}
-                  onClick={() => dispatch({ type: 'vote', vote: 'up' })}
+                  onClick={() => applyFeedback({ type: 'vote', vote: 'up' })}
                 >
                   👍
                 </button>
                 <button
                   type="button"
                   aria-label={t(locale.value, 'feedback_not_helpful')}
-                  onClick={() => dispatch({ type: 'vote', vote: 'down' })}
+                  onClick={() => applyFeedback({ type: 'vote', vote: 'down' })}
                 >
                   👎
                 </button>
@@ -130,12 +147,12 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
               type="button"
               class="fbchip"
               key={r.reason}
-              onClick={() => dispatch({ type: 'reason', reason: r.reason })}
+              onClick={() => applyFeedback({ type: 'reason', reason: r.reason })}
             >
               {r.label}
             </button>
           ))}
-          <button type="button" class="fbskip" onClick={() => dispatch({ type: 'skip' })}>
+          <button type="button" class="fbskip" onClick={() => applyFeedback({ type: 'skip' })}>
             skip
           </button>
         </div>
@@ -208,9 +225,13 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
           </div>
         ))}
       </div>
+      {/* ticket_action is deliberately NOT queueable — a confirm fired minutes
+          later without the trader present is unacceptable. Offline: fail loud. */}
       <button
         type="button"
         class="cta"
+        disabled={connection.value !== 'live'}
+        title={connection.value !== 'live' ? t(locale.value, 'ticket_offline_hint') : undefined}
         onClick={() =>
           send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'confirm_handoff' })
         }
@@ -233,6 +254,10 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
             <button
               type="button"
               class="cxl"
+              disabled={connection.value !== 'live'}
+              title={
+                connection.value !== 'live' ? t(locale.value, 'ticket_offline_hint') : undefined
+              }
               onClick={() =>
                 send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'cancel' })
               }
@@ -291,7 +316,7 @@ function AdviceDeclineCard({ frame }: { frame: AdviceDecline }) {
                 type="button"
                 class="chip"
                 key={q}
-                onClick={() => send({ kind: 'chip_tap', text: q })}
+                onClick={() => void dispatch({ kind: 'chip_tap', text: q })}
               >
                 {q}
               </button>
@@ -334,7 +359,7 @@ function RejectionCard({ frame }: { frame: RejectionTicket }) {
         <button
           type="button"
           class="cta"
-          onClick={() => send({ kind: 'chip_tap', text: frame.fix?.action ?? '' })}
+          onClick={() => void dispatch({ kind: 'chip_tap', text: frame.fix?.action ?? '' })}
         >
           {frame.fix.label}
         </button>
