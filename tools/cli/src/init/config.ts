@@ -5,7 +5,8 @@
  * involved — this is the plain-code stage the LLM stages build on. Its output
  * is what stage 4 fills with mapping code and what `hippo conform` grades.
  */
-import type { CapabilityId, ScanResult } from '../scan/types.js'
+import { TRADE_FEATURE_IDS } from '../scan/features.js'
+import type { CapabilityId, ScanResult, VenueCapabilitiesShape } from '../scan/types.js'
 import type { AdapterConfig, AdapterOperation } from './types.js'
 
 /** Data-returning ops render into cards, so their venue shape needs a mapping
@@ -58,6 +59,7 @@ export function draftAdapterConfig(scan: ScanResult): AdapterConfig {
     venue: scan.domain,
     baseUrl: baseUrlGuess(scan),
     auth: { schemes: scan.authSchemes, strategy: authStrategy(scan.authSchemes) },
+    tradeFeatures: scan.tradeFeatures ?? null,
     operations,
     gaps: operations.filter((o) => o.status === 'gap').map((o) => o.capability),
     needsMappingCode: operations.filter((o) => o.needsMappingCode).map((o) => o.capability),
@@ -88,7 +90,13 @@ export function renderAdapterConfigYaml(config: AdapterConfig): string {
   )
   if (config.auth.schemes.length === 0) push('    [] # none declared in the spec')
   else for (const s of config.auth.schemes) push(`    - ${q(s)}`)
-  push(`  strategy: ${q(config.auth.strategy)}`, '', 'operations:')
+  push(`  strategy: ${q(config.auth.strategy)}`)
+
+  if (config.tradeFeatures) {
+    pushCapabilitiesBlock(push, config.tradeFeatures)
+  }
+
+  push('', 'operations:')
 
   for (const op of config.operations) {
     push(`  ${op.capability}:`, `    status: ${op.status}`)
@@ -111,4 +119,42 @@ export function renderAdapterConfigYaml(config: AdapterConfig): string {
 
   push('')
   return lines.join('\n')
+}
+
+/**
+ * The `capabilities:` block — the trade-type feature set the generated adapter
+ * must implement (protocol VenueCapabilities semantics). Detection is a
+ * keyword candidate, not proof: incomplete params are flagged, never invented.
+ */
+function pushCapabilitiesBlock(
+  push: (...ls: string[]) => void,
+  features: VenueCapabilitiesShape,
+): void {
+  push(
+    '',
+    '# Trade-type feature set detected from the public spec (candidates, not proof).',
+    '# Enabled features are what the generated adapter must implement; params are',
+    '# what the capability modules validate against (protocol VenueCapabilities).',
+    'capabilities:',
+  )
+  for (const id of TRADE_FEATURE_IDS) {
+    const feature = features[id]
+    if (!feature) {
+      push(`  ${id}:`, '    enabled: false # not detected in the public API surface')
+      continue
+    }
+    push(`  ${id}:`, '    enabled: true')
+    if ('maxLeverage' in feature && feature.maxLeverage !== undefined) {
+      push(`    maxLeverage: ${feature.maxLeverage}`)
+    }
+    if ('marginModes' in feature && feature.marginModes && feature.marginModes.length > 0) {
+      push('    marginModes:')
+      for (const mode of feature.marginModes) push(`      - ${mode}`)
+    }
+    if (feature.paramsIncomplete) {
+      push(
+        '    paramsIncomplete: true # heuristic candidate — confirm validation params with the venue',
+      )
+    }
+  }
 }

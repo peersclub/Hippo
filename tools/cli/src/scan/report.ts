@@ -2,7 +2,8 @@
  * Integration Report rendering (pure) — the artifact you hand a prospect.
  * Markdown report + short stdout summary from a ScanResult.
  */
-import type { CapabilityMatch, ScanResult } from './types.js'
+import { TRADE_FEATURE_IDS, TRADE_FEATURE_LABELS } from './features.js'
+import type { CapabilityMatch, ScanResult, VenueCapabilitiesShape } from './types.js'
 
 export interface Verdict {
   level: 'High' | 'Medium' | 'Low'
@@ -32,6 +33,21 @@ function cspLine(r: ScanResult): string {
 
 function code(s: string): string {
   return `\`${s}\``
+}
+
+/** Status cell for a trade feature: enabled + extracted params, or the honest gaps. */
+function tradeFeatureStatus(features: VenueCapabilitiesShape, id: keyof VenueCapabilitiesShape) {
+  const feature = features[id]
+  if (!feature) return 'Not detected'
+  const details: string[] = []
+  if ('maxLeverage' in feature && feature.maxLeverage !== undefined) {
+    details.push(`max leverage ${feature.maxLeverage}x`)
+  }
+  if ('marginModes' in feature && feature.marginModes && feature.marginModes.length > 0) {
+    details.push(`margin: ${feature.marginModes.join('/')}`)
+  }
+  if (feature.paramsIncomplete) details.push('params incomplete — confirm with the venue')
+  return details.length > 0 ? `Enabled (${details.join('; ')})` : 'Enabled'
 }
 
 export function renderReport(r: ScanResult): string {
@@ -106,6 +122,24 @@ export function renderReport(r: ScanResult): string {
   }
   push('')
 
+  if (r.tradeFeatures) {
+    const features = r.tradeFeatures
+    push('## Trade features', '', '| Feature | Status | Evidence |', '| --- | --- | --- |')
+    for (const id of TRADE_FEATURE_IDS) {
+      const evidence = features[id]?.endpoints ?? []
+      push(
+        `| ${TRADE_FEATURE_LABELS[id]} | ${tradeFeatureStatus(features, id)} | ${
+          evidence.length > 0 ? evidence.map(code).join('<br>') : '—'
+        } |`,
+      )
+    }
+    push(
+      '',
+      '_Trade features are keyword candidates from the public spec — treat "Enabled" as a lead to confirm with the venue, not proof._',
+      '',
+    )
+  }
+
   const gaps = r.capabilities.filter((c) => c.status === 'gap')
   push('## Gaps', '')
   if (gaps.length === 0) {
@@ -135,7 +169,14 @@ export function renderSummary(r: ScanResult): string {
     `  Site      ${r.site.framework.name} · ${r.site.csp ? (r.site.csp.restrictsScripts ? 'CSP restricts scripts' : 'CSP present, scripts unrestricted') : 'no CSP'} · locales: ${r.site.locales.join(', ') || 'none declared'}`,
     `  API spec  ${r.spec ? `${r.spec.url} (${r.spec.version}, ${r.spec.pathCount} paths)` : 'none found at common locations'}`,
     `  CTI       ${v.found}/${v.total} capabilities matched${gaps.length > 0 ? ` · gaps: ${gaps.join(', ')}` : ''}`,
-    `  Verdict   Integration readiness: ${v.level}`,
   ]
+  if (r.tradeFeatures) {
+    const features = r.tradeFeatures
+    const enabled = TRADE_FEATURE_IDS.filter((id) => features[id] !== undefined).map((id) =>
+      features[id]?.paramsIncomplete ? `${id} (params incomplete)` : id,
+    )
+    lines.push(`  Features  ${enabled.length > 0 ? enabled.join(', ') : 'none detected'}`)
+  }
+  lines.push(`  Verdict   Integration readiness: ${v.level}`)
   return lines.join('\n')
 }

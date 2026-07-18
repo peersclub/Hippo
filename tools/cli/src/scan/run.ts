@@ -12,6 +12,7 @@ import {
   specVersion,
 } from './cti.js'
 import { detectFramework, extractLocales, extractTitle } from './detect.js'
+import { detectTradeFeatures } from './features.js'
 import { fetchHtml, fetchJson, fetchUrl } from './fetchers.js'
 import { parseRobots } from './robots.js'
 import type { ProbeResult, ScanResult, SiteProfile, SpecFinding } from './types.js'
@@ -135,6 +136,7 @@ export async function runScan(rawDomain: string): Promise<ScanOutcome> {
     capabilities: mapToCti(specDoc ?? {}),
     authSchemes: specDoc ? extractAuthSchemes(specDoc) : [],
     errorResponses: specDoc ? extractErrorResponses(specDoc) : [],
+    tradeFeatures: detectTradeFeatures(specDoc ?? {}),
   }
   return { reachable: true, result }
 }
