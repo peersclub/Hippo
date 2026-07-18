@@ -9,27 +9,14 @@
  * uses for partner tokens, lifted into @hippo/stores) carried in an
  * httpOnly SameSite=Strict cookie — the SPA never touches the token.
  */
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import type { OperatorRole } from '@hippo/stores'
 import { signJwtHS256, verifyJwtHS256 } from '@hippo/stores'
 
-const KEY_LEN = 32
 export const SESSION_COOKIE = 'hippo_admin'
 export const SESSION_TTL_S = 8 * 60 * 60 // 8h
 
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16)
-  const key = scryptSync(password, salt, KEY_LEN)
-  return `${salt.toString('hex')}:${key.toString('hex')}`
-}
-
-export function verifyPassword(password: string, stored: string): boolean {
-  const [saltHex, keyHex] = stored.split(':')
-  if (!saltHex || !keyHex) return false
-  const expected = Buffer.from(keyHex, 'hex')
-  const actual = scryptSync(password, Buffer.from(saltHex, 'hex'), KEY_LEN)
-  return actual.length === expected.length && timingSafeEqual(actual, expected)
-}
+// scrypt hashing lives in @hippo/stores (shared with the partner portal).
+export { hashPassword, verifyPassword } from '@hippo/stores'
 
 export type OperatorSession = { email: string; role: OperatorRole }
 

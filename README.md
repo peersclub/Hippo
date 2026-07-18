@@ -25,6 +25,7 @@ pnpm install
 pnpm dev        # full stack: gateways :8787/:8788, intelligence :8791 (Python venv
                 # auto-created; needs python3 + Ollama qwen3:4b for llm mode),
                 # market-data :8790, memory :8792, seam :8793, admin :8794/:5175,
+                # partner portal :8795/:5176 (partner self-serve: own data/integration/plan),
                 # host-demo :5173, site :5174 + sdk watch build
 # open http://localhost:5173 → tap "Ask Hippo"   (?gw=real → real gateway :8788)
 pnpm test       # protocol schema tests

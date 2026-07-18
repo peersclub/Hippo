@@ -85,3 +85,28 @@ export type AuditEntry = {
   detail: Record<string, unknown>
   ts: number
 }
+
+/** 'admin' can mutate (integration, users, plan requests); 'viewer' is
+ * reserved for a read-only seat — schema carries it from day one, the
+ * portal UI doesn't manage roles yet. */
+export type PartnerAdminRole = 'admin' | 'viewer'
+
+/**
+ * A partner-staff login for the partner portal (services/portal) — the
+ * OPPOSITE trust domain from OperatorRecord: external customers on the
+ * public ingress, scoped to exactly one partner. Rows are created by an
+ * operator invite (passwordHash null + inviteTokenHash set) and become
+ * usable when the invite is claimed (password set, token cleared).
+ */
+export type PartnerAdminRecord = {
+  email: string
+  partnerId: string
+  /** scrypt `salthex:keyhex`; null until the invite is claimed. */
+  passwordHash: string | null
+  role: PartnerAdminRole
+  /** sha256 of the single-use claim token; null once claimed/revoked. */
+  inviteTokenHash: string | null
+  /** Invite validity ceiling (ms epoch); ignored once claimed. */
+  inviteExpiresAt: number | null
+  createdAt: number
+}

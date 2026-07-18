@@ -52,6 +52,28 @@ importers:
         specifier: ^7.0.0
         version: 7.3.6(@types/node@26.1.1)(tsx@4.23.1)
 
+  apps/portal:
+    dependencies:
+      '@hippo/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@preact/signals':
+        specifier: ^2.0.0
+        version: 2.9.3(preact@10.29.7)
+      preact:
+        specifier: ^10.26.0
+        version: 10.29.7
+    devDependencies:
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vite:
+        specifier: ^7.0.0
+        version: 7.3.6(@types/node@26.1.1)(tsx@4.23.1)
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@26.1.1)(tsx@4.23.1)
+
   apps/site:
     devDependencies:
       '@hippo/sdk':
@@ -238,6 +260,28 @@ importers:
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
+
+  services/portal:
+    dependencies:
+      '@hippo/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@hippo/stores':
+        specifier: workspace:*
+        version: link:../../packages/stores
+      fastify:
+        specifier: ^5.4.0
+        version: 5.10.0
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.1
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@26.1.1)(tsx@4.23.1)
 
   services/seam:
     dependencies:

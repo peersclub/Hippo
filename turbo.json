@@ -19,15 +19,26 @@
     "KOINBX_DEV_JWT_SECRET",
     "LLM_BASE_URL",
     "LLM_MODEL",
-    "LLM_API_KEY"
+    "LLM_API_KEY",
+    "PORTAL_JWT_SECRET",
+    "PORTAL_API_URL",
+    "PORTAL_ALLOWED_ORIGIN",
+    "PORTAL_COOKIE_SECURE",
+    "HIPPO_SDK_URL"
   ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "dev": {
       "cache": false,

@@ -1,0 +1,23 @@
+{
+  "name": "@hippo/portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Partner-facing portal service — a partner's own team signs in to see their data (MAU vs quota, users), manage their integration (embed key, secret rotation) and their plan. Tenancy by construction: partnerId only ever comes from the session. apps/portal is its client; sits on the partner ingress, rate-limited",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hippo/protocol": "workspace:*",
+    "@hippo/stores": "workspace:*",
+    "fastify": "^5.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

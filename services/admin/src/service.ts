@@ -22,6 +22,7 @@ import {
   AssignPlanBody,
   LoginBody,
   OperatorBody,
+  PartnerAdminInviteBody,
   PartnerBody,
   PartnerPatch,
   PersonaAdminUpdate,
@@ -33,10 +34,12 @@ import type {
   AuditStore,
   MauStore,
   OperatorStore,
+  PartnerAdminStore,
   PartnerStore,
   PlanStore,
   UserStore,
 } from '@hippo/stores'
+import { tokenHash } from '@hippo/stores'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { LoginThrottle, originAllowed } from './guard.js'
 import {
@@ -54,6 +57,7 @@ export type AdminServiceOptions = {
   plans: PlanStore
   users: UserStore
   operators: OperatorStore
+  partnerAdmins: PartnerAdminStore
   audit: AuditStore
   /** Secret for operator session JWTs. */
   jwtSecret: string
@@ -75,6 +79,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     plans,
     users,
     operators,
+    partnerAdmins,
     audit,
     jwtSecret,
     memoryUrl = process.env.MEMORY_URL ?? 'http://localhost:8792',
@@ -355,6 +360,78 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     void record(op, 'partner.assign_plan', req.params.id, { planId: parsed.data.planId })
     return { partnerId: updated.partnerId, planId: updated.planId }
   })
+
+  // ── partner admins (portal seats) ────────────────────────────────────────
+  // Operator mints a single-use invite; the plaintext token appears ONLY in
+  // this response — the store keeps its sha256. The partner claims it on the
+  // portal (POST /auth/claim), which sets their password and burns the token.
+  const INVITE_TTL_MS = 7 * 24 * 60 * 60_000 // 7 days
+
+  app.get<{ Params: { id: string } }>('/v1/partners/:id/admins', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    const rows = await partnerAdmins.listByPartner(req.params.id)
+    // Never expose hashes; claimed = password set.
+    return rows.map((a) => ({
+      email: a.email,
+      role: a.role,
+      claimed: a.passwordHash !== null,
+      inviteExpiresAt: a.inviteExpiresAt,
+      createdAt: a.createdAt,
+    }))
+  })
+
+  app.post<{ Params: { id: string } }>('/v1/partners/:id/admins', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    const parsed = PartnerAdminInviteBody.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid invite body' })
+    if (!(await partners.get(req.params.id))) {
+      return reply.code(404).send({ error: 'unknown partner' })
+    }
+    if (await partnerAdmins.get(parsed.data.email)) {
+      return reply.code(409).send({ error: 'that email already has a portal seat' })
+    }
+    const token = randomBytes(24).toString('base64url')
+    const created = await partnerAdmins.create({
+      email: parsed.data.email,
+      partnerId: req.params.id,
+      role: parsed.data.role,
+      inviteTokenHash: tokenHash(token),
+      inviteExpiresAt: Date.now() + INVITE_TTL_MS,
+    })
+    void record(op, 'partner_admin.invited', `partner:${req.params.id}`, {
+      email: created.email,
+      role: created.role,
+      partnerId: req.params.id,
+    })
+    return {
+      email: created.email,
+      role: created.role,
+      // Hand this to the partner out-of-band; it is not retrievable again.
+      inviteToken: token,
+      claimPath: '/auth/claim',
+      inviteExpiresAt: created.inviteExpiresAt,
+    }
+  })
+
+  app.delete<{ Params: { id: string; email: string } }>(
+    '/v1/partners/:id/admins/:email',
+    async (req, reply) => {
+      const op = operator(req, reply)
+      if (!op) return reply
+      const existing = await partnerAdmins.get(req.params.email)
+      if (!existing || existing.partnerId !== req.params.id) {
+        return reply.code(404).send({ error: 'unknown partner admin' })
+      }
+      await partnerAdmins.delete(req.params.email)
+      void record(op, 'partner_admin.revoked', `partner:${req.params.id}`, {
+        email: req.params.email,
+        partnerId: req.params.id,
+      })
+      return { ok: true }
+    },
+  )
 
   // ── plans ────────────────────────────────────────────────────────────────
   app.get('/v1/plans', async (req, reply) => {

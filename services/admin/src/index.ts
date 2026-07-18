@@ -9,12 +9,14 @@ import {
   getPool,
   InMemoryAuditStore,
   InMemoryOperatorStore,
+  InMemoryPartnerAdminStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
   InMemoryUserStore,
   PostgresAuditStore,
   PostgresMauStore,
   PostgresOperatorStore,
+  PostgresPartnerAdminStore,
   PostgresPartnerStore,
   PostgresPlanStore,
   PostgresUserStore,
@@ -36,6 +38,7 @@ const plans = pool
     )
 const users = pool ? new PostgresUserStore(pool) : new InMemoryUserStore()
 const operators = pool ? new PostgresOperatorStore(pool) : new InMemoryOperatorStore()
+const partnerAdmins = pool ? new PostgresPartnerAdminStore(pool) : new InMemoryPartnerAdminStore()
 const audit = pool ? new PostgresAuditStore(pool) : new InMemoryAuditStore()
 
 // Session-signing secret: env in production; ephemeral per boot in dev
@@ -61,6 +64,7 @@ const app = buildAdminService({
   plans,
   users,
   operators,
+  partnerAdmins,
   audit,
   jwtSecret,
   // Durable MAU counts (quota alerts survive gateway restarts).

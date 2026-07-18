@@ -118,6 +118,13 @@
 - [ ] Pilot instrumentation (Sudha): load curves, cache hit rate, queries/MAU, true cost/MAU, lift telemetry
 - [ ] Degraded-mode banner demonstrable for procurement (SLA clause)
 
+### Ops — Partner admin portal (planned 2026-07-18, [[12 Partner Admin Portal]])
+- [ ] `@hippo/stores`: `partner_admins` (migration 008), `PartnerAdminStore`, shared scrypt helpers, audit filter by partner, per-partner MAU count
+- [ ] `services/portal` :8795 — partner-scoped auth (own cookie/secret), overview / users / integration (secret rotation) / plan / audit; tenancy by construction (partnerId only ever from the session)
+- [ ] `services/admin`: operator-side invite mint / list / revoke (`/v1/partners/:id/admins`), one-time claim links
+- [ ] `apps/portal` :5176 — login/claim, overview, users, integration, plan, audit
+- [ ] Exit gate: invite → claim → login → rotate secret → gateway mints sessions with the new secret; zero cross-tenant routes by construction
+
 ### Infra (cross-cutting)
 - [ ] India + Gulf GPU quotes (Kartik) → capacity plan
 - [ ] vLLM pods: regional intent (7–8B) + global research (~30B) + cache tier
@@ -138,5 +145,6 @@
 | 7 | [[07 Infrastructure & Pods\|Infra & pods]] | ⬜ | local dev only (compose postgres :5433) | GPU quotes, vLLM pods |
 | 8 | Admin panel & durable stores | ✅ merged | `packages/stores` (Postgres-or-memory), memory admin surface, gateway enforcement (suspend/block/MAU quota), `services/admin` + `apps/admin` SPA, audit trail, solidity pass | run against compose Postgres in prod topology; operator SSO later |
 | 9 | Trade capabilities (new) | 🚧 keystone in review | canonical order model (PR #16 draft), trade-type discovery (PR #20 draft) | land keystone, then seam order-plans / intelligence capabilities / SDK rendering from `wt-cap-*` |
+| 10 | [[12 Partner Admin Portal\|Partner admin portal]] (new) | 🚧 building on `feat/partner-portal` | plan doc 12 (2026-07-18) | stores + `services/portal` + invite flow + `apps/portal`; memory visibility & invite delivery are [[Open Decisions]] #10/#11 |
 
 Related: [[Home]] · [[00 Build Plan Overview]] · [[Open Decisions]] · [[Hippo Dev Progress]] · [[Ram JSX vs Victor Dev]]
