@@ -32,11 +32,17 @@ type StoredTicket = {
   req: PrepareRequest
   price: number
   sizeNum: number
+  confirmed?: boolean
   fillTimer?: ReturnType<typeof setTimeout>
 }
 
+/** Net position per (user, instrument), accumulated from actual fills. */
+type PositionAgg = { netSize: number; costBasis: number }
+
 export class SimVenueAdapter implements VenueAdapter {
   private readonly tickets = new Map<string, StoredTicket>()
+  /** `${partnerId}:${userId}` → instrument → net position from real fills. */
+  private readonly books = new Map<string, Map<string, PositionAgg>>()
   private handler: (event: LifecycleEvent) => void = () => {}
 
   constructor(private readonly opts: { fillDelayMs?: number; marketDataUrl?: string } = {}) {}
@@ -90,9 +96,22 @@ export class SimVenueAdapter implements VenueAdapter {
     }
   }
 
+  private recordFill(req: PrepareRequest, sizeNum: number, price: number): void {
+    const bookKey = `${req.partnerId}:${req.userId}`
+    const book = this.books.get(bookKey) ?? new Map<string, PositionAgg>()
+    const agg = book.get(req.instrument) ?? { netSize: 0, costBasis: 0 }
+    const signed = req.side === 'buy' ? sizeNum : -sizeNum
+    agg.netSize += signed
+    agg.costBasis += signed * price
+    if (Math.abs(agg.netSize) < 1e-12) book.delete(req.instrument)
+    else book.set(req.instrument, agg)
+    this.books.set(bookKey, book)
+  }
+
   async confirm(ticketId: string): Promise<void> {
     const ticket = this.tickets.get(ticketId)
     if (!ticket) throw new Error(`unknown ticket ${ticketId}`)
+    ticket.confirmed = true
 
     // SIMULATION — a real venue confirms with the trader, then its webhooks
     // land here. The fill uses the actuals captured at prepare time.
@@ -112,6 +131,7 @@ export class SimVenueAdapter implements VenueAdapter {
           { label: 'Venue order ID', value: venueOrderId },
         ],
       })
+      this.recordFill(ticket.req, ticket.sizeNum, ticket.price)
       this.tickets.delete(ticketId)
     }, this.opts.fillDelayMs ?? 3_000)
   }
@@ -124,41 +144,49 @@ export class SimVenueAdapter implements VenueAdapter {
     return true
   }
 
-  async portfolio(): Promise<Portfolio> {
-    // Demo portfolio (moved here from the gateway's Phase 2 stub). A real
-    // adapter maps the venue's positions/orders endpoints. NEVER cached.
-    return {
-      positions: [
-        {
-          instrument: 'BTC/USDT',
-          size: '0.31 BTC',
-          entry: '58,420',
-          mark: '61,240',
-          pnl: '+874.20 USDT',
-          tone: 'pos',
-        },
-        {
-          instrument: 'SOL/USDT',
-          size: '42 SOL',
-          entry: '171.10',
-          mark: '166.40',
-          pnl: '−197.40 USDT',
-          tone: 'neg',
-        },
-        {
-          instrument: 'ADA/USDT',
-          size: '5,000 ADA',
-          entry: '0.4980',
-          mark: '0.5210',
-          pnl: '+115.00 USDT',
-          tone: 'pos',
-        },
-      ],
-      openOrders: [
-        { orderId: 'o_btc', side: 'buy', summary: 'BUY 0.05 BTC · MKT', status: 'FILLING 40%' },
-        { orderId: 'o_sol', side: 'sell', summary: 'SELL 12 SOL @ 168.00', status: 'OPEN' },
-        { orderId: 'o_ada', side: 'buy', summary: 'BUY 2,500 ADA @ 0.5210', status: 'OPEN' },
-      ],
-    }
+  async portfolio(partnerId: string, userId: string): Promise<Portfolio> {
+    // REAL state only — production semantics. A fresh user is empty; open
+    // orders are actual confirmed-but-unfilled tickets; positions accumulate
+    // from actual fills and are marked to the LIVE market price. Never a
+    // fabricated row. NEVER cached.
+    const openOrders = [...this.tickets.entries()]
+      .filter(
+        ([, t]) => t.confirmed && t.req.partnerId === partnerId && t.req.userId === userId,
+      )
+      .map(([ticketId, t]) => {
+        const base = t.req.instrument.split('/')[0] ?? t.req.instrument
+        const summary =
+          t.req.orderType === 'limit'
+            ? `${t.req.side.toUpperCase()} ${t.req.size} ${base} @ ${formatPrice(t.price)}`
+            : `${t.req.side.toUpperCase()} ${t.req.size} ${base} · MKT`
+        return { orderId: ticketId, side: t.req.side, summary, status: 'FILLING' }
+      })
+
+    const book = this.books.get(`${partnerId}:${userId}`) ?? new Map<string, PositionAgg>()
+    const positions = await Promise.all(
+      [...book.entries()].map(async ([instrument, agg]) => {
+        const base = instrument.split('/')[0] ?? instrument
+        const entry = agg.costBasis / agg.netSize
+        // Live mark; if the feed is briefly unreachable, degrade honestly to
+        // entry-only (no invented P&L) rather than failing the whole read.
+        let mark: number | null = null
+        try {
+          mark = await this.quote(instrument)
+        } catch {
+          mark = null
+        }
+        const pnl = mark === null ? null : (mark - entry) * agg.netSize
+        return {
+          instrument,
+          size: `${agg.netSize.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${base}`,
+          entry: formatPrice(entry),
+          mark: mark === null ? '—' : formatPrice(mark),
+          pnl: pnl === null ? '—' : `${pnl >= 0 ? '+' : '−'}${formatAmount(Math.abs(pnl))} USDT`,
+          tone: pnl === null ? ('neutral' as const) : pnl >= 0 ? ('pos' as const) : ('neg' as const),
+        }
+      }),
+    )
+
+    return { positions, openOrders }
   }
 }

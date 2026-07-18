@@ -155,12 +155,47 @@ describe('seam service HTTP surface', () => {
     await app.close()
   })
 
-  it('serves the portfolio (never cached)', async () => {
-    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }))
-    const res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u1' })
-    const body = res.json() as { positions: unknown[]; openOrders: unknown[] }
-    expect(body.positions).toHaveLength(3)
-    expect(body.openOrders).toHaveLength(3)
+  it('portfolio is REAL state: empty for a fresh user, built only from actual fills', async () => {
+    const app = buildService(new SimVenueAdapter({ fillDelayMs: 20 }))
+
+    // Fresh user: nothing fabricated.
+    let res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u1' })
+    expect(res.json()).toEqual({ positions: [], openOrders: [] })
+
+    // Prepare + confirm → the ticket shows as a real open order while filling.
+    const prep = await app.inject({ method: 'POST', url: '/v1/prepare', payload: prepareBody })
+    const { ticketId } = prep.json() as { ticketId: string }
+    await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      payload: { callbackUrl: 'http://gateway.test/callback' },
+    })
+    res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u1' })
+    let body = res.json() as { positions: unknown[]; openOrders: Record<string, string>[] }
+    expect(body.openOrders).toHaveLength(1)
+    expect(body.openOrders[0]).toMatchObject({
+      orderId: ticketId,
+      summary: 'BUY 0.05 BTC · MKT',
+      status: 'FILLING',
+    })
+
+    // After the fill: open order gone, position materialized from the fill
+    // actuals and marked to the live quote (stubbed at 61,240 = entry → flat).
+    await new Promise((r) => setTimeout(r, 60))
+    res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u1' })
+    body = res.json() as { positions: Record<string, string>[]; openOrders: unknown[] }
+    expect(body.openOrders).toHaveLength(0)
+    expect(body.positions).toHaveLength(1)
+    expect(body.positions[0]).toMatchObject({
+      instrument: 'BTC/USDT',
+      size: '0.05 BTC',
+      entry: '61,240',
+      mark: '61,240',
+    })
+
+    // Tenancy: another user's portfolio stays empty.
+    res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u2' })
+    expect(res.json()).toEqual({ positions: [], openOrders: [] })
     await app.close()
   })
 })
