@@ -22,8 +22,11 @@ Docs live in the Obsidian vault: `/Users/Victor/Projects22/hippo/Hippo/` (PRD: `
 
 ```bash
 pnpm install
-pnpm dev        # mock-gateway :8787 + sdk watch build + host-demo :5173
-# open http://localhost:5173 → tap "Ask Hippo"
+pnpm dev        # full stack: gateways :8787/:8788, intelligence :8791 (Python venv
+                # auto-created; needs python3 + Ollama qwen3:4b for llm mode),
+                # market-data :8790, memory :8792, seam :8793, admin :8794/:5175,
+                # host-demo :5173, site :5174 + sdk watch build
+# open http://localhost:5173 → tap "Ask Hippo"   (?gw=real → real gateway :8788)
 pnpm test       # protocol schema tests
 pnpm build      # all packages; loader size gate
 ```
