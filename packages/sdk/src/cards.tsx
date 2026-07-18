@@ -166,7 +166,10 @@ function ResearchBriefCard({ frame }: { frame: ResearchBrief }) {
     <div class="bubble">
       <div class="eyebrow">
         <span>{frame.eyebrow}</span>
-        {frame.live && <span class="live">● LIVE</span>}
+        <span class="eyebrow-right">
+          {frame.live && <span class="live">● LIVE</span>}
+          {frame.model && <span class="model-tag">{frame.model}</span>}
+        </span>
       </div>
       {frame.liveBar?.cached && (
         <span class="cache-badge">CACHED BRIEF · {frame.liveBar.cacheAge}</span>

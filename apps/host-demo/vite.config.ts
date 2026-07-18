@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 
 // The SDK's built bundles (loader.js, panel.js) are served from the web root,
@@ -5,4 +6,12 @@ import { defineConfig } from 'vite'
 // mode alongside this server.
 export default defineConfig({
   publicDir: '../../packages/sdk/dist',
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(import.meta.dirname, 'index.html'),
+        how: resolve(import.meta.dirname, 'how.html'),
+      },
+    },
+  },
 })

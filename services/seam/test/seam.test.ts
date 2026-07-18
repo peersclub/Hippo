@@ -134,7 +134,9 @@ describe('seam service HTTP surface', () => {
   })
 
   it('cancel stops the lifecycle and audits it', async () => {
-    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }))
+    // Fill far in the future: the test cancels immediately after confirm, and a
+    // 10ms fill window raced the cancel on loaded CI runners (order filled first).
+    const app = buildService(new SimVenueAdapter({ fillDelayMs: 5_000 }))
     const prep = await app.inject({ method: 'POST', url: '/v1/prepare', payload: prepareBody })
     const { ticketId } = prep.json() as { ticketId: string }
     await app.inject({

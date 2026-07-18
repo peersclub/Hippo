@@ -87,6 +87,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       headline: res.headline,
       paragraphs: res.paragraphs,
       stats: res.stats,
+      model: res.model,
       ...(res.sparkPoints && res.sparkPoints.length >= 2
         ? { spark: { points: res.sparkPoints } }
         : {}),
