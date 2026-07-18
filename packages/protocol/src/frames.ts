@@ -192,9 +192,7 @@ export const Frame = z.discriminatedUnion('type', [
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
-export const FrameEnvelope = z
-  .object({ ...base, type: z.string() })
-  .loose()
+export const FrameEnvelope = z.object({ ...base, type: z.string() }).loose()
 
 export type Frame = z.infer<typeof Frame>
 export type FrameType = Frame['type']

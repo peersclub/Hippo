@@ -66,6 +66,7 @@ export type MessageKey =
   | 'clear_memory_done'
   | 'copy_brief'
   | 'copied'
+  | 'stop_streaming'
 
 type Catalog = Record<MessageKey, string>
 
@@ -114,6 +115,7 @@ const en: Catalog = {
   clear_memory_done: 'CLEARED ✓',
   copy_brief: 'Copy this brief',
   copied: 'Copied',
+  stop_streaming: 'Stop generating',
 }
 
 // First pass — pending native review.
@@ -162,6 +164,7 @@ const hi: Catalog = {
   clear_memory_done: 'मिटा दिया ✓',
   copy_brief: 'यह ब्रीफ़ कॉपी करें',
   copied: 'कॉपी हो गया',
+  stop_streaming: 'जनरेट करना रोकें',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -212,6 +215,7 @@ const hiLatn: Catalog = {
   clear_memory_done: 'CLEAR HO GAYA ✓',
   copy_brief: 'Yeh brief copy karo',
   copied: 'Copy ho gaya',
+  stop_streaming: 'Generate karna roko',
 }
 
 /** ar: RTL groundwork only — no copy yet, falls back to en, but flips layout. */
