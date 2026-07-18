@@ -9,9 +9,9 @@
  * is intentionally EXCLUDED — it is counsel-owned (Open Decisions #2) and must
  * be translated under review, not here.
  *
- * hi (Devanagari) and hi-Latn (Hinglish) strings are a FIRST PASS pending
- * native review. `ar` is present as RTL groundwork: no copy yet (falls back to
- * en), but selecting it flips the panel to right-to-left via `isRtl`.
+ * hi (Devanagari), hi-Latn (Hinglish) and ar (Modern Standard Arabic) strings
+ * are a FIRST PASS pending native review. Selecting `ar` also flips the panel
+ * to right-to-left via `isRtl`.
  */
 
 export const LOCALES = ['en', 'hi', 'hi-Latn', 'ar'] as const
@@ -218,8 +218,56 @@ const hiLatn: Catalog = {
   stop_streaming: 'Generate karna roko',
 }
 
-/** ar: RTL groundwork only — no copy yet, falls back to en, but flips layout. */
-const ar: Partial<Catalog> = {}
+// First pass — pending native review. Modern Standard Arabic; the brand word
+// "Hippo" stays in Latin script, and numerals stay Western (0-9) so figures
+// match the card content the server sends.
+const ar: Catalog = {
+  brand_ask: 'اسأل Hippo',
+  header_subtitle: 'ذكاء السوق',
+  hero_title: 'اسأل سوقك عن أي شيء.',
+  composer_placeholder: 'اسأل عن أي سوق…',
+  composer_placeholder_offline: 'جارٍ إعادة الاتصال — لا يمكنك الإرسال الآن',
+  send: 'إرسال',
+  retry_send: 'إعادة الإرسال',
+  send_failed: 'فشل الإرسال — رسالتك محفوظة. اضغط ↻ لإعادة المحاولة.',
+  orders_open: 'الأوامر المفتوحة',
+  orders_positions: 'المراكز',
+  new_order: '+ أمر جديد',
+  new_order_hint: 'أخبرني بما تريد تنفيذه…',
+  manage_on: 'الإدارة على {venue} ←',
+  settings: 'الإعدادات',
+  change_layout: 'تغيير التخطيط',
+  minimize: 'تصغير',
+  connection_lost: 'انقطع الاتصال',
+  connection_lost_body: 'جارٍ إعادة الاتصال — محادثتك آمنة، ولن يضيع أي شيء كتبته.',
+  feedback_helpful: 'مفيد',
+  feedback_not_helpful: 'غير مفيد',
+  order_filled: 'تم تنفيذ الأمر',
+  ob_not_now: 'ليس الآن',
+  ob_agree_start: 'أوافق وأبدأ',
+  ob_replay: 'إعادة عرض المقدمة',
+  suggestions_label: 'أسئلة مقترحة',
+  chip_edit_hint: 'اضغط مطولًا للتعديل قبل الإرسال',
+  composer_placeholder_connecting: 'جارٍ الاتصال…',
+  jump_latest: 'الأحدث',
+  queued_note: '{n} في قائمة الانتظار — سيتم الإرسال عند إعادة الاتصال',
+  ticket_offline_hint: 'أعد الاتصال لتأكيد الأوامر',
+  thread_label: 'المحادثة',
+  intro_dialog: 'المقدمة',
+  share_card: 'مشاركة البطاقة',
+  close_settings: 'إغلاق الإعدادات',
+  close_share: 'إغلاق بطاقة المشاركة',
+  settings_language: 'لغة الإجابات',
+  settings_memory_title: 'الذاكرة الشخصية',
+  settings_memory_body: 'يتذكر Hippo تفضيلاتك وأسئلتك السابقة.',
+  clear_memory: 'مسح كل ما يتذكره Hippo',
+  clear_memory_confirm: 'نعم، امسحه',
+  clear_memory_cancel: 'أبقِه',
+  clear_memory_done: 'تم المسح ✓',
+  copy_brief: 'نسخ هذا الموجز',
+  copied: 'تم النسخ',
+  stop_streaming: 'إيقاف التوليد',
+}
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }
 
