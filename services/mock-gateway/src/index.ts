@@ -8,6 +8,7 @@ import {
   openingScript,
   ordersSnapshot,
   replyScriptFor,
+  stoppedBrief,
 } from './golden.js'
 
 const PORT = Number(process.env.PORT ?? 8787)
@@ -16,6 +17,8 @@ type Session = {
   id: string
   send: ((frame: unknown) => void) | null
   seq: number
+  /** Pending scripted timers — stream_stop cancels them mid-play. */
+  timers: Set<ReturnType<typeof setTimeout>>
 }
 
 const sessions = new Map<string, Session>()
@@ -35,13 +38,15 @@ function play(session: Session, script: ScriptStep[]) {
   let delay = 0
   for (const step of script) {
     delay += step.afterMs
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      session.timers.delete(timer)
       // Frames may be thunks (live market templating) — resolve at fire time.
       const draft = typeof step.frame === 'function' ? step.frame() : step.frame
       Promise.resolve(draft)
         .then((frame) => session.send?.(stamp(session, frame)))
         .catch((err) => app.log.error({ err }, 'script step failed'))
     }, delay)
+    session.timers.add(timer)
   }
 }
 
@@ -50,7 +55,7 @@ await app.register(cors, { origin: true })
 
 app.post('/v1/session', async () => {
   const id = `s_${Math.random().toString(36).slice(2, 10)}`
-  sessions.set(id, { id, send: null, seq: 0 })
+  sessions.set(id, { id, send: null, seq: 0, timers: new Set() })
   return {
     sessionId: id,
     config: {
@@ -125,6 +130,16 @@ app.post('/v1/turns', async (req, reply) => {
       break
     case 'ticket_action':
       if (up.action === 'confirm_handoff') play(session, lifecycleScriptFor(up.ticketId))
+      break
+    case 'stream_stop':
+      // Cancel the pending scripted steps and land the authoritative brief
+      // early — the stopped answer is server-decided, honest and truncated.
+      // Nothing pending → silent no-op, mirroring the real gateway.
+      if (session.timers.size > 0) {
+        for (const timer of session.timers) clearTimeout(timer)
+        session.timers.clear()
+        session.send?.(stamp(session, stoppedBrief))
+      }
       break
     case 'feedback':
     case 'consent':

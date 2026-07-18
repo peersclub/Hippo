@@ -39,6 +39,7 @@ import {
   thread,
   venueName,
 } from './state.js'
+import { isStreaming } from './streaming.js'
 import { panelCss } from './styles.js'
 import { connect, send } from './transport.js'
 
@@ -210,15 +211,33 @@ function Composer() {
           placeholder={placeholder}
           aria-label={t(L, 'brand_ask')}
         />
-        <button
-          type="submit"
-          class="send"
-          disabled={blocked}
-          title={failed ? t(L, 'retry_send') : undefined}
-          aria-label={failed ? t(L, 'retry_send') : t(L, 'send')}
-        >
-          {failed ? '↻' : '↑'}
-        </button>
+        {isStreaming(thread.value) ? (
+          // Stop control while a brief streams: signals intent only — the
+          // server assembles the stopped answer (thin client, no invention).
+          // Time-sensitive, so it goes straight through transport `send`,
+          // never the outbox (offline, stopping is moot). Typing stays
+          // enabled and the draft is untouched.
+          <button
+            type="button"
+            class="send stop"
+            disabled={blocked}
+            title={t(L, 'stop_streaming')}
+            aria-label={t(L, 'stop_streaming')}
+            onClick={() => void send({ kind: 'stream_stop' })}
+          >
+            ⏹
+          </button>
+        ) : (
+          <button
+            type="submit"
+            class="send"
+            disabled={blocked}
+            title={failed ? t(L, 'retry_send') : undefined}
+            aria-label={failed ? t(L, 'retry_send') : t(L, 'send')}
+          >
+            {failed ? '↻' : '↑'}
+          </button>
+        )}
       </form>
     </div>
   )
