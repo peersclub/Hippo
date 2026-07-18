@@ -593,3 +593,72 @@ describe('login protection', () => {
     await app.close()
   })
 })
+
+describe('sandbox provisioning (hippo register)', () => {
+  it('creates a sandbox partner; secret only via one-time claim', async () => {
+    const { app, partners, audit } = await testAdmin()
+
+    const reg = await app.inject({
+      method: 'POST',
+      url: '/v1/provision/sandbox',
+      payload: { email: 'eng@newvenue.io', venueName: 'New Venue' },
+    })
+    expect(reg.statusCode).toBe(200)
+    const body = reg.json() as {
+      partnerId: string
+      partnerKey: string
+      status: string
+      claimPath: string
+    }
+    expect(body.status).toBe('sandbox')
+    expect(body.partnerId).toMatch(/^new-venue-[0-9a-f]{4}$/)
+    expect(body.partnerKey).toMatch(/^pk_sandbox_/)
+    // The register response must never carry the secret.
+    expect(JSON.stringify(body)).not.toContain('jwtSecret')
+
+    const created = await partners.get(body.partnerId)
+    expect(created?.status).toBe('sandbox')
+    expect(created?.jwtSecret).toHaveLength(64)
+
+    // Claim once → secret; claim twice → 404.
+    const claim1 = await app.inject({ method: 'GET', url: body.claimPath })
+    expect(claim1.statusCode).toBe(200)
+    expect(claim1.json().jwtSecret).toBe(created?.jwtSecret)
+    const claim2 = await app.inject({ method: 'GET', url: body.claimPath })
+    expect(claim2.statusCode).toBe(404)
+
+    const actions = (await audit.list({ limit: 10 })).rows.map((r) => r.action)
+    expect(actions).toContain('provision.sandbox')
+    expect(actions).toContain('provision.claimed')
+    await app.close()
+  })
+
+  it('rate-limits provisioning per IP (3/hour) and validates the body', async () => {
+    const { app } = await testAdmin()
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/provision/sandbox',
+          payload: { email: 'not-an-email', venueName: 'X' },
+        })
+      ).statusCode,
+    ).toBe(400)
+
+    for (let i = 0; i < 3; i++) {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/v1/provision/sandbox',
+        payload: { email: 'a@b.co', venueName: `Venue ${i} OK` },
+      })
+      expect(r.statusCode).toBe(200)
+    }
+    const limited = await app.inject({
+      method: 'POST',
+      url: '/v1/provision/sandbox',
+      payload: { email: 'a@b.co', venueName: 'One Too Many' },
+    })
+    expect(limited.statusCode).toBe(429)
+    await app.close()
+  })
+})

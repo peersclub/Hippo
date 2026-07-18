@@ -43,6 +43,15 @@ export const LoginBody = z.object({
 })
 export type LoginBody = z.infer<typeof LoginBody>
 
+/** Self-serve sandbox provisioning (`hippo register`). Public, rate-limited;
+ * activation to production stays operator-gated in the panel. */
+export const ProvisionBody = z.object({
+  email: z.string().email(),
+  venueName: z.string().min(2).max(80),
+  locales: z.array(z.string().min(2).max(10)).max(8).default(['en']),
+})
+export type ProvisionBody = z.infer<typeof ProvisionBody>
+
 export const OperatorBody = z.object({
   email: z.string().email(),
   password: z.string().min(12).max(200),

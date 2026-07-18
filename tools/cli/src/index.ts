@@ -19,6 +19,7 @@ import { runConformance } from './conform/suite.js'
 import { draftAdapterConfig, renderAdapterConfigYaml } from './init/config.js'
 import { draftMapping, renderMappingTs } from './init/mapping.js'
 import { draftRejections, renderRejectionsYaml } from './init/rejections.js'
+import { registerSandbox, renderRegisterText } from './register/run.js'
 import { renderReport, renderSummary } from './scan/report.js'
 import { runScan } from './scan/run.js'
 
@@ -46,6 +47,34 @@ program
     )
     process.exitCode = 1
   })
+
+program
+  .command('register')
+  .description(
+    'Self-serve sandbox provisioning: creates a sandbox partner and a one-time claim link for the JWT secret',
+  )
+  .requiredOption('--venue <name>', 'venue display name')
+  .requiredOption('--email <email>', 'engineering contact email')
+  .option('--api <url>', 'Hippo provisioning API', 'http://localhost:8794')
+  .option(
+    '--claim',
+    'fetch the one-time JWT secret immediately (printed once, stored nowhere)',
+    false,
+  )
+  .option('--json', 'machine-readable output', false)
+  .action(
+    async (opts: { venue: string; email: string; api: string; claim: boolean; json: boolean }) => {
+      const result = await registerSandbox({
+        apiUrl: opts.api,
+        email: opts.email,
+        venueName: opts.venue,
+        claim: opts.claim,
+      })
+      if (opts.json) console.log(JSON.stringify(result, null, 2))
+      else console.log(renderRegisterText(result))
+      if (!result.ok) process.exitCode = 1
+    },
+  )
 
 program
   .command('scan <domain>')
