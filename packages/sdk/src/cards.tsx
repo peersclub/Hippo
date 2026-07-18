@@ -337,13 +337,21 @@ function PositionsCard({ frame }: { frame: Positions }) {
       <div class="eyebrow">
         <span>POSITIONS</span>
       </div>
-      {frame.rows.map((r) => (
-        <div class="pos-row" key={r.instrument}>
-          <span>{r.instrument}</span>
-          <span>{r.size}</span>
-          <span class={r.tone}>{r.pnl}</span>
+      {frame.rows.length === 0 ? (
+        // Honest empty state — a fresh account has no positions; nothing is
+        // ever fabricated to fill the card.
+        <div class="pos-row">
+          <span class="dim">No open positions yet — trades you place appear here live.</span>
         </div>
-      ))}
+      ) : (
+        frame.rows.map((r) => (
+          <div class="pos-row" key={r.instrument}>
+            <span>{r.instrument}</span>
+            <span>{r.size}</span>
+            <span class={r.tone}>{r.pnl}</span>
+          </div>
+        ))
+      )}
     </div>
   )
 }
