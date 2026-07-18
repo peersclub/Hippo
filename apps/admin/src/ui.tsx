@@ -89,7 +89,6 @@ export function ConfirmHost() {
             <input
               value={typed}
               onInput={(e) => setTyped((e.target as HTMLInputElement).value)}
-              // biome-ignore lint/a11y/noAutofocus: modal focus belongs here
               autofocus
             />
           </label>
@@ -118,7 +117,6 @@ export function Busy({ rows = 3 }: { rows?: number }) {
   return (
     <div class="busy" aria-busy="true">
       {Array.from({ length: rows }, (_, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows
         <div key={i} class="skeleton" />
       ))}
     </div>
@@ -132,7 +130,6 @@ export function useLoad(
 ): { loading: boolean; error: string; retry: () => void } {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  // biome-ignore lint/correctness/useExhaustiveDependencies: caller-supplied deps
   const retry = useCallback(() => {
     setLoading(true)
     setError('')

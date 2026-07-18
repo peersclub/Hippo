@@ -7,7 +7,10 @@
  * its hardcoded PARTNERS array for a PartnerStore is type-compatible.
  */
 
-export type PartnerStatus = 'active' | 'suspended'
+/** sandbox = self-provisioned via `hippo register`, not yet operator-approved
+ * for production; behaves like active for session mint, excluded from quota
+ * alerts, and visually distinct in the panel. Going active is operator-gated. */
+export type PartnerStatus = 'active' | 'suspended' | 'sandbox'
 
 export type PartnerRecord = {
   partnerId: string

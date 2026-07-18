@@ -16,6 +16,8 @@
  * admin_audit row. Cross-partner reads are the operator's legitimate view;
  * the audit trail is what keeps that power accountable.
  */
+
+import { randomBytes } from 'node:crypto'
 import {
   AssignPlanBody,
   LoginBody,
@@ -25,6 +27,7 @@ import {
   PersonaAdminUpdate,
   PlanBody,
   PlanPatch,
+  ProvisionBody,
 } from '@hippo/protocol'
 import type {
   AuditStore,
@@ -144,6 +147,97 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     }
     return op
   }
+
+  // ── self-serve sandbox provisioning (public, rate-limited) ───────────────
+  // `hippo register` lands here. Creates a `sandbox` partner + a one-time
+  // claim token for the jwtSecret — the secret is fetchable exactly once and
+  // never appears in the register response, audit trail, or any list view.
+  // Going `active` (production) stays operator-gated in the panel.
+  const provisionThrottle = new LoginThrottle(60 * 60_000, 3) // 3 per IP per hour
+  const claims = new Map<string, { partnerId: string; jwtSecret: string; expiresAt: number }>()
+  const CLAIM_TTL_MS = 15 * 60_000
+
+  app.post('/v1/provision/sandbox', async (req, reply) => {
+    const retryAfter = provisionThrottle.retryAfterS([`prov:${req.ip}`])
+    if (retryAfter > 0) {
+      reply.header('retry-after', String(retryAfter))
+      return reply.code(429).send({ error: 'provisioning rate limit — try again later' })
+    }
+    const parsed = ProvisionBody.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid provision body' })
+    provisionThrottle.recordFailure([`prov:${req.ip}`]) // every attempt counts
+
+    // Unique slug: venue name + random suffix.
+    const base = parsed.data.venueName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 24)
+    let partnerId = ''
+    for (let i = 0; i < 5; i++) {
+      const candidate = `${base}-${randomBytes(2).toString('hex')}`
+      if (!(await partners.get(candidate))) {
+        partnerId = candidate
+        break
+      }
+    }
+    if (!partnerId) return reply.code(503).send({ error: 'could not allocate partner id' })
+
+    const partnerKey = `pk_sandbox_${randomBytes(9).toString('base64url')}`
+    const jwtSecretValue = randomBytes(32).toString('hex')
+    await partners.create({
+      partnerId,
+      partnerKey,
+      jwtSecret: jwtSecretValue,
+      venueName: parsed.data.venueName,
+      locales: parsed.data.locales,
+      suggestedQueries: [],
+      planId: null,
+      status: 'sandbox',
+    })
+
+    const token = randomBytes(24).toString('base64url')
+    claims.set(token, {
+      partnerId,
+      jwtSecret: jwtSecretValue,
+      expiresAt: Date.now() + CLAIM_TTL_MS,
+    })
+
+    void audit
+      .append({
+        operatorEmail: parsed.data.email,
+        action: 'provision.sandbox',
+        target: partnerId,
+        detail: { venueName: parsed.data.venueName },
+      })
+      .catch(() => {})
+
+    return {
+      partnerId,
+      partnerKey,
+      status: 'sandbox',
+      claimPath: `/v1/provision/claim/${token}`,
+      claimExpiresInS: CLAIM_TTL_MS / 1000,
+      note: 'Fetch the claim path ONCE to receive the JWT secret; store it in your vault. Activation to production is operator-approved.',
+    }
+  })
+
+  app.get<{ Params: { token: string } }>('/v1/provision/claim/:token', async (req, reply) => {
+    const claim = claims.get(req.params.token)
+    claims.delete(req.params.token) // one-time, even on expiry
+    if (!claim || claim.expiresAt < Date.now()) {
+      return reply.code(404).send({ error: 'unknown or expired claim' })
+    }
+    void audit
+      .append({
+        operatorEmail: 'provisioning',
+        action: 'provision.claimed',
+        target: claim.partnerId,
+        detail: {},
+      })
+      .catch(() => {})
+    return { partnerId: claim.partnerId, jwtSecret: claim.jwtSecret }
+  })
 
   // ── auth ─────────────────────────────────────────────────────────────────
   app.post('/auth/login', async (req, reply) => {

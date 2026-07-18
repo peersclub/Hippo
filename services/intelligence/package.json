@@ -1,0 +1,9 @@
+{
+  "name": "@hippo/intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Intelligence service — Python/FastAPI on :8791 (intent + research + answer cache + guardrail). package.json exists only so `pnpm dev` starts it alongside the TS services; see dev.sh and requirements.txt.",
+  "scripts": {
+    "dev": "./dev.sh"
+  }
+}

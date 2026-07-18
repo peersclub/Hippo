@@ -1,0 +1,41 @@
+{
+  "$comment": "Hippo brand tokens — Dark Glass Instrument. Source of truth for the brand core, reconciled from Ram's walking-skeleton.jsx + marketing site and hippo-app SDK. Amber is the only brand accent; up/down are semantic status only.",
+  "color": {
+    "surface": {
+      "bg":    { "dark": "#0E1014", "light": "#E9ECF1" },
+      "panel": { "dark": "#14161C", "light": "#F7F8FA" },
+      "card":  { "dark": "#232733", "light": "#FFFFFF" },
+      "card2": { "dark": "#262B36", "light": "#F0F2F6" }
+    },
+    "accent": {
+      "amber":    { "dark": "#F0B94A", "light": "#B98A1E" },
+      "amberInk": { "dark": "#1A1405", "light": "#FFFFFF" }
+    },
+    "semantic": {
+      "up":   { "dark": "#2EC48D", "light": "#149469" },
+      "down": { "dark": "#FF8585", "light": "#D94F4F" }
+    },
+    "text": {
+      "hi":    { "dark": "#E9EBF0", "light": "rgba(14,18,26,.92)" },
+      "mid":   { "dark": "#B8BDC9", "light": "rgba(14,18,26,.62)" },
+      "dim":   { "dark": "#8A8F9C", "light": "rgba(14,18,26,.46)" },
+      "faint": { "dark": "#6A7080", "light": "rgba(14,18,26,.42)" }
+    },
+    "hairline": { "dark": "rgba(255,255,255,.07)", "light": "rgba(12,16,24,.09)" }
+  },
+  "type": {
+    "display": { "family": "Outfit", "weights": [400, 500, 600, 700, 800], "use": "headlines, the mark, hero" },
+    "body":    { "family": "Inter", "weights": [400, 500, 600], "use": "paragraph and UI text" },
+    "mono":    { "family": "IBM Plex Mono", "weights": [400, 500, 600], "use": "numbers, labels, eyebrows, status lines" }
+  },
+  "radius": { "card": 16, "cell": 10, "button": 12, "pill": 999 },
+  "eyebrow": { "size": 10, "tracking": "0.12em", "transform": "uppercase", "family": "mono" },
+  "motion": {
+    "cardIn": "fade + 10px rise, 0.32s ease",
+    "pulse": "waiting/live, 1.6s infinite",
+    "glow": "idle pill, 3s infinite",
+    "flash": "in-place refresh, 1.1s",
+    "respectsReducedMotion": true
+  },
+  "theme": { "hero": "dark", "secondary": "light" }
+}

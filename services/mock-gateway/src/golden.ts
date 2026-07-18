@@ -95,6 +95,31 @@ const dipDecline: FrameDraft = {
   followups: ['How do dips usually resolve?', 'What would change this picture?'],
 }
 
+/** Authoritative brief for a stream the trader stopped: honest, truncated —
+ * the prose that had already played, STOPPED eyebrow, and deliberately no
+ * stats/spark (mirrors the gateway's law: the server never fabricates
+ * numbers it didn't retrieve). */
+export const stoppedBrief: FrameDraft = {
+  type: 'research_brief',
+  eyebrow: 'MARKET BRIEF · STOPPED',
+  live: false,
+  headline: 'Stopped early — partial brief',
+  paragraphs: [
+    'US inflation came in hotter than expected at 18:00 IST, pushing rate-cut expectations later into the year. Risk assets sold off broadly — BTC led the move down.',
+  ],
+  stats: [],
+  sources: [],
+  followups: [],
+  liveBar: {
+    asOf: 'AS OF 14:32:05 IST',
+    asOfIso: '2026-07-14T09:02:05.000Z',
+    refreshable: true,
+    shareable: true,
+    feedback: true,
+    cached: false,
+  },
+}
+
 const thinking = (lines: string[]): FrameDraft => ({ type: 'thinking', lines })
 const skeleton = (shape: string): FrameDraft => ({ type: 'skeleton', shape })
 const userEcho = (text: string): FrameDraft => ({ type: 'user_echo', text })

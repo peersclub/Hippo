@@ -7,7 +7,7 @@
 <meta name="description" content="Integrate the Hippo trading agent anywhere: one script tag on the web, a WebView shell on iOS, Android, React Native and Flutter. Thin client, heavy core." />
 <link rel="icon" type="image/png" href="./assets/hippo-mascot.png" />
 <script>/* pre-paint theme boot — avoids a dark→light flash */
-try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch{}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -48,7 +48,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
       <a href="/design">Design</a>
       <a class="on" href="/sdk">SDK</a>
     </nav>
-    <button class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
+    <button type="button" class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
     <a class="btn amber" href="/#cta">Talk to us</a>
   </div>
 </header>

@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hippo × KoinBX — Thin Client Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E1014; --panel:#14161C; --glass:rgba(38,42,52,.6); --hairline:rgba(255,255,255,.07);
+    --ink:#E9EBF0; --dim:#8A8F9C; --faint:#6A7080;
+    --amber:#F0B94A; --up:#2EC48D; --down:#FF8585;
+    --mono:'IBM Plex Mono',monospace; --sans:'Inter',sans-serif; --disp:'Outfit',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#E8E9ED;color:#23252E;font-family:var(--sans);min-height:100vh;}
+  header.top{padding:26px 20px 8px;text-align:center;}
+  header.top h1{font-family:var(--disp);font-weight:600;font-size:clamp(20px,4vw,27px);letter-spacing:-0.01em;}
+  header.top p{font-size:13px;color:#6B6E7A;margin-top:6px;max-width:600px;margin-inline:auto;line-height:1.55;}
+  html{scroll-behavior:smooth;}
+  /* ===== access gate ===== */
+  body.locked{overflow:hidden;}
+  .gate{position:fixed;inset:0;z-index:999;background:linear-gradient(175deg,#15171D 0%,#0E1014 100%);display:flex;align-items:center;justify-content:center;padding:24px;}
+  .gate.open{display:none;}
+  .gate-card{width:100%;max-width:340px;text-align:center;}
+  .gate-mark{width:56px;height:56px;border-radius:18px;background:#F0B94A;color:#15171D;display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:25px;margin:0 auto 18px;box-shadow:0 18px 44px rgba(240,185,74,.25);}
+  .gate-card h2{font-family:var(--disp);font-size:20px;font-weight:700;color:#E9EBF0;letter-spacing:-0.01em;margin-bottom:6px;}
+  .gate-card > p{font-size:12.5px;line-height:1.55;color:#8A8F9C;margin-bottom:20px;}
+  .gate-form{display:flex;gap:8px;}
+  .gate-form input{flex:1;background:rgba(38,42,52,.7);border:1px solid rgba(255,255,255,.1);border-radius:12px;color:#E9EBF0;font-family:var(--mono);font-size:14px;padding:12px 14px;outline:none;letter-spacing:.08em;}
+  .gate-form input:focus{border-color:rgba(240,185,74,.6);}
+  .gate-form button{border:0;background:#F0B94A;color:#15171D;font-family:var(--disp);font-weight:600;font-size:13px;padding:12px 18px;border-radius:12px;cursor:pointer;}
+  .gate-err{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:#FF8585;margin-top:12px;min-height:14px;}
+  .gate-foot{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:#5A6070;margin-top:26px;}
+  .gate-card.shake{animation:gshake .4s ease;}
+  @keyframes gshake{0%,100%{transform:none;}25%{transform:translateX(-8px);}50%{transform:translateX(7px);}75%{transform:translateX(-4px);}}
+  header.hero{padding:52px 20px 30px;text-align:center;}
+  .hero-in{max-width:640px;margin:0 auto;}
+  .hero-mark{width:54px;height:54px;border-radius:17px;background:#1A1C22;color:#F0B94A;display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:24px;margin:0 auto 18px;box-shadow:0 14px 34px rgba(20,22,30,.25);}
+  header.hero h1{font-family:var(--disp);font-weight:700;font-size:clamp(26px,5vw,38px);letter-spacing:-0.02em;}
+  .lede{font-size:14.5px;line-height:1.65;color:#5C5F6A;margin-top:12px;}
+  .tok-row{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;margin-top:18px;}
+  .tok{font-family:var(--mono);font-size:9px;letter-spacing:.1em;border:1px solid #C9CCD5;border-radius:999px;padding:5px 11px;color:#5C5F6A;}
+  nav.anchors{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;padding:12px;position:sticky;top:0;background:rgba(232,233,237,.92);backdrop-filter:blur(8px);z-index:80;border-bottom:1px solid #D8DAE1;}
+  nav.anchors a{font-family:var(--disp);font-size:12.5px;font-weight:600;color:#6B6E7A;text-decoration:none;padding:8px 14px;border-radius:999px;}
+  nav.anchors a:hover{color:#1A1C22;}
+  nav.anchors a.on{background:#1A1C22;color:#F4F5F8;}
+  .stage{display:block;padding:34px 12px 30px;}
+  .stage + .stage{border-top:1px solid #D8DAE1;}
+  .sec-head{max-width:640px;margin:0 auto 18px;text-align:center;}
+  .sec-no{font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:#9EA1AC;display:block;margin-bottom:8px;}
+  .sec-head h2{font-family:var(--disp);font-size:23px;font-weight:700;letter-spacing:-0.015em;color:#1E2029;}
+  .sec-head > p{font-size:13.5px;line-height:1.6;color:#6B6E7A;margin-top:7px;}
+  .try{max-width:640px;margin:0 auto 26px;background:#F4F5F8;border:1px solid #D5D8E0;border-radius:16px;padding:16px 20px;}
+  .try h6{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:#B07C14;margin-bottom:10px;}
+  .try ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px;}
+  .try li{font-size:13px;line-height:1.55;color:#3A3D47;}
+  .try b{color:#1E2029;}
+  .try a{color:#B07C14;font-weight:600;}
+
+  /* ================= WEB TERMINAL ================= */
+  .term-wrap{width:100%;display:flex;justify-content:center;overflow:hidden;}
+  .term-scale{transform-origin:top center;}
+  .terminal{width:1200px;height:720px;background:var(--bg);border-radius:14px;overflow:hidden;color:var(--ink);display:flex;flex-direction:column;box-shadow:0 26px 70px rgba(15,17,22,.4);position:relative;}
+  .t-top{display:flex;align-items:center;gap:22px;padding:0 18px;height:52px;border-bottom:1px solid var(--hairline);background:var(--panel);flex-shrink:0;}
+  .t-logo{font-family:var(--disp);font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;}
+  .t-logo .dot{width:22px;height:22px;border-radius:7px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-size:11px;}
+  .t-nav{display:flex;gap:18px;font-size:12.5px;color:var(--dim);}
+  .t-nav span.on{color:var(--ink);font-weight:600;}
+  .t-pair{margin-left:auto;display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:12px;}
+  .t-pair .px{color:var(--down);font-size:14px;font-weight:600;}
+  .t-body{display:flex;flex:1;min-height:0;}
+  .t-main{flex:1;display:flex;min-width:0;}
+  .chart-col{flex:1;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--hairline);}
+  .chart-head{display:flex;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--hairline);font-size:11.5px;color:var(--dim);}
+  .chart-head .tf{font-family:var(--mono);display:flex;gap:10px;}
+  .chart-head .tf span.on{color:var(--amber);}
+  .chart-area{flex:1;position:relative;}
+  .chart-area svg{position:absolute;inset:0;width:100%;height:100%;}
+  .book{width:230px;flex-shrink:0;display:flex;flex-direction:column;font-family:var(--mono);font-size:11px;}
+  .book h5{font-family:var(--disp);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);padding:12px 14px 8px;}
+  .book .cols{display:flex;justify-content:space-between;padding:0 14px 6px;color:var(--faint);font-size:9.5px;letter-spacing:.06em;}
+  .brow{display:flex;justify-content:space-between;padding:3.5px 14px;position:relative;}
+  .brow .depth{position:absolute;right:0;top:0;bottom:0;opacity:.09;}
+  .brow.ask .p{color:var(--down);} .brow.ask .depth{background:var(--down);}
+  .brow.bid .p{color:var(--up);} .brow.bid .depth{background:var(--up);}
+  .brow .s,.brow .t{color:var(--dim);}
+  .mid{font-size:14px;font-weight:600;color:var(--down);padding:8px 14px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);}
+  .mid small{color:var(--faint);font-size:9.5px;margin-left:8px;}
+
+  /* --- Hippo web panel --- */
+  .hippo-panel{width:360px;flex-shrink:0;background:linear-gradient(175deg,#15171D,#101217);border-left:1px solid var(--hairline);display:flex;flex-direction:column;transition:width .28s ease;position:relative;z-index:20;}
+  .terminal.h-min .hippo-panel{width:0;border-left:0;overflow:hidden;}
+  .terminal.h-max .hippo-panel{position:absolute;right:0;top:52px;bottom:0;width:620px;box-shadow:-30px 0 60px rgba(0,0,0,.45);border-left:1px solid rgba(240,185,74,.25);}
+  .terminal.h-max .scrim{position:absolute;inset:52px 0 0;background:rgba(10,11,14,.45);backdrop-filter:blur(2px);z-index:15;}
+  .scrim{display:none;}
+  .terminal.h-max .scrim{display:block;}
+  .hp-head{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--hairline);flex-shrink:0;}
+  .hp-head .mark{width:24px;height:24px;border-radius:8px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:12px;}
+  .hp-head .name{font-family:var(--disp);font-weight:600;font-size:13.5px;}
+  .hp-head .name small{display:block;font-family:var(--mono);font-weight:400;font-size:8.5px;letter-spacing:.12em;color:var(--faint);margin-top:1px;}
+  .hp-ctl{margin-left:auto;display:flex;gap:6px;}
+  .hp-ctl button{width:26px;height:26px;border-radius:8px;border:1px solid var(--hairline);background:rgba(255,255,255,.03);color:var(--dim);cursor:pointer;font-size:12px;line-height:1;display:grid;place-items:center;}
+  .hp-ctl button:hover{color:var(--ink);border-color:rgba(255,255,255,.18);}
+  .hp-ctl button:focus-visible{outline:2px solid var(--amber);outline-offset:1px;}
+  /* minimized floating button */
+  .hippo-tab{position:absolute;right:26px;bottom:26px;display:none;z-index:25;}
+  .terminal.h-min .hippo-tab{display:block;}
+  .hippo-tab button{display:flex;align-items:center;gap:9px;border:1px solid rgba(240,185,74,.45);background:linear-gradient(135deg,#1E212A,#171A21);color:var(--ink);font-family:var(--disp);font-weight:600;font-size:13.5px;padding:12px 20px;border-radius:999px;cursor:pointer;box-shadow:0 12px 32px rgba(0,0,0,.55),0 0 0 4px rgba(240,185,74,.06);transition:transform .15s ease, box-shadow .15s ease;}
+  .hippo-tab button:hover{transform:translateY(-2px);box-shadow:0 16px 38px rgba(0,0,0,.6),0 0 0 5px rgba(240,185,74,.1);}
+  .hippo-tab button:focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+  .hippo-tab .mark{width:22px;height:22px;border-radius:8px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-size:11px;font-weight:700;}
+
+  /* --- shared hippo conversation --- */
+  .hp-scroll{overflow-y:auto;padding:13px;display:flex;flex-direction:column;gap:11px;flex:1;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+  .hp-scroll > *, .scroll > *{flex-shrink:0;}
+  .u-msg{align-self:flex-end;max-width:80%;font-size:12.5px;line-height:1.45;padding:9px 13px;border-radius:14px 14px 5px 14px;background:#2A2E38;border:1px solid var(--hairline);}
+  .bubble{align-self:flex-start;max-width:96%;border-radius:15px;padding:13px;background:#232733;border:1px solid rgba(255,255,255,.08);}
+  .eyebrow{font-family:var(--mono);font-size:9px;letter-spacing:.14em;margin-bottom:7px;display:flex;justify-content:space-between;color:var(--dim);}
+  .eyebrow .live{color:var(--amber);}
+  .bubble h3{font-family:var(--disp);font-size:15px;font-weight:600;margin-bottom:5px;}
+  .bubble p{font-size:12.5px;line-height:1.58;color:#B8BDC9;}
+  .bubble p + p{margin-top:6px;}
+  .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin:10px 0 3px;}
+  .kv div{border-radius:9px;padding:7px 8px;background:rgba(20,22,28,.7);border:1px solid var(--hairline);}
+  .kv .k{font-family:var(--mono);font-size:8px;letter-spacing:.12em;display:block;margin-bottom:3px;color:var(--faint);}
+  .kv .v{font-family:var(--mono);font-size:11.5px;font-weight:500;}
+  .kv .v.neg{color:var(--down);}
+  svg.spark{display:block;width:100%;height:48px;margin-top:7px;}
+  .spark path.line{stroke:var(--amber);}
+  .spark path.fill{fill:rgba(240,185,74,.07);}
+  .figcap{font-family:var(--mono);font-size:9px;display:flex;justify-content:space-between;margin-top:4px;color:var(--faint);}
+  .src-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;}
+  .src{font-family:var(--mono);font-size:9px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.06);color:#9BA1AE;}
+  .ticket{align-self:flex-start;width:94%;border-radius:16px;overflow:hidden;background:#262B36;border:1px solid rgba(240,185,74,.35);}
+  .t-head2{display:flex;justify-content:space-between;align-items:center;padding:11px 13px;border-bottom:1px solid var(--hairline);}
+  .t-head2 .tt{font-family:var(--disp);font-weight:600;font-size:13px;}
+  .t-head2 .side{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;padding:3px 9px;border-radius:999px;background:rgba(46,196,141,.12);color:var(--up);}
+  .t-body2{padding:2px 13px 3px;}
+  .trow{display:flex;justify-content:space-between;padding:7px 0;font-size:12.5px;}
+  .trow + .trow{border-top:1px dashed rgba(255,255,255,.09);}
+  .trow .lab{font-size:10.5px;align-self:center;color:var(--dim);}
+  .trow b{font-family:var(--mono);font-weight:500;font-size:11.5px;}
+  .cta{display:block;width:calc(100% - 26px);margin:9px 13px 11px;border:0;font-family:var(--disp);font-weight:600;font-size:12.5px;padding:12px;border-radius:11px;cursor:pointer;background:var(--amber);color:#15171D;}
+  .foot{font-size:9.5px;text-align:center;padding:0 13px 11px;line-height:1.5;color:var(--faint);}
+  .hp-composer{display:flex;align-items:center;gap:8px;padding:10px 13px 13px;border-top:1px solid var(--hairline);flex-shrink:0;}
+  /* open orders strip */
+  .orders-strip{flex-shrink:0;padding:9px 13px 10px;border-bottom:1px solid var(--hairline);background:rgba(20,22,28,.4);}
+  .strip-label{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:var(--faint);margin-bottom:7px;display:flex;justify-content:space-between;}
+  .strip-label .cnt{color:var(--amber);}
+  .pill-row{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .pill-row::-webkit-scrollbar{display:none;}
+  .o-pill{flex-shrink:0;display:flex;align-items:center;gap:7px;background:var(--glass);border:1px solid var(--hairline);border-radius:999px;padding:7px 12px;font-family:var(--mono);font-size:10.5px;color:var(--ink);cursor:pointer;white-space:nowrap;}
+  .o-pill:hover{border-color:rgba(255,255,255,.18);}
+  .o-pill .sd{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+  .o-pill.buy .sd{background:var(--up);} .o-pill.sell .sd{background:var(--down);}
+  .o-pill .st{color:var(--faint);font-size:9px;}
+  .o-pill.new{border:1px dashed rgba(240,185,74,.5);color:var(--amber);font-family:var(--disp);font-weight:600;font-size:11px;}
+  .o-pill.active{border-color:rgba(240,185,74,.6);background:rgba(240,185,74,.08);}
+  .o-expand{max-height:0;overflow:hidden;transition:max-height .38s ease;}
+  .o-expand.open{max-height:320px;}
+  .o-expand-inner{padding-top:10px;}
+  .o-expand .ticket{width:100%;align-self:auto;}
+  .o-expand .hintcard{background:#232733;border:1px dashed rgba(240,185,74,.4);border-radius:14px;padding:13px;}
+  .o-expand .hintcard p{font-size:12px;line-height:1.55;color:#B8BDC9;margin-bottom:9px;}
+  .o-expand .hintcard .dc-chips{margin-top:0;}
+  /* suggested queries */
+  .sugg-strip{flex-shrink:0;padding:9px 13px 2px;display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;border-top:1px solid var(--hairline);}
+  .sugg-strip::-webkit-scrollbar{display:none;}
+  .q-chip{flex-shrink:0;background:rgba(255,255,255,.04);border:1px solid var(--hairline);border-radius:999px;padding:7px 13px;font-size:11px;color:#B8BDC9;cursor:pointer;white-space:nowrap;}
+  .q-chip:hover{border-color:rgba(240,185,74,.4);color:var(--ink);}
+  .sugg-strip + .hp-composer{border-top:0;padding-top:8px;}
+  /* ===== consent onboarding — the hero moment ===== */
+  .onboard{position:absolute;inset:0;z-index:100;background:rgba(10,11,14,.52);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);display:flex;align-items:center;justify-content:center;padding:24px;border-radius:inherit;}
+  .onboard.hidden{display:none;}
+  .ob-inner{width:100%;max-width:380px;max-height:100%;overflow-y:auto;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch;}
+  .ob-dots{display:flex;gap:6px;justify-content:center;margin-bottom:22px;flex-shrink:0;}
+  .ob-dots span{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.18);transition:all .2s;}
+  .ob-dots span.on{background:var(--amber);width:18px;border-radius:3px;}
+  .ob-step{display:none;flex-direction:column;}
+  .ob-step.on{display:flex;}
+  .ob-step.center{align-items:center;text-align:center;}
+  .ob-mark{width:46px;height:46px;border-radius:14px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:22px;margin-bottom:16px;flex-shrink:0;}
+  .ob-mark.hero{width:62px;height:62px;border-radius:20px;font-size:28px;box-shadow:0 18px 44px rgba(240,185,74,.28);}
+  .ob-step h3{font-family:var(--disp);font-size:19px;font-weight:600;margin-bottom:7px;letter-spacing:-0.01em;color:var(--ink);}
+  .ob-step h3.big{font-size:26px;letter-spacing:-0.02em;line-height:1.12;}
+  .ob-step > p{font-size:13px;line-height:1.6;color:#B8BDC9;margin-bottom:16px;}
+  .ob-bar{width:100%;display:flex;align-items:center;gap:9px;background:rgba(22,25,32,.92);border:1px solid rgba(240,185,74,.55);border-radius:999px;padding:8px 8px 8px 18px;box-shadow:0 20px 50px rgba(0,0,0,.55),0 0 0 7px rgba(240,185,74,.06);margin:6px 0 12px;}
+  .ob-bar .t{flex:1;text-align:left;font-size:14px;color:#C9CDD6;min-height:20px;}
+  .ob-bar .t::after{content:'▏';color:var(--amber);animation:pulse 1s infinite;}
+  .ob-bar .send{width:38px;height:38px;border-radius:50%;background:var(--amber);color:#15171D;display:grid;place-items:center;font-size:16px;flex-shrink:0;}
+  .ob-caption{font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--dim);margin-bottom:18px;}
+  .ob-row{display:flex;gap:12px;padding:12px 13px;background:rgba(30,34,43,.96);border:1px solid rgba(255,255,255,.08);border-radius:14px;margin-bottom:9px;}
+  .ob-row .ic{width:30px;height:30px;border-radius:10px;background:rgba(240,185,74,.12);color:var(--amber);display:grid;place-items:center;font-size:14px;flex-shrink:0;}
+  .ob-row .tx b{display:block;font-family:var(--disp);font-size:12.5px;font-weight:600;margin-bottom:2px;color:var(--ink);}
+  .ob-row .tx span{font-size:11px;line-height:1.5;color:#9BA1AE;display:block;}
+  .ob-fine{font-size:10px;color:var(--faint);line-height:1.55;padding-top:6px;}
+  .ob-fine a{color:var(--amber);text-decoration:none;}
+  .ob-cta{display:block;width:100%;border:0;font-family:var(--disp);font-weight:600;font-size:13.5px;padding:13px;border-radius:12px;cursor:pointer;background:var(--amber);color:#15171D;margin-top:12px;flex-shrink:0;}
+  .ob-skip{display:block;width:100%;background:none;border:0;color:var(--faint);font-family:var(--disp);font-size:12px;padding:10px;cursor:pointer;flex-shrink:0;}
+  .ob-skip:hover{color:var(--dim);}
+  /* ===== live bar (as-of / refresh / share) ===== */
+  .live-bar{display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:9px;border-top:1px dashed rgba(255,255,255,.08);font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;}
+  .live-bar .asof{color:var(--faint);margin-right:auto;transition:color .3s;}
+  .live-bar .asof.flash{color:var(--amber);}
+  .lb-btn{background:none;border:0;color:#9BA1AE;font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;cursor:pointer;padding:2px 0;}
+  .lb-btn:hover{color:var(--amber);}
+  .lb-btn.busy{color:var(--amber);pointer-events:none;}
+  /* ===== share overlay ===== */
+  .share-ov{position:absolute;inset:0;z-index:70;background:rgba(10,11,14,.72);backdrop-filter:blur(6px);display:flex;flex-direction:column;justify-content:center;padding:20px;border-radius:inherit;}
+  .share-ov.hidden{display:none;}
+  .share-card{background:linear-gradient(160deg,#1D212B,#14161C);border:1px solid rgba(240,185,74,.3);border-radius:18px;padding:16px;box-shadow:0 18px 44px rgba(0,0,0,.5);}
+  .sc-brand{display:flex;align-items:center;gap:7px;font-family:var(--disp);font-weight:700;font-size:12.5px;margin-bottom:10px;}
+  .sc-brand .mark{width:20px;height:20px;border-radius:7px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-size:10px;}
+  .sc-brand .on{font-weight:400;color:var(--dim);font-size:11.5px;}
+  .share-card h4{font-family:var(--disp);font-size:16px;font-weight:600;margin-bottom:5px;letter-spacing:-0.01em;}
+  .share-card > p{font-size:11.5px;line-height:1.55;color:#B8BDC9;}
+  .sc-foot{display:flex;justify-content:space-between;font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--faint);margin-top:10px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.08);}
+  .sc-foot .lnk{color:var(--amber);}
+  .sc-disc{font-family:var(--mono);font-size:8px;letter-spacing:.08em;color:var(--faint);margin-top:6px;}
+  .share-actions{display:flex;gap:8px;margin-top:12px;}
+  .share-actions button{flex:1;border:0;font-family:var(--disp);font-weight:600;font-size:12.5px;padding:12px;border-radius:11px;cursor:pointer;}
+  .share-actions .cpy{background:rgba(255,255,255,.08);color:var(--ink);border:1px solid var(--hairline);}
+  .share-actions .shb{background:var(--amber);color:#15171D;}
+  .sc-close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:10px;border:1px solid var(--hairline);background:rgba(255,255,255,.04);color:var(--dim);cursor:pointer;font-size:13px;}
+  .sc-live{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;letter-spacing:.12em;color:var(--up);background:rgba(46,196,141,.1);border-radius:999px;padding:3px 8px;margin-bottom:9px;}
+  .sc-live::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--up);}
+  /* ===== edge states gallery ===== */
+  .egrid{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;max-width:1100px;margin:6px auto 0;}
+  .ecard{width:320px;max-width:94vw;}
+  .ecard h5{font-family:var(--disp);font-size:13px;font-weight:600;color:#23252E;margin-bottom:3px;}
+  .ecard .rule{font-size:11.5px;color:#6B6E7A;line-height:1.5;margin-bottom:10px;}
+  .ecard .rule b{color:#3A3D47;}
+  .mini{background:linear-gradient(175deg,#15171D,#101217);border-radius:18px;color:var(--ink);overflow:hidden;box-shadow:0 14px 36px rgba(15,17,22,.3);display:flex;flex-direction:column;min-height:330px;position:relative;}
+  .mini .hp-head{border-bottom:1px solid var(--hairline);}
+  .mini .hp-scroll{padding:12px;}
+  .banner{display:flex;gap:9px;align-items:flex-start;padding:10px 13px;font-size:11px;line-height:1.5;flex-shrink:0;}
+  .banner .bi{flex-shrink:0;font-size:12px;margin-top:1px;}
+  .banner.warn{background:rgba(240,185,74,.1);border-bottom:1px solid rgba(240,185,74,.3);color:#E8CE93;}
+  .banner.warn .bi{color:var(--amber);}
+  .banner.off{background:rgba(255,255,255,.05);border-bottom:1px solid var(--hairline);color:#9BA1AE;}
+  .banner b{font-family:var(--mono);font-size:9px;letter-spacing:.12em;display:block;margin-bottom:2px;}
+  .empty-hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 22px;}
+  .empty-hero .ob-mark{margin:0 auto 14px;}
+  .empty-hero h3{font-family:var(--disp);font-size:16px;font-weight:600;margin-bottom:5px;}
+  .empty-hero p{font-size:12px;color:#9BA1AE;line-height:1.55;margin-bottom:14px;}
+  .empty-hero .q-chip{margin-bottom:7px;width:100%;text-align:center;}
+  .cache-badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;letter-spacing:.12em;color:var(--amber);background:rgba(240,185,74,.1);border-radius:999px;padding:3px 8px;margin-bottom:8px;}
+  .ticket.err{border-color:rgba(255,133,133,.45);}
+  .ticket.err .t-head2 .side{background:rgba(255,133,133,.12);color:var(--down);}
+  .why-row{display:flex;gap:8px;padding:9px 13px;background:rgba(255,133,133,.07);border-top:1px solid rgba(255,133,133,.2);font-size:11px;line-height:1.5;color:#E8B8B8;}
+  .why-row .bi{color:var(--down);flex-shrink:0;}
+  .err-actions{display:flex;gap:8px;padding:10px 13px 12px;}
+  .err-actions button{flex:1;border:0;font-family:var(--disp);font-weight:600;font-size:11.5px;padding:10px;border-radius:10px;cursor:pointer;}
+  .err-actions .fix{background:var(--amber);color:#15171D;}
+  .err-actions .dis{background:rgba(255,255,255,.07);color:var(--dim);border:1px solid var(--hairline);}
+  .live-bar.stale .asof{color:var(--amber);}
+  .live-bar.stale .rfr{color:var(--amber);}
+  .composer-off{display:flex;align-items:center;gap:8px;padding:10px 13px 13px;border-top:1px solid var(--hairline);margin-top:auto;opacity:.55;}
+  .composer-off .field{flex:1;font-size:12px;padding:10px 13px;border-radius:999px;background:rgba(38,42,52,.5);border:1px dashed var(--hairline);color:var(--faint);font-style:italic;}
+  .retry-bubble{align-self:flex-start;max-width:92%;border-radius:15px;padding:12px 13px;background:rgba(255,133,133,.06);border:1px solid rgba(255,133,133,.25);}
+  .retry-bubble p{font-size:12px;line-height:1.55;color:#D8B8B8;}
+  .retry-bubble button{margin-top:9px;border:1px solid rgba(255,133,133,.4);background:none;color:#FFA8A8;font-family:var(--disp);font-weight:600;font-size:11px;padding:7px 14px;border-radius:9px;cursor:pointer;}
+  /* ===== order lifecycle states ===== */
+  .await{display:flex;align-items:center;gap:8px;padding:10px 13px;border-top:1px dashed rgba(255,255,255,.09);font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--amber);}
+  .await .pulse{width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0;animation:pulse 1.2s ease infinite;}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.75);}}
+  .await .cxl-link{margin-left:auto;background:none;border:0;color:var(--faint);font-family:var(--mono);font-size:9px;letter-spacing:.1em;cursor:pointer;}
+  .await .cxl-link:hover{color:var(--down);}
+  .ticket.ok{border-color:rgba(46,196,141,.45);}
+  .ticket.ok .t-head2 .side{background:rgba(46,196,141,.12);color:var(--up);}
+  .ticket.part .t-head2 .side{background:rgba(240,185,74,.12);color:var(--amber);}
+  .fillwrap{padding:4px 13px 10px;}
+  .fillmeta{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--dim);margin-bottom:5px;}
+  .fillmeta b{color:var(--amber);font-weight:500;}
+  .fillbar{height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;}
+  .fillbar span{display:block;height:100%;width:40%;border-radius:3px;background:var(--amber);}
+  .ticket.cxl{border-color:rgba(255,255,255,.16);}
+  .ticket.cxl .t-head2 .side{background:rgba(255,255,255,.08);color:var(--dim);}
+  .olink{display:block;width:calc(100% - 26px);margin:9px 13px 12px;border:1px solid var(--hairline);background:rgba(255,255,255,.05);color:#B8BDC9;font-family:var(--disp);font-weight:600;font-size:12px;padding:11px;border-radius:11px;cursor:pointer;text-align:center;}
+  .olink:hover{color:var(--ink);border-color:rgba(255,255,255,.2);}
+  .oid{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--faint);text-align:center;padding-bottom:11px;}
+  /* ===== welcome celebration (onboarding step 0) ===== */
+  .confetti{position:absolute;inset:0;pointer-events:none;z-index:1;}
+  .ob-inner{position:relative;z-index:2;}
+  .wc{width:100%;background:linear-gradient(160deg,#1F232E,#14161C);border:1px solid rgba(240,185,74,.55);border-radius:20px;padding:26px 24px 20px;text-align:center;box-shadow:0 26px 64px rgba(0,0,0,.6),0 0 0 8px rgba(240,185,74,.06);animation:wcIn .5s cubic-bezier(.2,.9,.3,1.2) both;}
+  @keyframes wcIn{from{opacity:0;transform:scale(.85) translateY(12px);}to{opacity:1;transform:none;}}
+  .wc-eyebrow{font-family:var(--mono);font-size:9px;letter-spacing:.22em;color:var(--amber);margin-bottom:9px;}
+  .wc h4{font-family:var(--disp);font-size:22px;font-weight:700;letter-spacing:-0.015em;margin-bottom:8px;color:var(--ink);line-height:1.15;}
+  .wc p{font-size:12.5px;line-height:1.6;color:#B8BDC9;}
+  .wc .ob-cta{margin-top:18px;}
+  /* ===== ambient market pulse (minimized states) ===== */
+  .evt{display:none;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:var(--amber);}
+  .alert .evt{display:inline;}
+  .hippo-tab button.alert,.h-pill.alert{animation:glow 1.7s ease infinite;border-color:rgba(240,185,74,.75);}
+  @keyframes glow{0%,100%{box-shadow:0 12px 32px rgba(0,0,0,.55),0 0 0 0 rgba(240,185,74,.4);}50%{box-shadow:0 12px 32px rgba(0,0,0,.55),0 0 0 10px rgba(240,185,74,0);}}
+  /* ===== settings sheet ===== */
+  .set-ov{position:absolute;inset:0;z-index:65;background:linear-gradient(180deg,#171A21,#101217);border-radius:inherit;display:flex;flex-direction:column;padding:20px 18px 16px;}
+  .set-ov.hidden{display:none;}
+  .set-title{font-family:var(--disp);font-size:18px;font-weight:600;margin-bottom:12px;}
+  .set-scroll{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:9px;-webkit-overflow-scrolling:touch;}
+  .set-scroll > *{flex-shrink:0;}
+  .set-h{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--faint);margin:8px 0 0;}
+  .set-act{display:block;width:100%;border:1px solid var(--hairline);background:rgba(255,255,255,.05);color:#B8BDC9;font-family:var(--disp);font-weight:600;font-size:12px;padding:11px;border-radius:11px;cursor:pointer;text-align:center;}
+  .set-act:hover{color:var(--ink);border-color:rgba(255,255,255,.2);}
+  .set-foot{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--faint);text-align:center;margin-top:auto;padding-top:14px;}
+  .expl{background:rgba(240,185,74,.06);border:1px solid rgba(240,185,74,.25);border-radius:12px;padding:11px 12px;}
+  .expl.hidden{display:none;}
+  .expl p{font-size:11px;line-height:1.6;color:#C6BBA4;}
+  .q-chip.sel{border-color:rgba(240,185,74,.6);color:var(--ink);background:rgba(240,185,74,.08);}
+  .gear{width:26px;height:26px;border-radius:8px;border:1px solid var(--hairline);background:rgba(255,255,255,.03);color:var(--dim);cursor:pointer;font-size:12px;line-height:1;display:grid;place-items:center;}
+  .gear:hover{color:var(--ink);border-color:rgba(255,255,255,.18);}
+  /* ===== feedback affordance ===== */
+  .fb{display:flex;gap:7px;align-items:center;}
+  .fb-btn{background:none;border:0;cursor:pointer;font-size:12px;line-height:1;padding:1px;filter:grayscale(1);opacity:.5;transition:opacity .15s,filter .15s;}
+  .fb-btn:hover{opacity:.95;}
+  .fb-done{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--amber);}
+  .fb-reasons{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+  .fb-reasons .q-chip{font-size:10px;padding:5px 10px;}
+  /* ===== streaming / thinking states ===== */
+  .think-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--dim);}
+  .tdot{width:7px;height:7px;border-radius:50%;background:var(--amber);animation:pulse 1.1s ease infinite;flex-shrink:0;}
+  .sk{background:linear-gradient(90deg,#2A2F3B 25%,#353B49 37%,#2A2F3B 63%);background-size:400% 100%;animation:shimmer 1.2s linear infinite;border-radius:6px;}
+  @keyframes shimmer{0%{background-position:100% 0;}100%{background-position:0 0;}}
+  .sk-title{height:13px;width:70%;margin-bottom:9px;}
+  .sk-line{height:9px;width:100%;margin-bottom:6px;}
+  .sk-line.short{width:55%;}
+  .sk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px;}
+  .sk-cell{height:38px;border-radius:9px;}
+  /* staged playback — pure CSS, cards remain visible if animations are unavailable */
+  @media (prefers-reduced-motion: no-preference){
+    .hp-scroll.play > *{animation:msgIn .34s ease both;}
+    .hp-scroll.play > :nth-child(1){animation-delay:.15s;}
+    .hp-scroll.play > :nth-child(2){animation-delay:.55s;}
+    .hp-scroll.play > :nth-child(3){animation-delay:.95s;}
+    .hp-scroll.play > :nth-child(4){animation-delay:1.35s;}
+    .hp-scroll.play > :nth-child(5){animation-delay:1.75s;}
+    .hp-scroll.play > :nth-child(6){animation-delay:2.15s;}
+    .hp-scroll.play > :nth-child(n+7){animation-delay:2.55s;}
+    @keyframes msgIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+  }
+  /* ===== advice-decline card ===== */
+  .decline{align-self:flex-start;max-width:94%;border-radius:15px;overflow:hidden;background:#232733;border:1px solid rgba(255,255,255,.08);border-left:3px solid var(--amber);}
+  .dc-head{display:flex;align-items:center;gap:7px;padding:10px 13px 0;}
+  .dc-badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;letter-spacing:.14em;color:var(--amber);background:rgba(240,185,74,.1);border-radius:999px;padding:3px 9px;}
+  .decline .dc-body{padding:9px 13px 12px;}
+  .decline .dc-body > p{font-size:12.5px;line-height:1.58;color:#B8BDC9;}
+  .decline .pivot{font-family:var(--disp);font-weight:600;font-size:12.5px;color:var(--ink);margin:10px 0 8px;}
+  .fact-list{display:flex;flex-direction:column;gap:6px;}
+  .fact{display:flex;gap:9px;font-size:12px;line-height:1.5;color:#B8BDC9;background:rgba(20,22,28,.6);border:1px solid var(--hairline);border-radius:10px;padding:8px 11px;}
+  .fact .fi{color:var(--amber);flex-shrink:0;font-size:11px;margin-top:1px;}
+  .fact b{color:var(--ink);font-family:var(--mono);font-weight:500;font-size:11px;}
+  .dc-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  .dc-chips .q-chip{font-size:10.5px;padding:6px 11px;}
+  .hp-composer .field{flex:1;font-size:12px;padding:10px 13px;border-radius:999px;background:rgba(38,42,52,.7);border:1px solid var(--hairline);color:var(--faint);}
+  .hp-composer .send{width:33px;height:33px;border-radius:11px;display:grid;place-items:center;font-size:14px;flex-shrink:0;background:var(--amber);color:#15171D;}
+
+  /* ================= MOBILE ================= */
+  .m-wrap{display:flex;justify-content:center;}
+  .phone{width:340px;max-width:94vw;height:680px;border-radius:34px;overflow:hidden;background:var(--bg);color:var(--ink);box-shadow:0 24px 60px rgba(15,17,22,.4);display:flex;flex-direction:column;position:relative;}
+  .m-top{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--hairline);}
+  .m-pair{font-family:var(--disp);font-weight:600;font-size:14px;}
+  .m-pair small{display:block;font-family:var(--mono);font-weight:400;font-size:10px;color:var(--down);margin-top:2px;}
+  .m-icons{font-size:13px;color:var(--dim);letter-spacing:6px;}
+  .m-chart{height:250px;position:relative;border-bottom:1px solid var(--hairline);flex-shrink:0;}
+  .m-chart svg{position:absolute;inset:0;width:100%;height:100%;}
+  .m-tf{display:flex;gap:14px;padding:9px 16px;font-family:var(--mono);font-size:10px;color:var(--dim);border-bottom:1px solid var(--hairline);}
+  .m-tf span.on{color:var(--amber);}
+  .m-book{flex:1;overflow:hidden;font-family:var(--mono);font-size:11px;padding-top:4px;}
+  .m-tabs{margin-top:auto;display:flex;justify-content:space-around;padding:12px 8px 20px;border-top:1px solid var(--hairline);font-size:10px;color:var(--faint);flex-shrink:0;background:var(--panel);}
+  .m-tabs span.on{color:var(--ink);}
+  /* floating pill */
+  .h-pill{position:absolute;left:50%;transform:translateX(-50%);bottom:74px;z-index:30;display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#1E212A,#171A21);border:1px solid rgba(240,185,74,.45);color:var(--ink);font-family:var(--disp);font-weight:600;font-size:13px;padding:11px 18px;border-radius:999px;cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,.5);}
+  .h-pill .mark{width:20px;height:20px;border-radius:7px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-size:10px;font-weight:700;}
+  /* sheet */
+  .h-sheet{position:absolute;left:0;right:0;bottom:0;top:38%;z-index:40;background:linear-gradient(175deg,#181B22,#111318);border-radius:22px 22px 0 0;border-top:1px solid rgba(240,185,74,.3);box-shadow:0 -18px 44px rgba(0,0,0,.55);display:flex;flex-direction:column;transition:top .3s ease;transform:translateY(105%);}
+  .phone.sheet .h-sheet{transform:none;}
+  .phone.full .h-sheet{transform:none;top:0;border-radius:0;}
+  .grab{width:38px;height:4px;border-radius:2px;background:rgba(255,255,255,.18);margin:8px auto 0;flex-shrink:0;}
+  .m-scrim{position:absolute;inset:0;background:rgba(8,9,12,.5);z-index:35;display:none;}
+  .phone.sheet .m-scrim{display:block;}
+  .phone.full .m-scrim{display:none;}
+
+  .note{max-width:600px;margin:22px auto 0;background:#F4F5F8;border:1px solid #D5D8E0;border-radius:14px;padding:15px 17px;}
+  .note h4{font-family:var(--disp);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8A8D99;margin-bottom:7px;}
+  .note p{font-size:13px;line-height:1.6;color:#3A3D47;}
+</style>
+</head>
+<body class="locked">
+
+<div class="gate" id="gate">
+  <div class="gate-card" id="gateCard">
+    <div class="gate-mark">H</div>
+    <h2>This prototype is private</h2>
+    <p>Hippo × KoinBX thin-client walkthrough. Enter the access phrase to continue.</p>
+    <div class="gate-form">
+      <input type="password" id="gatePw" placeholder="access phrase" autocomplete="off" aria-label="Access phrase">
+      <button id="gateGo">Unlock</button>
+    </div>
+    <div class="gate-err" id="gateErr"></div>
+    <div class="gate-foot">HIPPO APP · INTERNAL PREVIEW</div>
+  </div>
+</div>
+
+
+<header class="hero">
+  <div class="hero-in">
+    <div class="hero-mark">H</div>
+    <h1>Hippo — the thin client, live</h1>
+    <p class="lede">An interactive prototype of the conversational trading layer, shown exactly where it will live: inside a partner exchange. Everything below is clickable — onboarding, research, orders, settings. Four chapters, top to bottom.</p>
+    <div class="tok-row"><span class="tok">DARK GLASS INSTRUMENT</span><span class="tok">OUTFIT · INTER · PLEX MONO</span><span class="tok">AMBER SIGNAL</span><span class="tok">APPROACH A — PARTNER CONFIRMS</span></div>
+  </div>
+</header>
+
+<nav class="anchors">
+  <a href="#s-web" class="on">01 Web terminal</a>
+  <a href="#s-mob">02 Mobile</a>
+  <a href="#s-life">03 Order lifecycle</a>
+  <a href="#s-edge">04 Edge states</a>
+</nav>
+
+<!-- ============ WEB ============ -->
+<section class="stage" id="s-web">
+  <div class="sec-head"><span class="sec-no">CHAPTER 01</span><h2>The web terminal</h2><p>Hippo docked beside the partner's chart as a 360px panel. The terminal, chart and order book belong to KoinBX; the conversation is ours. It never takes the trader hostage.</p></div>
+  <div class="try"><h6>TRY THIS</h6><ol>
+    <li>Tap the floating <b>Ask Hippo</b> button — confetti welcome → <b>Show me more</b> → data consent → <b>Agree &amp; start</b>. The thread plays in.</li>
+    <li>Tap a suggested query at the bottom of the panel: watch <b>thinking → skeleton → streamed answer</b> arrive live.</li>
+    <li>Tap an <b>order pill</b> at the top — its full card expands in place. <b>+ New order</b> takes plain-language intents.</li>
+    <li>On the research brief: <b>↻ REFRESH</b> updates the as-of time, <b>↗ SHARE</b> shows the co-branded live card, <b>👍/👎</b> feeds the eval set.</li>
+    <li><b>—</b> minimizes the panel; wait ~5s for the amber <b>market pulse</b>. <b>⚙</b> opens settings — switch answers to <b>Hinglish</b> or preview <b>RTL</b>. <a href="#" data-replay>Replay onboarding</a>.</li>
+  </ol></div>
+  <div class="term-wrap"><div class="term-scale" id="scaleBox">
+    <div class="terminal h-min" id="term">
+      <div class="t-top">
+        <div class="t-logo"><span class="dot">K</span>KoinBX <span style="font-weight:400;color:var(--faint);font-size:11px">Pro</span></div>
+        <div class="t-nav"><span class="on">Trade</span><span>Markets</span><span>Portfolio</span><span>Earn</span></div>
+        <div class="t-pair"><span style="color:var(--ink);font-weight:600">BTC/USDT</span><span class="px">61,240.00</span><span style="color:var(--down)">−4.2%</span><span style="color:var(--dim)">24H VOL 38.4B</span></div>
+      </div>
+      <div class="t-body">
+        <div class="t-main">
+          <div class="chart-col">
+            <div class="chart-head"><span style="color:var(--ink);font-weight:600">Chart</span><div class="tf"><span>15m</span><span class="on">1H</span><span>4H</span><span>1D</span></div><span style="margin-left:auto">Indicators · Compare · Fullscreen</span></div>
+            <div class="chart-area"><svg id="candles" preserveAspectRatio="none"></svg></div>
+          </div>
+          <div class="book">
+            <h5>Order book</h5>
+            <div class="cols"><span>PRICE</span><span>SIZE</span><span>TOTAL</span></div>
+            <div id="asks"></div>
+            <div class="mid">61,240.00 <small>≈ ₹51.2L</small></div>
+            <div id="bids"></div>
+          </div>
+        </div>
+
+        <!-- HIPPO PANEL -->
+        <aside class="hippo-panel" id="hpanel" aria-label="Ask Hippo panel">
+          <div class="hp-head">
+            <span class="mark">H</span>
+            <div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div>
+            <div class="hp-ctl">
+              <button class="gear" title="Settings" aria-label="Settings">⚙</button>
+              <button id="btnMax" title="Expand panel" aria-label="Expand panel">⤢</button>
+              <button id="btnMin" title="Minimize panel" aria-label="Minimize panel">—</button>
+            </div>
+          </div>
+          <div class="orders-strip">
+            <div class="strip-label"><span>OPEN ORDERS <span class="cnt">· 2</span></span><span>POSITIONS · 3</span></div>
+            <div class="pill-row">
+              <div class="o-pill buy" data-oc="btc"><span class="sd"></span>BUY 0.05 BTC · MKT <span class="st">FILLING 40%</span></div>
+              <div class="o-pill sell" data-oc="sol"><span class="sd"></span>SELL 12 SOL @ 168.00 <span class="st">OPEN</span></div>
+              <div class="o-pill buy" data-oc="ada"><span class="sd"></span>BUY 2,500 ADA @ 0.5210 <span class="st">OPEN</span></div>
+              <div class="o-pill new" data-oc="new">+ New order</div>
+            </div>
+            <div class="o-expand"><div class="o-expand-inner"></div></div>
+          </div>
+          <div class="hp-scroll">
+            <div class="u-msg">why is btc down today?</div>
+            <div class="bubble">
+              <div class="eyebrow"><span>MARKET BRIEF</span><span class="live">● LIVE 14:32</span></div>
+              <h3>BTC is down 4.2% over 12 hours</h3>
+              <p>US inflation came in hotter than expected at 18:00 IST, pushing rate-cut expectations later into the year. Risk assets sold off broadly — BTC led the move down.</p>
+              <div class="kv">
+                <div><span class="k">LAST</span><span class="v">61,240</span></div>
+                <div><span class="k">12H</span><span class="v neg">−4.2%</span></div>
+                <div><span class="k">FUNDING</span><span class="v neg">−0.008%</span></div>
+              </div>
+              <svg class="spark" viewBox="0 0 300 48" preserveAspectRatio="none">
+                <path class="fill" d="M0,11 C30,8 55,15 80,13 C110,11 130,22 160,26 C190,29 215,26 240,35 C265,43 285,39 300,41 L300,48 L0,48 Z"/>
+                <path class="line" d="M0,11 C30,8 55,15 80,13 C110,11 130,22 160,26 C190,29 215,26 240,35 C265,43 285,39 300,41" fill="none" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+              <div class="figcap"><span>BTC/USDT · 12H</span><span>$61,240</span></div>
+              <p style="margin-top:8px">Around $310M in leveraged longs unwound in the past hour, and funding has flipped mildly negative.</p>
+              <div class="src-row"><span class="src">PRICE FEED</span><span class="src">FUNDING</span><span class="src">NEWS ×2</span></div>
+              <div class="live-bar"><span class="asof">AS OF 14:32:05 IST</span><button class="lb-btn rfr">↻ REFRESH</button><button class="lb-btn shr">↗ SHARE</button><span class="fb"><button class="fb-btn up" aria-label="Helpful">👍</button><button class="fb-btn dn" aria-label="Not helpful">👎</button></span></div>
+            </div>
+            <div class="u-msg">ok. buy 0.05 btc at market</div>
+            <div class="ticket">
+              <div class="t-head2"><span class="tt">Order prepared</span><span class="side">BUY · MKT</span></div>
+              <div class="t-body2">
+                <div class="trow"><span class="lab">Instrument</span><b>BTC / USDT</b></div>
+                <div class="trow"><span class="lab">Size</span><b>0.05000 BTC</b></div>
+                <div class="trow"><span class="lab">Est. price</span><b>61,240.00</b></div>
+                <div class="trow"><span class="lab">Est. cost incl. fees</span><b>3,068.30 USDT</b></div>
+              </div>
+              <button class="cta">Review &amp; confirm in KoinBX →</button>
+              <div class="foot">Hippo prepared this order. KoinBX will ask you to confirm before anything executes.</div>
+            </div>
+            <div class="u-msg">actually should i just buy more? is this the dip?</div>
+            <div class="decline">
+              <div class="dc-head"><span class="dc-badge">◇ NO ADVICE — BY DESIGN</span></div>
+              <div class="dc-body">
+                <p>I can't tell you whether to buy — not because I'm hedging, but because an assistant that gives trading calls isn't on your side. What I can do is show you the picture:</p>
+                <div class="pivot">What's true about BTC right now</div>
+                <div class="fact-list">
+                  <div class="fact"><span class="fi">▾</span><div>Down <b>4.2%</b> in 12h on the US inflation surprise — a macro move, not a BTC-specific one.</div></div>
+                  <div class="fact"><span class="fi">◎</span><div>Funding is <b>−0.008%</b> — shorts now pay longs; positioning has flipped cautious.</div></div>
+                  <div class="fact"><span class="fi">≋</span><div><b>$310M</b> in longs liquidated in an hour — forced selling, most of which has now cleared.</div></div>
+                </div>
+                <div class="dc-chips"><div class="q-chip">How do dips usually resolve?</div><div class="q-chip">What would change this picture?</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="sugg-strip">
+            <div class="q-chip">What's driving SOL volume?</div>
+            <div class="q-chip">My positions &amp; P&amp;L</div>
+            <div class="q-chip">ETH funding rate</div>
+            <div class="q-chip">Explain liquidations</div>
+          </div>
+          <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+        </aside>
+        <div class="scrim" id="scrim"></div>
+      </div>
+      <!-- minimized floating button -->
+      <div class="hippo-tab"><button id="btnTab"><span class="mark">H</span>Ask Hippo<span class="evt">· BTC −4.2%</span></button></div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ MOBILE ============ -->
+<section class="stage" id="s-mob">
+  <div class="sec-head"><span class="sec-no">CHAPTER 02</span><h2>The mobile app</h2><p>The same SDK inside the partner's mobile trading screen: a floating pill at rest, a sheet over the chart when open, full-screen for deep research. Three postures, one surface.</p></div>
+  <div class="try"><h6>TRY THIS</h6><ol>
+    <li>Tap the <b>Ask Hippo</b> pill — same welcome and consent flow, staged over the whole phone.</li>
+    <li>The sheet opens <b>over</b> the chart, not instead of it. Tap the <b>grab bar</b> or <b>⤢</b> for full screen.</li>
+    <li>Everything from the web panel works here: chips stream answers, order pills expand, <b>⚙</b> holds settings.</li>
+    <li><b>—</b> drops Hippo back to the pill; it pulses when the market moves.</li>
+  </ol></div>
+  <div class="m-wrap">
+    <div class="phone" id="mphone">
+      <div class="m-top">
+        <div class="m-pair">BTC/USDT<small>61,240.00 · −4.2%</small></div>
+        <div class="m-icons">⭐ ⋯</div>
+      </div>
+      <div class="m-chart"><svg id="mcandles" preserveAspectRatio="none"></svg></div>
+      <div class="m-tf"><span>15m</span><span class="on">1H</span><span>4H</span><span>1D</span><span style="margin-left:auto">Depth</span></div>
+      <div class="m-book" id="mbook"></div>
+      <div class="m-tabs"><span>Markets</span><span class="on">Trade</span><span>Assets</span><span>Account</span></div>
+
+      <button class="h-pill" id="pill"><span class="mark">H</span>Ask Hippo<span class="evt">· BTC −4.2%</span></button>
+      <div class="m-scrim" id="mscrim"></div>
+
+      <div class="h-sheet" id="sheet" aria-label="Ask Hippo sheet">
+        <div class="grab" id="grab" title="Expand"></div>
+        <div class="hp-head">
+          <span class="mark">H</span>
+          <div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div>
+          <div class="hp-ctl">
+            <button class="gear" title="Settings" aria-label="Settings">⚙</button>
+            <button id="mBtnMax" title="Full screen" aria-label="Full screen">⤢</button>
+            <button id="mBtnMin" title="Minimize" aria-label="Minimize">—</button>
+          </div>
+        </div>
+        <div class="orders-strip">
+          <div class="strip-label"><span>OPEN ORDERS <span class="cnt">· 2</span></span><span>POSITIONS · 3</span></div>
+          <div class="pill-row">
+            <div class="o-pill buy" data-oc="btc"><span class="sd"></span>BUY 0.05 BTC · MKT <span class="st">FILLING 40%</span></div>
+            <div class="o-pill sell" data-oc="sol"><span class="sd"></span>SELL 12 SOL @ 168.00 <span class="st">OPEN</span></div>
+            <div class="o-pill buy" data-oc="ada"><span class="sd"></span>BUY 2,500 ADA @ 0.5210 <span class="st">OPEN</span></div>
+            <div class="o-pill new" data-oc="new">+ New order</div>
+          </div>
+          <div class="o-expand"><div class="o-expand-inner"></div></div>
+        </div>
+        <div class="hp-scroll">
+          <div class="u-msg">why is btc down today?</div>
+          <div class="bubble">
+            <div class="eyebrow"><span>MARKET BRIEF</span><span class="live">● LIVE 14:32</span></div>
+            <h3>BTC is down 4.2% over 12 hours</h3>
+            <p>US inflation came in hotter than expected at 18:00 IST, pushing rate-cut expectations later into the year. Risk assets sold off broadly — BTC led the move down.</p>
+            <div class="kv">
+              <div><span class="k">LAST</span><span class="v">61,240</span></div>
+              <div><span class="k">12H</span><span class="v neg">−4.2%</span></div>
+              <div><span class="k">FUNDING</span><span class="v neg">−0.008%</span></div>
+            </div>
+            <div class="src-row"><span class="src">PRICE FEED</span><span class="src">FUNDING</span><span class="src">NEWS ×2</span></div>
+            <div class="live-bar"><span class="asof">AS OF 14:32:05 IST</span><button class="lb-btn rfr">↻ REFRESH</button><button class="lb-btn shr">↗ SHARE</button><span class="fb"><button class="fb-btn up" aria-label="Helpful">👍</button><button class="fb-btn dn" aria-label="Not helpful">👎</button></span></div>
+          </div>
+          <div class="u-msg">ok. buy 0.05 btc at market</div>
+          <div class="ticket">
+            <div class="t-head2"><span class="tt">Order prepared</span><span class="side">BUY · MKT</span></div>
+            <div class="t-body2">
+              <div class="trow"><span class="lab">Instrument</span><b>BTC / USDT</b></div>
+              <div class="trow"><span class="lab">Size</span><b>0.05000 BTC</b></div>
+              <div class="trow"><span class="lab">Est. price</span><b>61,240.00</b></div>
+              <div class="trow"><span class="lab">Est. cost incl. fees</span><b>3,068.30 USDT</b></div>
+            </div>
+            <button class="cta">Review &amp; confirm in KoinBX →</button>
+            <div class="foot">Hippo prepared this order. KoinBX will confirm before anything executes.</div>
+          </div>
+          <div class="u-msg">actually should i just buy more? is this the dip?</div>
+          <div class="decline">
+            <div class="dc-head"><span class="dc-badge">◇ NO ADVICE — BY DESIGN</span></div>
+            <div class="dc-body">
+              <p>I can't tell you whether to buy — an assistant that gives trading calls isn't on your side. Here's the picture instead:</p>
+              <div class="pivot">What's true about BTC right now</div>
+              <div class="fact-list">
+                <div class="fact"><span class="fi">▾</span><div>Down <b>4.2%</b> in 12h on the inflation surprise — macro move, not BTC-specific.</div></div>
+                <div class="fact"><span class="fi">◎</span><div>Funding <b>−0.008%</b> — positioning has flipped cautious.</div></div>
+                <div class="fact"><span class="fi">≋</span><div><b>$310M</b> longs liquidated in an hour — forced selling, mostly cleared.</div></div>
+              </div>
+              <div class="dc-chips"><div class="q-chip">How do dips usually resolve?</div><div class="q-chip">What would change this?</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="sugg-strip">
+          <div class="q-chip">What's driving SOL volume?</div>
+          <div class="q-chip">My positions &amp; P&amp;L</div>
+          <div class="q-chip">ETH funding rate</div>
+          <div class="q-chip">Explain liquidations</div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="note">
+    <h4>Why these states matter</h4>
+    <p>The panel never takes the trader hostage: minimized, Hippo is one quiet amber tab and the partner's terminal is untouched — the co-brand promise made literal. The sheet opens over the chart, not instead of it; full-screen is opt-in for deep research. Same SDK, three postures.</p>
+  </div>
+</section>
+
+<!-- ============ ORDER LIFECYCLE ============ -->
+<section class="stage" id="s-life">
+  <div class="sec-head"><span class="sec-no">CHAPTER 03</span><h2>The order lifecycle</h2><p>The Approach A seam, card by card: Hippo prepares, KoinBX confirms, and the thread always tells the truth about where the order stands. These are specification cards — each states the rule it enforces.</p></div>
+  <div class="egrid">
+
+    <div class="ecard">
+      <h5>1 · Awaiting confirm</h5>
+      <p class="rule"><b>Rule:</b> the moment the trader taps through to KoinBX, the ticket shows a live waiting state — the thread never goes silent while money is in motion.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="hp-scroll">
+          <div class="u-msg">buy 0.05 btc at market</div>
+          <div class="ticket">
+            <div class="t-head2"><span class="tt">Order prepared</span><span class="side">BUY · MKT</span></div>
+            <div class="t-body2">
+              <div class="trow"><span class="lab">Instrument</span><b>BTC / USDT</b></div>
+              <div class="trow"><span class="lab">Size</span><b>0.05000 BTC</b></div>
+              <div class="trow"><span class="lab">Est. cost incl. fees</span><b>3,068.30 USDT</b></div>
+            </div>
+            <div class="await"><span class="pulse"></span>WAITING FOR YOUR CONFIRM ON KOINBX<button class="cxl-link">CANCEL</button></div>
+          </div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>2 · Confirmed &amp; filled</h5>
+      <p class="rule"><b>Rule:</b> the receipt states what actually executed — filled price, real fees — not what was estimated. Estimates end at the confirm; receipts are facts.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="hp-scroll">
+          <div class="ticket ok">
+            <div class="t-head2"><span class="tt">Order filled ✓</span><span class="side">BUY · FILLED</span></div>
+            <div class="t-body2">
+              <div class="trow"><span class="lab">Filled</span><b>0.05000 BTC</b></div>
+              <div class="trow"><span class="lab">Avg. fill price</span><b>61,247.20</b></div>
+              <div class="trow"><span class="lab">Fees paid</span><b>4.59 USDT</b></div>
+              <div class="trow"><span class="lab">Total cost</span><b>3,066.95 USDT</b></div>
+            </div>
+            <button class="olink">View in KoinBX orders →</button>
+            <div class="oid">KOINBX ORDER #KX-88213 · 14:36:12 IST</div>
+          </div>
+          <div class="bubble"><p>Done — 0.05 BTC filled at an average of 61,247.20. You now hold 0.31 BTC. Want the updated position card?</p></div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>3 · Partially filled</h5>
+      <p class="rule"><b>Rule:</b> partial fills are shown as live progress, not a mystery. The card updates in place until the order fills, is cancelled, or expires.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="hp-scroll">
+          <div class="ticket part">
+            <div class="t-head2"><span class="tt">Order filling</span><span class="side">SELL · LIMIT</span></div>
+            <div class="t-body2">
+              <div class="trow"><span class="lab">Instrument</span><b>SOL / USDT</b></div>
+              <div class="trow"><span class="lab">Limit price</span><b>168.00</b></div>
+            </div>
+            <div class="fillwrap">
+              <div class="fillmeta"><span>FILLED <b>4.8 / 12 SOL</b></span><span>40%</span></div>
+              <div class="fillbar"><span></span></div>
+            </div>
+            <button class="olink">Amend or cancel on KoinBX →</button>
+            <div class="oid">LIVE · UPDATES AUTOMATICALLY</div>
+          </div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>4 · Cancelled on KoinBX</h5>
+      <p class="rule"><b>Rule:</b> if the trader backs out on the venue's confirm screen, the thread acknowledges it without judgment and keeps the ticket reusable. Changing your mind is a feature.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="hp-scroll">
+          <div class="ticket cxl">
+            <div class="t-head2"><span class="tt">Not placed</span><span class="side">CANCELLED</span></div>
+            <div class="t-body2">
+              <div class="trow"><span class="lab">Instrument</span><b>BTC / USDT</b></div>
+              <div class="trow"><span class="lab">Size</span><b>0.05000 BTC</b></div>
+            </div>
+            <button class="olink">Re-open this ticket</button>
+          </div>
+          <div class="bubble"><p>No problem — you cancelled on KoinBX, so nothing was placed and nothing was charged. The ticket's saved above if you want it back.</p></div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>5 · Expired / cancelled later</h5>
+      <p class="rule"><b>Rule:</b> status changes that happen away from the conversation still arrive in it. The thread is the trader's timeline of truth, even for actions taken elsewhere.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="hp-scroll">
+          <div class="ticket cxl">
+            <div class="t-head2"><span class="tt">Order update</span><span class="side">EXPIRED</span></div>
+            <div class="t-body2">
+              <div class="trow"><span class="lab">SELL 12 SOL @ 168.00</span><b>7.2 SOL UNFILLED</b></div>
+            </div>
+            <div class="why-row" style="background:rgba(255,255,255,.04);border-color:var(--hairline);color:#B8BDC9"><span class="bi" style="color:var(--dim)">◷</span>Your limit order expired on KoinBX with 4.8 of 12 SOL filled. The unfilled 7.2 SOL stays in your balance.</div>
+            <button class="olink">Prepare a fresh ticket at market?</button>
+          </div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+  </div>
+  <div class="note">
+    <h4>Why this seam is the product</h4>
+    <p>Approach A means the confirm happens on KoinBX's screen, outside our surface — so the thread must stitch the journey back together: waiting, filled, partial, cancelled, expired. Every state is a server-driven card; the SDK only draws. If a trader ever has to leave the conversation to find out what happened to their order, this seam has failed.</p>
+  </div>
+</section>
+
+<!-- ============ EDGE STATES ============ -->
+<section class="stage" id="s-edge">
+  <div class="sec-head"><span class="sec-no">CHAPTER 04</span><h2>Edge states</h2><p>Six states the SDK must ship with — empty, degraded, rejected, stale, offline. Every state answers three questions without being asked: what happened, what still works, what do I do next.</p></div>
+  <div class="egrid">
+
+    <div class="ecard">
+      <h5>1 · Empty thread</h5>
+      <p class="rule"><b>Rule:</b> never show a blank chat. First open teaches by suggestion — three real queries, one tap from value.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="empty-hero">
+          <div class="ob-mark">H</div>
+          <h3>Ask me about any market</h3>
+          <p>Facts, not tips — grounded in live prices, news and on-chain data.</p>
+          <div class="q-chip">Why is BTC moving today?</div>
+          <div class="q-chip">What does funding rate mean?</div>
+          <div class="q-chip">Show my positions &amp; P&amp;L</div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>2 · No open orders</h5>
+      <p class="rule"><b>Rule:</b> an empty strip is an invitation, not a void — the placement path stays one tap away.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="orders-strip">
+          <div class="strip-label"><span>OPEN ORDERS <span class="cnt">· 0</span></span><span>POSITIONS · 3</span></div>
+          <div class="pill-row">
+            <div class="o-pill" style="color:var(--faint);cursor:default">Nothing open right now</div>
+            <div class="o-pill new">+ New order</div>
+          </div>
+        </div>
+        <div class="hp-scroll">
+          <div class="u-msg">any open orders?</div>
+          <div class="bubble"><p>No open orders at the moment. You hold 3 positions — want a P&amp;L summary, or shall I prepare a new order?</p></div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>3 · Degraded mode</h5>
+      <p class="rule"><b>Rule:</b> the SLA state, designed — declared honestly in a banner. Orders and cached briefs never degrade; cached answers are labeled, not disguised.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="banner warn"><span class="bi">◍</span><div><b>HIGH MARKET LOAD</b>Fresh research may take longer than usual. Orders, prices and saved briefs are unaffected.</div></div>
+        <div class="hp-scroll">
+          <div class="u-msg">why is everything crashing??</div>
+          <div class="bubble">
+            <span class="cache-badge">◈ MARKET BRIEF · UPDATED 2 MIN AGO</span>
+            <p>Broad risk-off move after the US inflation surprise — BTC −4.2%, ETH −5.1%. ~$310M in longs liquidated in the last hour. A fully fresh deep-dive is queued and will follow here.</p>
+          </div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>4 · Order rejected</h5>
+      <p class="rule"><b>Rule:</b> a failure names its reason in plain words and offers a fix — never a bare error code. The venue's rejection, translated.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="hp-scroll">
+          <div class="u-msg">buy 0.05 btc at market</div>
+          <div class="ticket err">
+            <div class="t-head2"><span class="tt">Order not placed</span><span class="side">REJECTED</span></div>
+            <div class="t-body2">
+              <div class="trow"><span class="lab">Instrument</span><b>BTC / USDT</b></div>
+              <div class="trow"><span class="lab">Size</span><b>0.05000 BTC</b></div>
+              <div class="trow"><span class="lab">Required</span><b>3,068.30 USDT</b></div>
+            </div>
+            <div class="why-row"><span class="bi">⚠</span>KoinBX rejected this order: your available USDT balance is 1,204.11 — about 1,864 short.</div>
+            <div class="err-actions"><button class="fix">Resize to max (0.0196 BTC)</button><button class="dis">Dismiss</button></div>
+          </div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>5 · Stale data</h5>
+      <p class="rule"><b>Rule:</b> staleness is declared, never silent. Past a freshness threshold the as-of line turns amber and refresh becomes the loudest element on the card.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="hp-scroll">
+          <div class="bubble">
+            <div class="eyebrow"><span>MARKET BRIEF</span></div>
+            <h3>BTC is down 4.2% over 12 hours</h3>
+            <p>US inflation came in hotter than expected, pushing rate-cut expectations later into the year.</p>
+            <div class="live-bar stale"><span class="asof">⚠ 14 MIN OLD · AS OF 14:18 IST</span><button class="lb-btn rfr">↻ REFRESH NOW</button></div>
+          </div>
+        </div>
+        <div class="hp-composer"><div class="field">Ask about any market…</div><div class="send">↑</div></div>
+      </div>
+    </div>
+
+    <div class="ecard">
+      <h5>6 · Offline / answer failed</h5>
+      <p class="rule"><b>Rule:</b> the thread stays readable, the composer locks with a reason, and a failed answer offers retry in place — nothing the trader wrote is ever lost.</p>
+      <div class="mini">
+        <div class="hp-head"><span class="mark">H</span><div class="name">Ask Hippo<small>MARKET INTELLIGENCE</small></div></div>
+        <div class="banner off"><span class="bi">○</span><div><b>CONNECTION LOST</b>Reconnecting… your conversation is safe.</div></div>
+        <div class="hp-scroll">
+          <div class="u-msg">what's driving sol volume?</div>
+          <div class="retry-bubble">
+            <p>Couldn't fetch that answer — the connection dropped mid-request. Your question is saved.</p>
+            <button>↻ Retry when connected</button>
+          </div>
+        </div>
+        <div class="composer-off"><div class="field">Reconnecting…</div><div class="send" style="opacity:.4">↑</div></div>
+      </div>
+    </div>
+
+  </div>
+  <div class="note">
+    <h4>The shared principle</h4>
+    <p>Every state answers three questions without the trader asking: what happened, what still works, and what do I do next. Degraded mode is the one with contract language behind it — the banner copy above is effectively the UI of the 99.5% SLA's graceful-degradation clause, so partners should see this screen during procurement, not discover it during an outage.</p>
+  </div>
+</section>
+
+<script>
+  // ===== access gate =====
+  // To change the password: run in any browser console →
+  //   crypto.subtle.digest('SHA-256',new TextEncoder().encode('YOUR-NEW-PASSWORD')).then(b=>console.log([...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')))
+  // then paste the printed hash into GATE_HASH below. Current phrase: hippo2026
+  (function(){
+    const GATE_HASH='f7811a6b2e5b0068604f7cae55e7a8b5acd9eb11928d215adf178800f0612110';
+    const gate=document.getElementById('gate'),pw=document.getElementById('gatePw'),
+          go=document.getElementById('gateGo'),err=document.getElementById('gateErr'),
+          card=document.getElementById('gateCard');
+    function unlock(){gate.classList.add('open');document.body.classList.remove('locked');}
+    try{if(sessionStorage.getItem('hippoGate')==='1'){unlock();}}catch(e){}
+    async function check(){
+      const v=pw.value;
+      let hex='';
+      try{
+        const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
+        hex=[...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');
+      }catch(e){ if(v==='hippo2026')hex=GATE_HASH; }
+      if(hex===GATE_HASH){
+        try{sessionStorage.setItem('hippoGate','1');}catch(e){}
+        unlock();
+      }else{
+        err.textContent='WRONG PHRASE — TRY AGAIN';pw.value='';
+        card.classList.remove('shake');void card.offsetWidth;card.classList.add('shake');
+      }
+    }
+    go.onclick=check;
+    pw.onkeydown=e=>{if(e.key==='Enter')check();};
+    setTimeout(()=>pw.focus(),200);
+  })();
+
+  // anchor nav scrollspy
+  const links=document.querySelectorAll('nav.anchors a');
+  if('IntersectionObserver' in window){
+    const spy=new IntersectionObserver(es=>{es.forEach(en=>{
+      if(en.isIntersecting)links.forEach(l=>l.classList.toggle('on',l.getAttribute('href')==='#'+en.target.id));
+    });},{rootMargin:'-25% 0px -65% 0px'});
+    document.querySelectorAll('section.stage').forEach(x=>spy.observe(x));
+  }
+
+  // chat always opens at the newest message (the ticket)
+  function scrollBottoms(){document.querySelectorAll('.hp-scroll').forEach(el=>{el.scrollTop=el.scrollHeight;});}
+  window.addEventListener('load',()=>setTimeout(scrollBottoms,60));
+
+  // staged thread reveal: CSS-driven, degrades to fully visible if anything fails
+  const played=new Set();
+  function playThread(scroll){
+    if(!scroll)return;
+    const end=()=>{try{scroll.scrollTop=scroll.scrollHeight;}catch(e){}};
+    if(played.has(scroll)){end();return;}
+    played.add(scroll);
+    scroll.classList.add('play');
+    let n=0;const iv=setInterval(()=>{end();if(++n>10)clearInterval(iv);},400);
+  }
+
+  // ===== consent onboarding (first run) =====
+  const obHTML=`
+    <div class="ob-dots"><span class="on"></span><span></span><span></span><span></span></div>
+    <div class="ob-step on center">
+      <div class="wc">
+        <div class="ob-mark hero" style="margin:0 auto 14px">H</div>
+        <div class="wc-eyebrow">WELCOME TO</div>
+        <h4>The Future of Trading</h4>
+        <p>Hippo — your conversational trading agent, built for KoinBX.</p>
+        <button class="ob-cta" data-next>Show me more</button>
+      </div>
+      <button class="ob-skip" data-skip>Not now</button>
+    </div>
+    <div class="ob-step center">
+      <div class="ob-mark hero">H</div>
+      <h3 class="big">Ask your market anything.</h3>
+      <p>Live, factual answers. Real orders — prepared in chat, confirmed by you, executed on KoinBX. Never a tip.</p>
+      <div class="ob-bar"><span class="t obtype"></span><span class="send">↑</span></div>
+      <div class="ob-caption">RESEARCH · ACT · REMEMBER</div>
+      <button class="ob-cta" data-next>Continue</button>
+      <button class="ob-skip" data-skip>Not now</button>
+    </div>
+    <div class="ob-step">
+      <h3>Your data, plainly</h3>
+      <p>Three things, no fine-print surprises:</p>
+      <div class="ob-row"><div class="ic">🔒</div><div class="tx"><b>Your account stays with KoinBX</b><span>Your identity, balances and orders never leave KoinBX's systems in your region. Hippo can't see who you are.</span></div></div>
+      <div class="ob-row"><div class="ic">✳</div><div class="tx"><b>Personal memory</b><span>Hippo remembers your context across sessions. Optional — turn it off anytime in settings.</span></div><div class="tog" role="switch" aria-checked="true" tabindex="0"></div></div>
+      <div class="ob-row"><div class="ic">∿</div><div class="tx"><b>Anonymous conversations improve Hippo</b><span>Conversation text, stripped of anything that identifies you, helps make answers better for everyone. It can't be linked back to you.</span></div></div>
+      <div class="ob-fine">Memory is your choice. Anonymized conversation data is part of the <a href="#">terms of use</a> — read how anonymization works.</div>
+      <button class="ob-cta" data-next>Continue</button>
+    </div>
+    <div class="ob-step">
+      <h3>Ground rules</h3>
+      <p>Two promises Hippo never breaks:</p>
+      <div class="ob-row"><div class="ic">◇</div><div class="tx"><b>Explains, never advises</b><span>Hippo tells you what's happening and why. It will never tell you to buy or sell — anyone who does that inside a chat isn't on your side.</span></div></div>
+      <div class="ob-row"><div class="ic">✓</div><div class="tx"><b>Nothing executes without you</b><span>Every order shows a full ticket — size, price, fees — and only executes after you explicitly confirm on KoinBX.</span></div></div>
+      <div class="ob-fine">By continuing you agree to the terms above and KoinBX's terms of service.</div>
+      <button class="ob-cta" data-agree>Agree &amp; start</button>
+      <button class="ob-skip" data-skip>Not now</button>
+    </div>`;
+  const obMap={};
+  let mobOnboarded=false,webOnboarded=false;
+  function confettiBurst(d){
+    d.querySelectorAll('.confetti').forEach(c=>c.remove());
+    const cv=document.createElement('canvas');cv.className='confetti';d.appendChild(cv);
+    const r=d.getBoundingClientRect();cv.width=r.width||600;cv.height=r.height||600;
+    const ctx=cv.getContext('2d');
+    if(!ctx){cv.remove();return;}
+    const cols=['#F0B94A','#FFD98A','#2EC48D','#E9EBF0','#8AA2FF'];
+    const ps=[];for(let i=0;i<150;i++){ps.push({x:cv.width/2+(Math.random()-0.5)*90,y:cv.height*0.42,vx:(Math.random()-0.5)*10,vy:-Math.random()*10-3,g:.26+Math.random()*.1,sz:4+Math.random()*5,c:cols[i%cols.length],rot:Math.random()*6.3,vr:(Math.random()-0.5)*.3});}
+    let t0=null;
+    function tick(ts){
+      if(t0===null)t0=ts;const el=ts-t0;
+      ctx.clearRect(0,0,cv.width,cv.height);
+      const a=Math.max(0,1-el/2400);
+      ps.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=p.g;p.rot+=p.vr;
+        ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.globalAlpha=a;ctx.fillStyle=p.c;ctx.fillRect(-p.sz/2,-p.sz/2,p.sz,p.sz*.62);ctx.restore();});
+      if(el<2600)requestAnimationFrame(tick);else cv.remove();
+    }
+    requestAnimationFrame(tick);
+  }
+  function mountOnboard(overlayHost,key,chatScroll,onAgree){
+    const d=document.createElement('div');d.className='onboard hidden';
+    d.innerHTML='<div class="ob-inner">'+obHTML+'</div>';overlayHost.appendChild(d);
+    const steps=d.querySelectorAll('.ob-step'),dots=d.querySelectorAll('.ob-dots span');let i=0;
+    const show=n=>{i=n;steps.forEach((x,k)=>x.classList.toggle('on',k===n));dots.forEach((x,k)=>x.classList.toggle('on',k===n));};
+    d.querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>show(i+1));
+    d.querySelector('[data-agree]').onclick=()=>{d.classList.add('hidden');onAgree&&onAgree();setTimeout(()=>playThread(chatScroll()),250);};
+    d.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>d.classList.add('hidden'));
+    d.querySelectorAll('.tog').forEach(t=>{const fl=()=>{t.classList.toggle('off');t.setAttribute('aria-checked',!t.classList.contains('off'));};t.onclick=fl;t.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fl();}};});
+    obMap[key]={el:d,reset:()=>{d.classList.remove('hidden');show(0);confettiBurst(d);}};
+  }
+  mountOnboard(document.getElementById('term'),'hpanel',()=>document.querySelector('#hpanel .hp-scroll'),()=>{webOnboarded=true;document.getElementById('term').classList.remove('h-min');});
+  mountOnboard(document.getElementById('mphone'),'sheet',()=>document.querySelector('#sheet .hp-scroll'),()=>{mobOnboarded=true;document.getElementById('mphone').classList.add('sheet');});
+  // hero chat bar typewriter
+  const OBTYPES=['why is BTC down today?','buy 0.05 BTC at market','what does funding rate mean?'];
+  document.querySelectorAll('.obtype').forEach(el=>{
+    let ti=0,ci=0,del=false;
+    setInterval(()=>{
+      const q=OBTYPES[ti];
+      if(!del){ci++;if(ci>=q.length+10)del=true;}
+      else{ci--;if(ci<=0){del=false;ti=(ti+1)%OBTYPES.length;}}
+      el.textContent=q.slice(0,Math.min(ci,q.length));
+    },75);
+  });
+  document.querySelectorAll('[data-replay]').forEach(a=>a.onclick=e=>{e.preventDefault();Object.values(obMap).forEach(o=>o.reset());});
+
+  // ===== order strip: pill click expands the order card in place =====
+  const orderCards={
+    btc:`<div class="ticket part">
+      <div class="t-head2"><span class="tt">Order filling</span><span class="side">BUY · MKT</span></div>
+      <div class="t-body2">
+        <div class="trow"><span class="lab">Instrument</span><b>BTC / USDT</b></div>
+        <div class="trow"><span class="lab">Est. cost incl. fees</span><b>3,068.30 USDT</b></div>
+      </div>
+      <div class="fillwrap"><div class="fillmeta"><span>FILLED <b>0.02 / 0.05 BTC</b></span><span>40%</span></div><div class="fillbar"><span></span></div></div>
+      <button class="olink">Amend or cancel on KoinBX →</button>
+      <div class="oid">LIVE · UPDATES AUTOMATICALLY</div>
+    </div>`,
+    sol:`<div class="ticket">
+      <div class="t-head2"><span class="tt">Open order</span><span class="side" style="background:rgba(255,133,133,.12);color:var(--down)">SELL · LIMIT</span></div>
+      <div class="t-body2">
+        <div class="trow"><span class="lab">Instrument</span><b>SOL / USDT</b></div>
+        <div class="trow"><span class="lab">Limit price</span><b>168.00</b></div>
+        <div class="trow"><span class="lab">Filled</span><b>0 / 12 SOL</b></div>
+      </div>
+      <button class="olink">Amend or cancel on KoinBX →</button>
+      <div class="oid">KOINBX ORDER #KX-88160 · PLACED 13:58 IST</div>
+    </div>`,
+    ada:`<div class="ticket">
+      <div class="t-head2"><span class="tt">Open order</span><span class="side">BUY · LIMIT</span></div>
+      <div class="t-body2">
+        <div class="trow"><span class="lab">Instrument</span><b>ADA / USDT</b></div>
+        <div class="trow"><span class="lab">Limit price</span><b>0.5210</b></div>
+        <div class="trow"><span class="lab">Filled</span><b>0 / 2,500 ADA</b></div>
+      </div>
+      <button class="olink">Amend or cancel on KoinBX →</button>
+      <div class="oid">KOINBX ORDER #KX-88171 · PLACED 14:04 IST</div>
+    </div>`,
+    new:`<div class="hintcard">
+      <p>Tell me what to place and I'll prepare the ticket — you confirm on KoinBX.</p>
+      <div class="dc-chips"><div class="q-chip">buy 0.05 BTC at market</div><div class="q-chip">sell half my SOL</div><div class="q-chip">limit buy ETH at 3,200</div></div>
+    </div>`
+  };
+  document.querySelectorAll('#hpanel .orders-strip, #sheet .orders-strip').forEach(strip=>{
+    const ex=strip.querySelector('.o-expand'),inner=strip.querySelector('.o-expand-inner');
+    const pills=[...strip.querySelectorAll('.o-pill')];
+    pills.forEach(p=>p.onclick=()=>{
+      if(p.classList.contains('active')){p.classList.remove('active');ex.classList.remove('open');return;}
+      pills.forEach(x=>x.classList.remove('active'));p.classList.add('active');
+      inner.innerHTML=orderCards[p.dataset.oc]||'';
+      ex.classList.add('open');
+    });
+  });
+
+  // ===== live send flow: chips trigger thinking → skeleton → streamed answer =====
+  const ANSWERS=[
+    {m:/sol/i,tag:'MARKET BRIEF',title:'SOL volume is up 38% in 24 hours',
+     text:'Most of the jump is concentrated in perps after the inflation print — spot share is roughly flat. Two catalysts stand out: tonight\'s fee-burn proposal vote, and a large market-maker visibly rotating inventory.',
+     hn:{title:'SOL ka volume 24 ghante mein 38% upar',text:'Zyada tar uchhaal perps mein hai — inflation print ke baad. Spot share lagbhag flat hai. Do wajahen: aaj raat ka fee-burn proposal vote, aur ek bada market-maker apni inventory rotate kar raha hai.'},
+     hi:{title:'SOL वॉल्यूम 24 घंटे में 38% ऊपर',text:'बढ़त का बड़ा हिस्सा perps में है — inflation आँकड़ों के बाद। Spot हिस्सा लगभग स्थिर है। दो कारण: आज रात का fee-burn proposal vote, और एक बड़ा market-maker अपनी inventory घुमा रहा है।'},
+     kv:'<div class="kv"><div><span class="k">VOL 24H</span><span class="v">$4.2B</span></div><div><span class="k">PERPS SHARE</span><span class="v">71%</span></div><div><span class="k">OI</span><span class="v">+12%</span></div></div>'},
+    {m:/funding|फंडिंग|تمويل/i,tag:'MARKET BRIEF',title:'ETH funding is mildly negative',
+     text:'Perp funding on ETH sits at −0.005% — shorts are paying longs after today\'s washout. Basis has compressed but remains positive on the quarterlies, so the term structure hasn\'t flipped.',
+     hn:{title:'ETH funding halki negative hai',text:'ETH perp funding −0.005% par hai — matlab shorts, longs ko pay kar rahe hain aaj ke washout ke baad. Basis compress hua hai par quarterlies par positive bana hua hai.'},
+     hi:{title:'ETH फंडिंग हल्की नेगेटिव है',text:'ETH perp फंडिंग −0.005% पर है — यानी shorts, longs को pay कर रहे हैं। Basis कम हुआ है पर quarterlies पर positive बना हुआ है।'},
+     kv:'<div class="kv"><div><span class="k">FUNDING</span><span class="v neg">−0.005%</span></div><div><span class="k">OI</span><span class="v">$11.8B</span></div><div><span class="k">BASIS</span><span class="v">+4.1%</span></div></div>'},
+    {m:/liquidat|लिक्विडेशन|تصف/i,tag:'CONCEPT',title:'Liquidations, in one minute',
+     text:'A liquidation is a forced close of a leveraged position when its margin runs out. Cascades happen when that forced selling pushes price into the next band of stops — which is exactly what amplified today\'s move.',
+     hn:{title:'Liquidation, ek minute mein',text:'Liquidation matlab leveraged position ka forced close jab margin khatam ho jaata hai. Cascade tab banta hai jab yeh forced selling price ko agle stops tak dhakel deti hai — aaj ki move isi se badi hui.'},
+     hi:{title:'लिक्विडेशन, एक मिनट में',text:'जब margin खत्म हो जाता है तो leveraged position जबरन बंद होती है — यही liquidation है। जब यह बिकवाली price को अगले stops तक धकेलती है तो cascade बनता है — आज की चाल इसी से बड़ी हुई।'},
+     kv:''},
+    {m:/dip|resolve|change this/i,tag:'MARKET CONTEXT',title:'What history says about days like this',
+     text:'Macro-driven selloffs tend to resolve on the next data point, not on crypto-native news — the key variables to watch are funding normalising and liquidation volume drying up. Both are already trending that way; neither guarantees direction.',kv:''}
+  ];
+  const POSITIONS_CARD=`<div class="ticket ok">
+    <div class="t-head2"><span class="tt">Your positions</span><span class="side">3 OPEN</span></div>
+    <div class="t-body2">
+      <div class="trow"><span class="lab">BTC · 0.31</span><b style="color:var(--up)">+2.4% · +₹18,420</b></div>
+      <div class="trow"><span class="lab">SOL · 46</span><b style="color:var(--down)">−1.8% · −₹5,110</b></div>
+      <div class="trow"><span class="lab">ADA · 2,500</span><b style="color:var(--up)">+0.6% · +₹780</b></div>
+    </div>
+    <div class="oid">UNREALISED P&L · +₹14,090 · LIVE</div>
+  </div>`;
+  const ORDER_TMPLS={
+    sol:`<div class="ticket"><div class="t-head2"><span class="tt">Order prepared</span><span class="side" style="background:rgba(255,133,133,.12);color:var(--down)">SELL · MKT</span></div><div class="t-body2"><div class="trow"><span class="lab">Instrument</span><b>SOL / USDT</b></div><div class="trow"><span class="lab">Size (half of 46)</span><b>23.000 SOL</b></div><div class="trow"><span class="lab">Est. proceeds incl. fees</span><b>3,838.10 USDT</b></div></div><button class="cta">Review &amp; confirm in KoinBX →</button><div class="foot">Hippo prepared this order. KoinBX will ask you to confirm before anything executes.</div></div>`,
+    eth:`<div class="ticket"><div class="t-head2"><span class="tt">Order prepared</span><span class="side">BUY · LIMIT</span></div><div class="t-body2"><div class="trow"><span class="lab">Instrument</span><b>ETH / USDT</b></div><div class="trow"><span class="lab">Limit price</span><b>3,200.00</b></div><div class="trow"><span class="lab">Size</span><b>0.50000 ETH</b></div></div><button class="cta">Review &amp; confirm in KoinBX →</button><div class="foot">Hippo prepared this order. KoinBX will ask you to confirm before anything executes.</div></div>`,
+    btc:`<div class="ticket"><div class="t-head2"><span class="tt">Order prepared</span><span class="side">BUY · MKT</span></div><div class="t-body2"><div class="trow"><span class="lab">Instrument</span><b>BTC / USDT</b></div><div class="trow"><span class="lab">Size</span><b>0.05000 BTC</b></div><div class="trow"><span class="lab">Est. cost incl. fees</span><b>3,068.30 USDT</b></div></div><button class="cta">Review &amp; confirm in KoinBX →</button><div class="foot">Hippo prepared this order. KoinBX will ask you to confirm before anything executes.</div></div>`
+  };
+  function sendFlow(root,text){
+    const scroll=root.querySelector('.hp-scroll');if(!scroll)return;
+    scroll.classList.remove('play');
+    const add=h=>{const w=document.createElement('div');w.innerHTML=h;const n=w.firstElementChild;scroll.appendChild(n);scroll.scrollTop=scroll.scrollHeight;return n;};
+    const esc=text.replace(/</g,'&lt;');
+    add(`<div class="u-msg">${esc}</div>`);
+    const isOrder=/^(buy|sell|limit)/i.test(text);
+    const stats=isOrder?['Constructing order…','Checking balance on KoinBX…','Preparing your ticket…']:['Parsing intent…','Fetching live market data…','Reading news sources…'];
+    const think=add(`<div class="bubble"><div class="think-row"><span class="tdot"></span><span class="tstat">${stats[0]}</span></div></div>`);
+    let si=0;const siv=setInterval(()=>{think.querySelector('.tstat').textContent=stats[++si%stats.length];},560);
+    setTimeout(()=>{
+      clearInterval(siv);
+      if(isOrder){
+        think.remove();
+        const k=/sol/i.test(text)?'sol':(/eth/i.test(text)?'eth':'btc');
+        add(ORDER_TMPLS[k]);return;
+      }
+      think.innerHTML='<div class="sk sk-title"></div><div class="sk sk-line"></div><div class="sk sk-line"></div><div class="sk sk-line short"></div><div class="sk-grid"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>';
+      scroll.scrollTop=scroll.scrollHeight;
+      setTimeout(()=>{
+        if(/position|p&l|पोज़िशन|مراكز/i.test(text)){think.remove();add(POSITIONS_CARD);return;}
+        const a=ANSWERS.find(x=>x.m.test(text))||ANSWERS[2];
+        const lang=root.dataset.lang||'en';
+        const v=(lang!=='en'&&a[lang])?a[lang]:a;
+        think.innerHTML=`<div class="eyebrow"><span>${a.tag}</span><span class="live">● LIVE</span></div><h3>${v.title}</h3><p class="stream"></p>${a.kv}`;
+        const p=think.querySelector('.stream'),words=v.text.split(' ');let wi=0;
+        const wiv=setInterval(()=>{
+          p.textContent=words.slice(0,++wi).join(' ');
+          scroll.scrollTop=scroll.scrollHeight;
+          if(wi>=words.length){
+            clearInterval(wiv);
+            const t=new Date(),z=n=>String(n).padStart(2,'0');
+            think.insertAdjacentHTML('beforeend',`<div class="live-bar"><span class="asof">AS OF ${z(t.getHours())}:${z(t.getMinutes())}:${z(t.getSeconds())} IST</span><button class="lb-btn rfr2">↻ REFRESH</button><span class="fb"><button class="fb-btn up" aria-label="Helpful">👍</button><button class="fb-btn dn" aria-label="Not helpful">👎</button></span></div>`);
+            scroll.scrollTop=scroll.scrollHeight;
+          }
+        },42);
+      },1050);
+    },1750);
+  }
+  ['hpanel','sheet'].forEach(id=>{
+    const root=document.getElementById(id);
+    root.addEventListener('click',e=>{
+      const c=e.target.closest('.q-chip');if(!c||c.classList.contains('fbr')||c.classList.contains('lang'))return;
+      const ex=c.closest('.o-expand');
+      if(ex){ex.classList.remove('open');root.querySelectorAll('.o-pill.active').forEach(p=>p.classList.remove('active'));}
+      sendFlow(root,c.textContent.trim());
+    });
+  });
+  // ===== settings sheet =====
+  const setHTML=`
+    <button class="sc-close" aria-label="Close">✕</button>
+    <h3 class="set-title">Settings</h3>
+    <div class="set-scroll">
+      <div class="set-h">MEMORY</div>
+      <div class="ob-row"><div class="ic">✳</div><div class="tx"><b>Personal memory</b><span>Assets you follow, your experience level. Kept for this venue only.</span></div><div class="tog" role="switch" aria-checked="true" tabindex="0"></div></div>
+      <button class="set-act clearmem">Clear everything Hippo remembers</button>
+      <div class="set-h">YOUR DATA</div>
+      <div class="ob-row"><div class="ic">🔒</div><div class="tx"><b>Account &amp; orders</b><span>Stay with KoinBX, in your region. Hippo cannot see your identity.</span></div></div>
+      <div class="ob-row expl-t" role="button" tabindex="0"><div class="ic">∿</div><div class="tx"><b>Anonymized conversations</b><span>Used to improve Hippo for everyone. Tap to see how anonymization works.</span></div></div>
+      <div class="expl hidden"><p>Before any conversation text leaves KoinBX's region, every identifier — names, account references, balances, order IDs, contact details — is stripped and replaced with neutral tokens. What remains carries no key back to you: it cannot be re-linked to your account, by us or by anyone else.</p></div>
+      <div class="set-h">ANSWER LANGUAGE</div>
+      <div class="dc-chips"><div class="q-chip lang sel" data-lang="en">English</div><div class="q-chip lang" data-lang="hi">हिन्दी</div><div class="q-chip lang" data-lang="hn">Hinglish</div><div class="q-chip lang" data-lang="ar">عربي · RTL</div></div>
+      <div class="expl"><p style="color:#9BA1AE">RTL is a structural preview for Gulf venues — layout mirrors, cards and numerals hold their grammar.</p></div>
+      <div class="set-h">ABOUT</div>
+      <button class="set-act replay">Replay the intro</button>
+      <div class="set-foot">HIPPO INSIDE KOINBX · TERMS · PRIVACY · V1.0</div>
+    </div>`;
+  const L10N={
+    en:{ph:'Ask about any market…',chips:["What's driving SOL volume?","My positions & P&L","ETH funding rate","Explain liquidations"]},
+    hi:{ph:'किसी भी मार्केट के बारे में पूछें…',chips:["SOL वॉल्यूम क्यों बढ़ रहा है?","मेरी पोज़िशन और P&L","ETH फंडिंग रेट क्या है?","लिक्विडेशन समझाइए"]},
+    hn:{ph:'Kisi bhi market ke baare mein poochho…',chips:["SOL volume kyun badh raha hai?","Mere positions aur P&L","ETH funding rate kya hai?","Liquidation samjhao"]},
+    ar:{ph:'اسأل عن أي سوق…',chips:["ما الذي يحرك حجم SOL؟","مراكزي والأرباح","معدل تمويل ETH","اشرح التصفيات"]}
+  };
+  function applyLang(host,code){
+    host.dataset.lang=code;
+    const L=L10N[code]||L10N.en;
+    host.querySelectorAll('.hp-composer .field').forEach(fd=>fd.textContent=L.ph);
+    host.querySelectorAll('.sugg-strip .q-chip').forEach((c,i)=>{if(L.chips[i])c.textContent=L.chips[i];});
+    host.setAttribute('dir',code==='ar'?'rtl':'ltr');
+  }
+  function mountSettings(host){
+    const d=document.createElement('div');d.className='set-ov hidden';d.innerHTML=setHTML;host.appendChild(d);
+    host.querySelector('.hp-ctl .gear').onclick=()=>d.classList.remove('hidden');
+    d.querySelector('.sc-close').onclick=()=>d.classList.add('hidden');
+    const t=d.querySelector('.tog');
+    const flip=()=>{t.classList.toggle('off');t.setAttribute('aria-checked',!t.classList.contains('off'));};
+    t.onclick=flip;t.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();flip();}};
+    const cm=d.querySelector('.clearmem');
+    cm.onclick=()=>{cm.textContent='Memory cleared ✓';setTimeout(()=>cm.textContent='Clear everything Hippo remembers',1800);};
+    const et=d.querySelector('.expl-t'),ex=d.querySelector('.expl');
+    et.onclick=()=>ex.classList.toggle('hidden');
+    d.querySelectorAll('.lang').forEach(l=>l.onclick=()=>{d.querySelectorAll('.lang').forEach(x=>x.classList.remove('sel'));l.classList.add('sel');applyLang(host,l.dataset.lang||'en');});
+    d.querySelector('.replay').onclick=()=>{d.classList.add('hidden');const o=obMap[host.id];if(o)o.reset();};
+  }
+  mountSettings(document.getElementById('hpanel'));
+  mountSettings(document.getElementById('sheet'));
+
+  // feedback: thumbs on answers feed the eval harness
+  document.addEventListener('click',e=>{
+    const b=e.target.closest('.fb-btn');
+    if(b){
+      const fb=b.closest('.fb');
+      if(b.classList.contains('up')){fb.innerHTML='<span class="fb-done">✓ THANKS — LOGGED</span>';}
+      else{
+        fb.innerHTML='<span class="fb-done" style="color:var(--dim)">WHAT WAS OFF?</span>';
+        const bar=fb.closest('.live-bar');
+        const r=document.createElement('div');r.className='fb-reasons';
+        r.innerHTML='<div class="q-chip fbr">Inaccurate</div><div class="q-chip fbr">Too shallow</div><div class="q-chip fbr">Outdated</div>';
+        bar.insertAdjacentElement('afterend',r);
+      }
+      return;
+    }
+    const fr=e.target.closest('.fbr');
+    if(fr){fr.parentElement.innerHTML='<span class="fb-done">✓ LOGGED FOR THE EVAL SET</span>';}
+  });
+
+  // refresh for dynamically streamed answers
+  document.addEventListener('click',e=>{
+    const b=e.target.closest('.rfr2');if(!b)return;
+    const asof=b.closest('.live-bar').querySelector('.asof');
+    b.textContent='⟳ REFRESHING…';
+    setTimeout(()=>{const t=new Date(),z=n=>String(n).padStart(2,'0');asof.textContent='AS OF '+z(t.getHours())+':'+z(t.getMinutes())+':'+z(t.getSeconds())+' IST';b.textContent='↻ REFRESH';asof.classList.add('flash');setTimeout(()=>asof.classList.remove('flash'),700);},700);
+  });
+  let lastPx=61240;
+  document.querySelectorAll('.rfr').forEach(b=>b.onclick=()=>{
+    const asof=b.closest('.live-bar').querySelector('.asof');
+    b.textContent='⟳ REFRESHING…';b.classList.add('busy');
+    setTimeout(()=>{
+      const t=new Date(),p=n=>String(n).padStart(2,'0');
+      asof.textContent='AS OF '+p(t.getHours())+':'+p(t.getMinutes())+':'+p(t.getSeconds())+' IST';
+      b.closest('.live-bar').classList.remove('stale');b.textContent='↻ REFRESH';
+      lastPx+=Math.round((Math.random()-0.45)*40);
+      document.querySelectorAll('.kv .v').forEach(v=>{if(/^6[01],\d{3}$/.test(v.textContent.trim()))v.textContent=lastPx.toLocaleString('en-US');});
+      b.classList.remove('busy');
+      asof.classList.add('flash');setTimeout(()=>asof.classList.remove('flash'),700);
+    },800);
+  });
+
+  // ===== shareable answers =====
+  const shHTML=`
+    <button class="sc-close" aria-label="Close">✕</button>
+    <div class="share-card">
+      <div class="sc-brand"><span class="mark">H</span>Hippo <span class="on">on KoinBX</span></div>
+      <div class="sc-live">LIVE CARD — REFRESHES WHEN OPENED</div>
+      <h4>BTC is down 4.2% over 12 hours</h4>
+      <p>Hot US inflation pushed rate-cut expectations later into the year. ~$310M in leveraged longs unwound in an hour; funding flipped negative.</p>
+      <svg class="spark" viewBox="0 0 300 48" preserveAspectRatio="none" style="height:44px;margin-top:9px">
+        <path class="fill" d="M0,11 C30,8 55,15 80,13 C110,11 130,22 160,26 C190,29 215,26 240,35 C265,43 285,39 300,41 L300,48 L0,48 Z"/>
+        <path class="line" d="M0,11 C30,8 55,15 80,13 C110,11 130,22 160,26 C190,29 215,26 240,35 C265,43 285,39 300,41" fill="none" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <div class="sc-foot"><span class="sc-asof">AS OF 14:32 IST</span><span class="lnk">hip.po/b/8F3K</span></div>
+      <div class="sc-disc">MARKET INFORMATION · NOT INVESTMENT ADVICE</div>
+    </div>
+    <div class="share-actions"><button class="cpy">Copy link</button><button class="shb">Share…</button></div>`;
+  function mountShare(host){
+    const d=document.createElement('div');d.className='share-ov hidden';d.innerHTML=shHTML;host.appendChild(d);
+    d.querySelector('.sc-close').onclick=()=>d.classList.add('hidden');
+    const cpy=d.querySelector('.cpy');
+    cpy.onclick=()=>{cpy.textContent='Copied ✓';setTimeout(()=>cpy.textContent='Copy link',1400);};
+    d.querySelector('.shb').onclick=()=>{if(navigator.share){navigator.share({title:'Hippo on KoinBX — BTC brief',url:'https://hip.po/b/8F3K'}).catch(()=>{});}};
+    return d;
+  }
+  const shWeb=mountShare(document.getElementById('hpanel'));
+  const shMob=mountShare(document.getElementById('sheet'));
+  document.querySelectorAll('.shr').forEach(b=>b.onclick=()=>{
+    const ov=b.closest('#hpanel')?shWeb:shMob;
+    const t=new Date(),p=n=>String(n).padStart(2,'0');
+    ov.querySelector('.sc-asof').textContent='AS OF '+p(t.getHours())+':'+p(t.getMinutes())+' IST';
+    ov.classList.remove('hidden');
+  });
+
+  // scale terminal to viewport
+  function fitTerminal(){
+    const box=document.getElementById('scaleBox');
+    const w=Math.min(document.documentElement.clientWidth-24,1200);
+    const s=w/1200;
+    box.style.transform='scale('+s+')';
+    box.style.height=(720*s)+'px';
+  }
+  window.addEventListener('resize',fitTerminal);fitTerminal();
+
+  // web panel states
+  let webPulse,mobPulse;
+  const term=document.getElementById('term');
+  document.getElementById('btnMin').onclick=()=>{term.classList.remove('h-max');term.classList.add('h-min');
+    clearTimeout(webPulse);webPulse=setTimeout(()=>document.getElementById('btnTab').classList.add('alert'),3500);};
+  document.getElementById('btnTab').onclick=()=>{clearTimeout(webPulse);
+    document.getElementById('btnTab').classList.remove('alert');
+    if(!webOnboarded){obMap.hpanel.reset();return;}
+    term.classList.remove('h-min');setTimeout(scrollBottoms,300);};
+  webPulse=setTimeout(()=>document.getElementById('btnTab').classList.add('alert'),5000);
+  document.getElementById('btnMax').onclick=()=>{term.classList.toggle('h-max');};
+  document.getElementById('scrim').onclick=()=>{term.classList.remove('h-max');};
+
+  // mobile sheet states
+  const ph=document.getElementById('mphone');
+  const pillEl=document.getElementById('pill');
+  pillEl.onclick=()=>{clearTimeout(mobPulse);pillEl.classList.remove('alert');
+    if(!mobOnboarded){obMap.sheet.reset();return;}
+    ph.classList.add('sheet');ph.classList.remove('full');setTimeout(scrollBottoms,320);};
+  mobPulse=setTimeout(()=>pillEl.classList.add('alert'),6000);
+  document.getElementById('grab').onclick=()=>{ph.classList.add('full');setTimeout(scrollBottoms,320);};
+  document.getElementById('mBtnMax').onclick=()=>{ph.classList.toggle('full');if(!ph.classList.contains('full'))ph.classList.add('sheet');setTimeout(scrollBottoms,320);};
+  document.getElementById('mBtnMin').onclick=()=>{ph.classList.remove('sheet','full');clearTimeout(mobPulse);mobPulse=setTimeout(()=>pillEl.classList.add('alert'),6000);};
+  document.getElementById('mscrim').onclick=()=>{ph.classList.remove('sheet','full');};
+
+  // candlestick generator
+  function drawCandles(svgId,n,W,H){
+    const svg=document.getElementById(svgId);
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    let price=64000,els='';
+    // gridlines
+    for(let g=1;g<5;g++){els+='<line x1="0" y1="'+(H*g/5)+'" x2="'+W+'" y2="'+(H*g/5)+'" stroke="rgba(255,255,255,.045)" stroke-width="1"/>';}
+    const step=W/n,bw=Math.max(3,step*0.55);
+    const seed=[1,-1,1,1,-1,-1,1,-1,-1,-1,1,-1,-1,1,-1,-1,-1,1,-1,-1];
+    let pts=[];
+    for(let i=0;i<n;i++){
+      const drift=(i>n*0.55)?-1:0.15;
+      const dir=(seed[i%seed.length]+drift)>=0?1:-1;
+      const range=price*(0.004+((i*7)%10)/900);
+      const o=price, c=price+dir*range*(0.6+((i*13)%7)/10);
+      const hi=Math.max(o,c)+range*0.4, lo=Math.min(o,c)-range*0.4;
+      pts.push({o,c,hi,lo});price=c;
+    }
+    const max=Math.max(...pts.map(p=>p.hi)),min=Math.min(...pts.map(p=>p.lo));
+    const y=v=>H*0.06+(max-v)/(max-min)*H*0.82;
+    pts.forEach((p,i)=>{
+      const x=step*i+step/2,up=p.c>=p.o,col=up?'#2EC48D':'#FF8585';
+      els+='<line x1="'+x+'" y1="'+y(p.hi)+'" x2="'+x+'" y2="'+y(p.lo)+'" stroke="'+col+'" stroke-width="1"/>';
+      els+='<rect x="'+(x-bw/2)+'" y="'+y(Math.max(p.o,p.c))+'" width="'+bw+'" height="'+Math.max(2,Math.abs(y(p.o)-y(p.c)))+'" fill="'+col+'" rx="1"/>';
+    });
+    // last price line
+    els+='<line x1="0" y1="'+y(pts[n-1].c)+'" x2="'+W+'" y2="'+y(pts[n-1].c)+'" stroke="#F0B94A" stroke-width="1" stroke-dasharray="3,4" opacity=".6"/>';
+    svg.innerHTML=els;
+  }
+  drawCandles('candles',46,900,560);
+  drawCandles('mcandles',30,340,250);
+
+  // order book rows
+  function book(el,side,base){
+    let html='';
+    for(let i=0;i<9;i++){
+      const p=(base+(side==='ask'?1:-1)*(i+1)*4.5).toFixed(2);
+      const s=(0.05+((i*37)%80)/100).toFixed(4);
+      const d=18+((i*53)%70);
+      html+='<div class="brow '+side+'"><span class="depth" style="width:'+d+'%"></span><span class="p">'+Number(p).toLocaleString('en-US',{minimumFractionDigits:2})+'</span><span class="s">'+s+'</span><span class="t">'+(s*p/1000).toFixed(1)+'K</span></div>';
+    }
+    el.innerHTML=side==='ask'?html.split('</div>').reverse().join('</div>'):html;
+  }
+  book(document.getElementById('asks'),'ask',61240);
+  book(document.getElementById('bids'),'bid',61240);
+  // mobile book
+  (function(){
+    const el=document.getElementById('mbook');let html='<div class="cols" style="display:flex;justify-content:space-between;padding:4px 16px 6px;color:#6A7080;font-size:9px;letter-spacing:.06em"><span>BID</span><span>PRICE</span><span>ASK</span></div>';
+    for(let i=0;i<7;i++){
+      const bp=(61240-(i+1)*4.5).toFixed(2),ap=(61240+(i+1)*4.5).toFixed(2);
+      html+='<div style="display:flex;justify-content:space-between;padding:3.5px 16px"><span style="color:#2EC48D">'+(0.05+((i*37)%80)/100).toFixed(3)+'</span><span style="color:#8A8F9C">'+Number(bp).toLocaleString()+' / '+Number(ap).toLocaleString()+'</span><span style="color:#FF8585">'+(0.04+((i*29)%70)/100).toFixed(3)+'</span></div>';
+    }
+    el.innerHTML=html;
+  })();
+</script>
+</body>
+</html>

@@ -51,6 +51,18 @@ export const SettingsUplink = z.object({
   clearMemory: z.boolean().optional(),
 })
 
+/**
+ * Stop-streaming (additive, July 2026): the trader halts an in-flight
+ * streaming research brief. Base envelope only — the gateway knows the
+ * session's in-flight stream, and the SERVER decides what the stopped
+ * answer looks like (the SDK only signals intent, never invents content).
+ * No active stream server-side → silent no-op.
+ */
+export const StreamStopUplink = z.object({
+  ...base,
+  kind: z.literal('stream_stop'),
+})
+
 export const Uplink = z.discriminatedUnion('kind', [
   UserTextUplink,
   ChipTapUplink,
@@ -58,6 +70,7 @@ export const Uplink = z.discriminatedUnion('kind', [
   FeedbackUplink,
   ConsentUplink,
   SettingsUplink,
+  StreamStopUplink,
 ])
 
 export type Uplink = z.infer<typeof Uplink>

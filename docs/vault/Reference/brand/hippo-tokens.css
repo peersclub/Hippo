@@ -1,0 +1,70 @@
+/* ============================================================
+   Hippo — Brand Tokens (Dark Glass Instrument)
+   Source of truth for the brand core. Reconciled from Ram's
+   walking-skeleton.jsx + marketing site and hippo-app SDK
+   (packages/sdk/src/styles.ts). Dark is the locked hero;
+   light is the secondary lean. Amber is the ONLY brand accent —
+   up/down are semantic status colours, never decoration.
+   ============================================================ */
+
+:root {
+  /* — Surfaces (dark hero) — */
+  --hippo-bg:        #0E1014; /* app background */
+  --hippo-panel:     #14161C; /* the Ask Hippo panel */
+  --hippo-card:      #232733; /* card surface (solid — no blur inside scroll) */
+  --hippo-card-2:    #262B36; /* nested cell / stat tile */
+
+  /* — Accent (the single brand accent) — */
+  --hippo-amber:     #F0B94A; /* signal gold */
+  --hippo-amber-ink: #1A1405; /* text/mark on amber */
+
+  /* — Semantic status (NOT brand accents) — */
+  --hippo-up:        #2EC48D; /* gains / buy / positive */
+  --hippo-down:      #FF8585; /* losses / sell / negative */
+
+  /* — Text tiers — */
+  --hippo-text-hi:    #E9EBF0; /* primary */
+  --hippo-text-mid:   #B8BDC9; /* body / secondary */
+  --hippo-text-dim:   #8A8F9C; /* labels */
+  --hippo-text-faint: #6A7080; /* eyebrows / meta */
+
+  /* — Lines — */
+  --hippo-hairline: rgba(255,255,255,.07);
+
+  /* — Type — */
+  --hippo-font-display: 'Outfit', system-ui, sans-serif;      /* 400–800; hero 700/800 */
+  --hippo-font-body:    'Inter', system-ui, sans-serif;       /* 400/500/600 */
+  --hippo-font-mono:    'IBM Plex Mono', ui-monospace, monospace; /* data, labels, eyebrows, status */
+
+  /* — Radius — */
+  --hippo-radius-card:   16px;
+  --hippo-radius-cell:   10px;
+  --hippo-radius-button: 12px;
+  --hippo-radius-pill:   999px;
+
+  /* — Eyebrow / label treatment — */
+  --hippo-eyebrow-size:    10px;
+  --hippo-eyebrow-track:   0.12em; /* letter-spacing */
+
+  /* — Motion — */
+  --hippo-motion-card-in: 0.32s ease;  /* fade + 10px rise */
+  --hippo-motion-pulse:   1.6s infinite; /* waiting / live */
+}
+
+/* Secondary light lean (Soft Glass + Instrument). Accent darkened for
+   legibility on light surfaces; semantic colours darkened to match. */
+:root[data-theme="light"] {
+  --hippo-bg:        #E9ECF1;
+  --hippo-panel:     #F7F8FA;
+  --hippo-card:      #FFFFFF;
+  --hippo-card-2:    #F0F2F6;
+  --hippo-amber:     #B98A1E;
+  --hippo-amber-ink: #FFFFFF;
+  --hippo-up:        #149469;
+  --hippo-down:      #D94F4F;
+  --hippo-text-hi:    rgba(14,18,26,.92);
+  --hippo-text-mid:   rgba(14,18,26,.62);
+  --hippo-text-dim:   rgba(14,18,26,.46);
+  --hippo-text-faint: rgba(14,18,26,.42);
+  --hippo-hairline:   rgba(12,16,24,.09);
+}

@@ -9,12 +9,56 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { SparklineSvg } from './cards.js'
 import { t } from './i18n.js'
 import { consentRows, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
+import { dispatch } from './outbox.js'
+import {
+  type ClearMemoryEvent,
+  type ClearMemoryState,
+  clearMemoryTransition,
+  LANGUAGE_OPTIONS,
+} from './settings.js'
 import { COPIED_FLASH_MS, shareLink } from './share.js'
-import { locale, memoryOptIn, settingsOpen, shareFrame, venueName } from './state.js'
-import { send } from './transport.js'
+import { locale, memoryOptIn, persistLocale, settingsOpen, shareFrame, venueName } from './state.js'
 
 const reducedMotion = () =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/**
+ * Dialog behavior for full-surface overlays: focus the first control on
+ * mount, keep Tab cycling inside the card. NOTE: inside a closed shadow
+ * root, document.activeElement only sees the host — the element's own
+ * getRootNode() is the ShadowRoot whose activeElement is real.
+ */
+function useTrapFocus() {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const focusables = () =>
+      Array.from(
+        el.querySelectorAll<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])'),
+      ).filter((f) => !f.hasAttribute('disabled'))
+    focusables()[0]?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+      const list = focusables()
+      if (list.length === 0) return
+      const rootNode = el.getRootNode() as ShadowRoot | Document
+      const active = rootNode.activeElement as HTMLElement | null
+      const first = list[0]
+      const last = list[list.length - 1]
+      if (e.shiftKey && active === first) {
+        e.preventDefault()
+        last?.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first?.focus()
+      }
+    }
+    el.addEventListener('keydown', onKey)
+    return () => el.removeEventListener('keydown', onKey)
+  }, [])
+  return ref
+}
 
 /** Hand-rolled confetti burst — one canvas, ~40 lines, no library. */
 function Confetti() {
@@ -170,17 +214,24 @@ export function OnboardingOverlay({
   const agree = () => {
     memoryOptIn.value = memory
     const l2Row = rows.find((r) => r.id === 'l2')
-    void send({
+    void dispatch({
       kind: 'consent',
       memoryOptIn: memory,
       l2Acknowledged: l2Row?.control === 'checkbox' ? l2Checked : true,
     })
     store.complete()
   }
+  const cardRef = useTrapFocus()
   return (
     <div class="overlay">
       {step === 0 && <Confetti />}
-      <div class="obcard">
+      <div
+        class="obcard"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(locale.value, 'intro_dialog')}
+        ref={cardRef}
+      >
         {step === 0 && (
           <>
             <div class="obeyebrow">WELCOME TO</div>
@@ -286,9 +337,16 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
     clearTimeout(timer.current)
     timer.current = window.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
   }
+  const cardRef = useTrapFocus()
   return (
     <div class="overlay">
-      <div class="shrcard">
+      <div
+        class="shrcard"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(locale.value, 'share_card')}
+        ref={cardRef}
+      >
         <div class="shrbrand">
           <span class="shrmark">H</span>
           <b>Hippo</b>
@@ -308,7 +366,12 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
         <button type="button" class="obcta" onClick={copy}>
           {copied ? 'COPIED ✓' : 'Copy link'}
         </button>
-        <button type="button" class="shrx" aria-label="Close share card" onClick={close}>
+        <button
+          type="button"
+          class="shrx"
+          aria-label={t(locale.value, 'close_share')}
+          onClick={close}
+        >
           ✕
         </button>
       </div>
@@ -316,21 +379,49 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
   )
 }
 
-/** Minimal ⚙ settings sheet: memory toggle + "Replay the intro". */
+/**
+ * ⚙ settings sheet (baseline §6): memory toggle + clear, the data rows
+ * restated in plain language, answer language (with RTL preview via عربي),
+ * and "Replay the intro". Language taps relabel the chrome instantly (the
+ * locale signal) AND tell the server via the settings uplink — content
+ * language stays a generation parameter, never client translation.
+ */
 export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
+  const L = locale.value
   const memory = memoryOptIn.value
+  const [clear, setClear] = useState<ClearMemoryState>({ phase: 'idle' })
+  const cardRef = useTrapFocus()
   const toggle = (v: boolean) => {
     memoryOptIn.value = v
-    void send({ kind: 'settings', memoryOptIn: v })
+    void dispatch({ kind: 'settings', memoryOptIn: v })
   }
+  const pickLanguage = (opt: (typeof LANGUAGE_OPTIONS)[number]) => {
+    locale.value = opt.locale
+    persistLocale(opt.locale)
+    void dispatch({ kind: 'settings', language: opt.uplink })
+  }
+  const clearEvt = (event: ClearMemoryEvent) => {
+    const { state: next, uplink } = clearMemoryTransition(clear, event)
+    setClear(next)
+    if (uplink) void dispatch({ kind: 'settings', clearMemory: true })
+  }
+  // Counsel-owned copy stays single-sourced: the same rows onboarding shows,
+  // restated read-only (controls stripped) as the in-place data explainer.
+  const rows = consentRows(venueName.value)
   return (
     <div class="overlay">
-      <div class="obcard sheet">
+      <div
+        class="obcard sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(L, 'settings')}
+        ref={cardRef}
+      >
         <div class="shhd">
-          <b>SETTINGS</b>
+          <b>{t(L, 'settings')}</b>
           <button
             type="button"
-            aria-label="Close settings"
+            aria-label={t(L, 'close_settings')}
             onClick={() => {
               settingsOpen.value = false
             }}
@@ -342,14 +433,63 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
           <div class="obrow">
             <span class="obicon">◎</span>
             <div>
-              <b>Personal memory</b>
-              <p>Hippo remembers your preferences and past questions.</p>
+              <b>{t(L, 'settings_memory_title')}</b>
+              <p>{t(L, 'settings_memory_body')}</p>
             </div>
-            <Toggle on={memory} onChange={toggle} label="Personal memory" />
+            <Toggle on={memory} onChange={toggle} label={t(L, 'settings_memory_title')} />
           </div>
+          {rows
+            .filter((r) => r.id !== 'memory')
+            .map((r) => (
+              <div class="obrow" key={r.id}>
+                <span class="obicon">{r.icon}</span>
+                <div>
+                  <b>{r.title}</b>
+                  <p>{r.body}</p>
+                </div>
+              </div>
+            ))}
         </div>
+        <div class="setlab">{t(L, 'settings_language')}</div>
+        <div class="langrow">
+          {LANGUAGE_OPTIONS.map((opt) => (
+            <button
+              type="button"
+              aria-pressed={L === opt.locale}
+              class={`lang${L === opt.locale ? ' on' : ''}`}
+              key={opt.locale}
+              onClick={() => pickLanguage(opt)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {clear.phase === 'idle' && (
+          <button type="button" class="shitem" onClick={() => clearEvt({ type: 'request' })}>
+            ⌫ {t(L, 'clear_memory')}
+          </button>
+        )}
+        {clear.phase === 'confirming' && (
+          <div class="confirmrow">
+            <button
+              type="button"
+              class="shitem danger"
+              onClick={() => clearEvt({ type: 'confirm' })}
+            >
+              {t(L, 'clear_memory_confirm')}
+            </button>
+            <button type="button" class="shitem" onClick={() => clearEvt({ type: 'cancel' })}>
+              {t(L, 'clear_memory_cancel')}
+            </button>
+          </div>
+        )}
+        {clear.phase === 'done' && (
+          <div class="cleared" role="status">
+            {t(L, 'clear_memory_done')}
+          </div>
+        )}
         <button type="button" class="shitem" onClick={onReplay}>
-          ↺ {t(locale.value, 'ob_replay')}
+          ↺ {t(L, 'ob_replay')}
         </button>
       </div>
     </div>
