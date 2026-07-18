@@ -5,12 +5,15 @@
  *   POST /v1/persona/:partnerId/:userId/clear  → wipe data (settings promise)
  *   GET  /admin/personas                       → enumerate (admin panel; token)
  *   DELETE /admin/personas/:partnerId/:userId  → hard delete/purge (token)
- *   GET  /health
+ *   GET  /health                                → unguarded liveness
  *
- * /admin/* is guarded by `x-hippo-internal-token` against INTERNAL_API_TOKEN
- * (timing-safe). Fail-closed: no env token → admin surface is 503, never
- * open. In pods this sits on the cluster network behind mTLS, same as the
- * gateway's /internal routes.
+ * Every route except /health is guarded by `x-hippo-internal-token` against
+ * INTERNAL_API_TOKEN (timing-safe). The /v1/persona routes carry opt-in PII
+ * (experience level, followed assets, open threads), so they share the same
+ * trust boundary as /admin/*: no network peer may read or wipe a user's
+ * memory by guessing IDs. Fail-closed: no env token → the guarded surface is
+ * 503, never open. In pods this sits on the cluster network behind mTLS, same
+ * as the gateway's /internal routes.
  */
 import { timingSafeEqual } from 'node:crypto'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
@@ -55,7 +58,7 @@ function parseUpdate(body: unknown): PersonaUpdate | null {
 
 export type ServiceOptions = {
   store?: PersonaStore
-  /** Shared secret for /admin/*; defaults to INTERNAL_API_TOKEN env. */
+  /** Shared secret for every guarded route; defaults to INTERNAL_API_TOKEN env. */
   internalToken?: string
 }
 
@@ -66,27 +69,12 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
 
   type Params = { partnerId: string; userId: string }
 
-  app.get<{ Params: Params }>('/v1/persona/:partnerId/:userId', async (req) => {
-    const { partnerId, userId } = req.params
-    return store.get(partnerId, userId)
-  })
-
-  app.put<{ Params: Params }>('/v1/persona/:partnerId/:userId', async (req, reply) => {
-    const patch = parseUpdate(req.body)
-    if (patch === null) return reply.code(400).send({ error: 'invalid persona update' })
-    const { partnerId, userId } = req.params
-    return store.update(partnerId, userId, patch)
-  })
-
-  app.post<{ Params: Params }>('/v1/persona/:partnerId/:userId/clear', async (req) => {
-    const { partnerId, userId } = req.params
-    return store.clear(partnerId, userId)
-  })
-
-  // ── admin surface (panel-only; internal token) ─────────────────────────
-  function adminGuard(req: FastifyRequest, reply: FastifyReply): boolean {
+  // ── internal trust boundary (x-hippo-internal-token) ───────────────────
+  // Guards every route that touches persona data — the /v1/persona PII surface
+  // and the /admin/* panel alike. Fail-closed: no env token → 503, never open.
+  function requireInternalToken(req: FastifyRequest, reply: FastifyReply): boolean {
     if (!internalToken) {
-      reply.code(503).send({ error: 'admin surface disabled: INTERNAL_API_TOKEN not set' })
+      reply.code(503).send({ error: 'memory service disabled: INTERNAL_API_TOKEN not set' })
       return false
     }
     const presented = req.headers['x-hippo-internal-token']
@@ -99,10 +87,31 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     return true
   }
 
+  app.get<{ Params: Params }>('/v1/persona/:partnerId/:userId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const { partnerId, userId } = req.params
+    return store.get(partnerId, userId)
+  })
+
+  app.put<{ Params: Params }>('/v1/persona/:partnerId/:userId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const patch = parseUpdate(req.body)
+    if (patch === null) return reply.code(400).send({ error: 'invalid persona update' })
+    const { partnerId, userId } = req.params
+    return store.update(partnerId, userId, patch)
+  })
+
+  app.post<{ Params: Params }>('/v1/persona/:partnerId/:userId/clear', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const { partnerId, userId } = req.params
+    return store.clear(partnerId, userId)
+  })
+
+  // ── admin surface (panel-only; same internal token) ────────────────────
   app.get<{
     Querystring: { partnerId?: string; optIn?: string; offset?: string; limit?: string }
   }>('/admin/personas', async (req, reply) => {
-    if (!adminGuard(req, reply)) return reply
+    if (!requireInternalToken(req, reply)) return reply
     const { partnerId, optIn, offset, limit } = req.query
     return store.list({
       ...(partnerId ? { partnerId } : {}),
@@ -113,7 +122,7 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
   })
 
   app.delete<{ Params: Params }>('/admin/personas/:partnerId/:userId', async (req, reply) => {
-    if (!adminGuard(req, reply)) return reply
+    if (!requireInternalToken(req, reply)) return reply
     const { partnerId, userId } = req.params
     const deleted = await store.delete(partnerId, userId)
     return { deleted }
@@ -122,7 +131,7 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
   // Bulk purge for partner offboarding — partnerId is mandatory: there is
   // deliberately no "delete everything" surface.
   app.delete<{ Querystring: { partnerId?: string } }>('/admin/personas', async (req, reply) => {
-    if (!adminGuard(req, reply)) return reply
+    if (!requireInternalToken(req, reply)) return reply
     const { partnerId } = req.query
     if (!partnerId) return reply.code(400).send({ error: 'partnerId required' })
     const deleted = await store.deleteByPartner(partnerId)
