@@ -145,6 +145,6 @@
 | 7 | [[07 Infrastructure & Pods\|Infra & pods]] | ⬜ | local dev only (compose postgres :5433) | GPU quotes, vLLM pods |
 | 8 | Admin panel & durable stores | ✅ merged | `packages/stores` (Postgres-or-memory), memory admin surface, gateway enforcement (suspend/block/MAU quota), `services/admin` + `apps/admin` SPA, audit trail, solidity pass | run against compose Postgres in prod topology; operator SSO later |
 | 9 | Trade capabilities (new) | 🚧 keystone in review | canonical order model (PR #16 draft), trade-type discovery (PR #20 draft) | land keystone, then seam order-plans / intelligence capabilities / SDK rendering from `wt-cap-*` |
-| 10 | [[12 Partner Admin Portal\|Partner admin portal]] (new) | 🚧 building on `feat/partner-portal` | plan doc 12 (2026-07-18) | stores + `services/portal` + invite flow + `apps/portal`; memory visibility & invite delivery are [[Open Decisions]] #10/#11 |
+| 10 | [[12 Partner Admin Portal\|Partner admin portal]] (new) | 🚧 built, [PR #21](https://github.com/peersclub/Hippo/pull/21) open | plan doc 12 + full V1 (2026-07-18): stores/migration 008, `services/portal` :8795, invite mint in admin, `apps/portal` :5176; cross-service E2E green | merge PR #21; run against compose Postgres; memory visibility & invite delivery are [[Open Decisions]] #10/#11 |
 
 Related: [[Home]] · [[00 Build Plan Overview]] · [[Open Decisions]] · [[Hippo Dev Progress]] · [[Ram JSX vs Victor Dev]]
