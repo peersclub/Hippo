@@ -79,19 +79,25 @@ describe('persona store', () => {
 })
 
 describe('memory service HTTP surface', () => {
+  // Persona routes carry opt-in PII and are held to the internal-token trust
+  // boundary, so the happy-path calls must present the token.
+  const TOKEN = 'test-internal-token'
+  const auth = { 'x-hippo-internal-token': TOKEN }
+
   it('GET returns the default persona for an unseen user', async () => {
-    const app = buildService()
-    const res = await app.inject({ method: 'GET', url: '/v1/persona/p1/u1' })
+    const app = buildService({ internalToken: TOKEN })
+    const res = await app.inject({ method: 'GET', url: '/v1/persona/p1/u1', headers: auth })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ optIn: false, followedAssets: [] })
     await app.close()
   })
 
   it('PUT merges and returns the updated persona', async () => {
-    const app = buildService()
+    const app = buildService({ internalToken: TOKEN })
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/persona/p1/u1',
+      headers: auth,
       payload: { optIn: true, experienceLevel: 'new', followAsset: 'sol' },
     })
     expect(res.statusCode).toBe(200)
@@ -104,47 +110,119 @@ describe('memory service HTTP surface', () => {
   })
 
   it('rejects malformed updates with 400', async () => {
-    const app = buildService()
+    const app = buildService({ internalToken: TOKEN })
     for (const payload of [
       { optIn: 'yes' },
       { experienceLevel: 'wizard' },
       { followAsset: 'not an asset!!' },
       { openThread: { text: '' } },
     ]) {
-      const res = await app.inject({ method: 'PUT', url: '/v1/persona/p1/u1', payload })
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/v1/persona/p1/u1',
+        headers: auth,
+        payload,
+      })
       expect(res.statusCode).toBe(400)
     }
     await app.close()
   })
 
   it('POST clear wipes via HTTP', async () => {
-    const app = buildService()
+    const app = buildService({ internalToken: TOKEN })
     await app.inject({
       method: 'PUT',
       url: '/v1/persona/p1/u1',
+      headers: auth,
       payload: { optIn: true, followAsset: 'btc' },
     })
-    const res = await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear' })
+    const res = await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear', headers: auth })
     expect(res.json().followedAssets).toEqual([])
     await app.close()
   })
 
   it('POST clear accepts an empty JSON body (what the gateway client sends)', async () => {
-    const app = buildService()
+    const app = buildService({ internalToken: TOKEN })
     await app.inject({
       method: 'PUT',
       url: '/v1/persona/p1/u1',
+      headers: auth,
       payload: { optIn: true, followAsset: 'btc' },
     })
     // Regression: a JSON content-type on the clear POST must not 400.
     const res = await app.inject({
       method: 'POST',
       url: '/v1/persona/p1/u1/clear',
-      headers: { 'content-type': 'application/json' },
+      headers: { ...auth, 'content-type': 'application/json' },
       payload: '{}',
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().followedAssets).toEqual([])
+    await app.close()
+  })
+})
+
+describe('persona routes trust boundary (PII)', () => {
+  const TOKEN = 'test-internal-token'
+  const auth = { 'x-hippo-internal-token': TOKEN }
+
+  it('is fail-closed: 503 on every persona route when INTERNAL_API_TOKEN is unset', async () => {
+    const app = buildService({ internalToken: '' })
+    expect((await app.inject({ method: 'GET', url: '/v1/persona/p1/u1' })).statusCode).toBe(503)
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/v1/persona/p1/u1',
+          payload: { optIn: true },
+        })
+      ).statusCode,
+    ).toBe(503)
+    expect(
+      (await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear' })).statusCode,
+    ).toBe(503)
+    await app.close()
+  })
+
+  it('rejects a missing or wrong token with 401 on GET/PUT/clear', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    const wrong = { 'x-hippo-internal-token': 'nope' }
+
+    expect((await app.inject({ method: 'GET', url: '/v1/persona/p1/u1' })).statusCode).toBe(401)
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/persona/p1/u1', headers: wrong })).statusCode,
+    ).toBe(401)
+    expect(
+      (
+        await app.inject({ method: 'PUT', url: '/v1/persona/p1/u1', payload: { optIn: true } })
+      ).statusCode,
+    ).toBe(401)
+    expect(
+      (await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear' })).statusCode,
+    ).toBe(401)
+    await app.close()
+  })
+
+  it('does not leak persona data on an unauthenticated GET', async () => {
+    const store = new InMemoryPersonaStore()
+    await store.update('p1', 'u1', { optIn: true, followAsset: 'BTC' })
+    const app = buildService({ store, internalToken: TOKEN })
+
+    const denied = await app.inject({ method: 'GET', url: '/v1/persona/p1/u1' })
+    expect(denied.statusCode).toBe(401)
+    expect(denied.body).not.toContain('BTC')
+
+    const ok = await app.inject({ method: 'GET', url: '/v1/persona/p1/u1', headers: auth })
+    expect(ok.statusCode).toBe(200)
+    expect(ok.json().followedAssets).toEqual(['BTC'])
+    await app.close()
+  })
+
+  it('leaves /health unguarded', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    const res = await app.inject({ method: 'GET', url: '/health' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ ok: true, service: 'memory' })
     await app.close()
   })
 })
