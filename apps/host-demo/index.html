@@ -79,11 +79,15 @@
   <script>
     (() => {
       const real = new URLSearchParams(location.search).get('gw') !== 'mock'
+      // Cloud builds bake the gateway in via VITE_GATEWAY_URL (Vite replaces
+      // %VITE_GATEWAY_URL% in HTML at build time); unset = local dev ports.
+      const envGw = '%VITE_GATEWAY_URL%'
+      const realGw = envGw.startsWith('http') ? envGw : 'http://localhost:8788'
       const s = document.createElement('script')
       s.src = '/loader.js'
       s.async = true
       s.dataset.hippoKey = 'pk_demo'
-      s.dataset.hippoGateway = real ? 'http://localhost:8788' : 'http://localhost:8787'
+      s.dataset.hippoGateway = real ? realGw : 'http://localhost:8787'
       document.body.appendChild(s)
 
       // Tiny badge so it's always unambiguous which gateway a demo is on,
