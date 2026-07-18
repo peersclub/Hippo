@@ -130,7 +130,12 @@ describe('seam service HTTP surface', () => {
       { ...prepareBody, orderType: 'limit' }, // limit without limitPrice
       { partnerId: 'p' },
     ]) {
-      const res = await app.inject({ method: 'POST', url: '/v1/prepare', headers: HDR, payload: bad })
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/prepare',
+        headers: HDR,
+        payload: bad,
+      })
       expect(res.statusCode).toBe(400)
     }
     await app.close()
@@ -179,7 +184,11 @@ describe('seam service HTTP surface', () => {
 
   it('serves the portfolio (never cached)', async () => {
     const app = guarded()
-    const res = await app.inject({ method: 'GET', url: '/v1/portfolio/koinbx-dev/u1', headers: HDR })
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portfolio/koinbx-dev/u1',
+      headers: HDR,
+    })
     const body = res.json() as { positions: unknown[]; openOrders: unknown[] }
     expect(body.positions).toHaveLength(3)
     expect(body.openOrders).toHaveLength(3)

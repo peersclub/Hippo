@@ -109,7 +109,11 @@ describe('/internal/venue-events (same internal guard)', () => {
 
   it('401 on a missing or wrong token — no forged lifecycle frames', async () => {
     const { app } = await testApp({ internalToken: TOKEN })
-    const missing = await app.inject({ method: 'POST', url: '/internal/venue-events', payload: evt })
+    const missing = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      payload: evt,
+    })
     expect(missing.statusCode).toBe(401)
     const bad = await app.inject({
       method: 'POST',

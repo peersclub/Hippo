@@ -178,9 +178,9 @@ describe('persona routes trust boundary (PII)', () => {
         })
       ).statusCode,
     ).toBe(503)
-    expect(
-      (await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear' })).statusCode,
-    ).toBe(503)
+    expect((await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear' })).statusCode).toBe(
+      503,
+    )
     await app.close()
   })
 
@@ -193,13 +193,12 @@ describe('persona routes trust boundary (PII)', () => {
       (await app.inject({ method: 'GET', url: '/v1/persona/p1/u1', headers: wrong })).statusCode,
     ).toBe(401)
     expect(
-      (
-        await app.inject({ method: 'PUT', url: '/v1/persona/p1/u1', payload: { optIn: true } })
-      ).statusCode,
+      (await app.inject({ method: 'PUT', url: '/v1/persona/p1/u1', payload: { optIn: true } }))
+        .statusCode,
     ).toBe(401)
-    expect(
-      (await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear' })).statusCode,
-    ).toBe(401)
+    expect((await app.inject({ method: 'POST', url: '/v1/persona/p1/u1/clear' })).statusCode).toBe(
+      401,
+    )
     await app.close()
   })
 

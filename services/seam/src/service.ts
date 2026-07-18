@@ -56,7 +56,10 @@ export type ServiceOptions = {
 function resolveCallbackOrigins(opts: ServiceOptions): Set<string> {
   const raw = opts.callbackAllowedOrigins ?? process.env.SEAM_CALLBACK_ALLOWED_ORIGINS ?? ''
   const origins = new Set<string>()
-  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+  for (const entry of raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     try {
       origins.add(new URL(entry).origin)
     } catch {
