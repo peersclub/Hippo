@@ -35,7 +35,7 @@
     <div class="pair"><span style="font-weight:600">BTC/USDT</span><span class="px">61,240.00</span><span style="color:var(--down)">−4.2%</span></div>
   </header>
   <main>
-    <div class="chart"><svg id="candles" preserveAspectRatio="none"></svg></div>
+    <div class="chart"><svg id="candles" aria-hidden="true" preserveAspectRatio="none"></svg></div>
     <div class="book">
       <h5>Order book</h5>
       <div id="asks"></div>
@@ -51,7 +51,10 @@
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`)
     let px = 300
     let seed = 42
-    const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280
+    const rnd = () => {
+      seed = (seed * 9301 + 49297) % 233280
+      return seed / 233280
+    }
     for (let i = 0; i < 60; i++) {
       const o = px, c = px + (rnd() - 0.55) * 40
       const hi = Math.max(o, c) + rnd() * 14, lo = Math.min(o, c) - rnd() * 14

@@ -13,7 +13,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "turbo run dev --parallel",
+    "dev": "set -a && [ -f .env ] && . ./.env; set +a; turbo run dev --concurrency=20",
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "biome check .",
