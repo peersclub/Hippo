@@ -12,6 +12,7 @@ import {
   stubIntel,
   stubMemory,
   stubSeam,
+  TEST_INTERNAL_TOKEN,
   testApp,
   ticketFixture,
   waitForJournal,
@@ -337,10 +338,12 @@ describe('orchestrator: action route', () => {
     await waitForJournal(session, (t) => t.includes('lifecycle'))
     expect(seam.confirms).toEqual([ticket.ticketId])
 
-    // Simulate the venue: the seam POSTs the fill to /internal/venue-events.
+    // Simulate the venue: the seam POSTs the fill to /internal/venue-events
+    // (now guarded by INTERNAL_API_TOKEN — the seam sends it).
     const res = await app.inject({
       method: 'POST',
       url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
       payload: {
         ticketId: ticket.ticketId,
         phase: 'filled',
@@ -382,6 +385,7 @@ describe('orchestrator: action route', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
       payload: { ticketId: ticket.ticketId, phase: 'filled', statusLine: 'FILLED' },
     })
     expect(res.json()).toEqual({ ok: true, routed: false })

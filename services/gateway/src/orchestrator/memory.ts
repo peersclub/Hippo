@@ -33,9 +33,15 @@ export interface MemoryClient {
 }
 
 async function request(url: string, init: RequestInit): Promise<Response> {
+  // The memory service holds opt-in PII and requires the shared internal token
+  // on every /v1/persona call (fail-closed 503 when it is unset there).
+  const internalToken = process.env.INTERNAL_API_TOKEN ?? ''
   return fetch(url, {
     ...init,
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(internalToken ? { 'x-hippo-internal-token': internalToken } : {}),
+    },
     signal: AbortSignal.timeout(MEMORY_TIMEOUT_MS),
   })
 }

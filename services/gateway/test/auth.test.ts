@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PARTNERS, signJwtHS256, verifyJwtHS256 } from '../src/plugins/auth.js'
-import { testApp } from './helpers.js'
+import { testApp, testAppRaw } from './helpers.js'
 
 const partner = PARTNERS[0]
 if (!partner) throw new Error('no dev partner configured')
@@ -38,6 +38,25 @@ describe('auth: dev mode', () => {
     })
     expect(res.statusCode).toBe(401)
     await app.close()
+  })
+
+  it('is safe by default: anonymous mint is rejected when devMode is unset (opt-in)', async () => {
+    // Neither opts.devMode nor HIPPO_DEV=1 → dev mode is OFF (prod-safe).
+    const saved = process.env.HIPPO_DEV
+    delete process.env.HIPPO_DEV
+    try {
+      const { app } = await testAppRaw()
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/session',
+        payload: { partnerKey: 'pk_demo' },
+      })
+      expect(res.statusCode).toBe(401)
+      await app.close()
+    } finally {
+      if (saved === undefined) delete process.env.HIPPO_DEV
+      else process.env.HIPPO_DEV = saved
+    }
   })
 })
 

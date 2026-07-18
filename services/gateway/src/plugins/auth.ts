@@ -2,9 +2,10 @@
  * Sessions & partner auth.
  *
  * Two modes (BE doc §1 "Session lifecycle"):
- *  (a) Dev mode (default, HIPPO_DEV unset or =1): POST /v1/session {partnerKey}
+ *  (a) Dev mode (OPT-IN, HIPPO_DEV=1): POST /v1/session {partnerKey}
  *      mints an anonymous session exactly like the mock gateway, so the SDK
- *      works unchanged against either.
+ *      works unchanged against either. It is OFF by default so a prod deploy
+ *      that forgets the env var stays closed (JWT-only).
  *  (b) JWT mode: the partner backend mints a short-lived HS256 JWT asserting
  *      the venue user (`sub` = venue_user_id, plus iat/exp). We verify it
  *      against the per-partner shared secret and bind the session to that
