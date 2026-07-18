@@ -22,7 +22,7 @@ const PILL_LABEL: Record<string, string> = {
   en: 'Ask Hippo',
   hi: 'Hippo से पूछें',
   'hi-Latn': 'Hippo se poochho',
-  ar: 'Ask Hippo', // RTL groundwork: layout flips, copy pending
+  ar: 'اسأل Hippo', // first pass, pending native review; brand stays Latin
 }
 const RTL = new Set(['ar'])
 
