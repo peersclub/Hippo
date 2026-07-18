@@ -3,6 +3,6 @@
   "buildCommand": "pnpm --filter @hippo/protocol build && vite build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://REPLACE-WITH-ADMIN-SERVICE.up.railway.app/:path*" }
+    { "source": "/api/:path*", "destination": "https://admin-production-9c9f.up.railway.app/:path*" }
   ]
 }
