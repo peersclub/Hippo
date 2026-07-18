@@ -4,7 +4,7 @@
 
 > [!summary] Where we are
 > Phase 0 ✅ done · Phase 1 (SDK) ✅ core complete (postures #12, i18n Phase 1 #15, fold release, stop control #18) · Phase 2 (intelligence backend) ✅ core + Redis stores + OTel **merged to main**; bake-off pending (GPU) · Phase 3 (execution seam) 🚧 seam + sim + KoinBX adapter **merged to main**; blocked on Open Decisions #6/#9 · Phase 4 (CLI) 🚧 scan → conform → config codegen → `embed`/`verify` (stages 5–6, #19) all landed; model-driven codegen pending · Phase 5 (pilot) ⬜ · **Ops: admin panel + durable stores + provisioning (`hippo register`) merged to main**.
-> **New workstream (July 16–18): trade capabilities** — canonical order model keystone (#16) and trade-type discovery in `hippo scan` (#20) **both merged July 18**; the seam/intelligence/SDK capability modules are WIP in the `wt-cap-*` worktrees (rebase onto main now that the keystone landed). Arabic chrome copy (#17) also merged — dormant until a partner sets `ar`; native review gates activation. **Partner portal V1 in review ([PR #21](https://github.com/peersclub/Hippo/pull/21))**.
+> **New workstream (July 16–18): trade capabilities** — canonical order model keystone (#16) and trade-type discovery in `hippo scan` (#20) **both merged July 18**; the seam/intelligence/SDK capability modules are WIP in the `wt-cap-*` worktrees (rebase onto main now that the keystone landed). Arabic chrome copy (#17) also merged — dormant until a partner sets `ar`; native review gates activation. **Partner portal V1 merged ([PR #21](https://github.com/peersclub/Hippo/pull/21))**.
 > The whole conversational loop is **verified end-to-end on main**: protocol turn → gateway orchestrator → intent/research engines (Ollama qwen3:4b) → live market data → research_brief / advice_decline / order_ticket frames — including the degraded-mode banner path when the model is cold.
 
 ---
@@ -34,11 +34,11 @@
 
 ## 🔄 In flight (PRs open / WIP)
 
-- [ ] **Partner admin portal V1** ([PR #21](https://github.com/peersclub/Hippo/pull/21), open, `feat/partner-portal`) — partner-facing accounts: own data (MAU vs quota), integration surface (embed tag, secret rotation), plan view + change request, own audit; `services/portal` :8795 + `apps/portal` :5176
 - [ ] **Capability modules, uncommitted in worktrees** (rebase onto main — keystone #16 is in): `wt-cap-seam` (order-plans across seam: venue adapters, types, service — the biggest WIP) · `wt-cap-intelligence` (`services/intelligence/capabilities/`) · `wt-cap-sdk` (render test scaffolding)
 - [ ] `ar` **native-speaker review** (Kartik/MENA) — gates enabling `data-hippo-locale="ar"` for any Arabic-market partner; copy itself is merged (#17)
 
 ### Merged July 17–18
+- [x] **Partner admin portal V1** ([PR #21](https://github.com/peersclub/Hippo/pull/21), merged July 18) — partner-facing accounts on their own trust plane: `services/portal` :8795 + `apps/portal` :5176, operator invite mint → one-time claim, own data (MAU vs quota), integration (embed tag, secret rotation), plan view + change request, own audit; [[12 Partner Admin Portal]]
 - [x] **Canonical order model — trading framework keystone** ([PR #16](https://github.com/peersclub/Hippo/pull/16), merged July 18) — capability-driven `packages/protocol/src/orders.ts` (spot / futures_perp / options discriminated union, money as strings, `VenueCapabilities` presence-=-enabled) + additive `capability` field on `order_ticket`
 - [x] **Trade-type feature discovery** ([PR #20](https://github.com/peersclub/Hippo/pull/20), merged July 18) — `hippo scan` stage 3: deterministic spot/futures_perp/options detection from OpenAPI specs, `paramsIncomplete` honesty flag, mirrors `VenueCapabilities`
 - [x] **Arabic chrome copy** ([PR #17](https://github.com/peersclub/Hippo/pull/17), merged July 18) — complete `ar` catalog (compiler-enforced totality), RTL pill label `اسأل Hippo`, brand in Latin script, Western numerals; dormant until enabled per-partner
@@ -147,6 +147,6 @@
 | 7 | [[07 Infrastructure & Pods\|Infra & pods]] | ⬜ | local dev only (compose postgres :5433) | GPU quotes, vLLM pods |
 | 8 | Admin panel & durable stores | ✅ merged | `packages/stores` (Postgres-or-memory), memory admin surface, gateway enforcement (suspend/block/MAU quota), `services/admin` + `apps/admin` SPA, audit trail, solidity pass | run against compose Postgres in prod topology; operator SSO later |
 | 9 | Trade capabilities (new) | 🚧 keystone merged | canonical order model (#16) + trade-type discovery (#20) on main | rebase + land the capability modules from `wt-cap-*`: seam order-plans, intelligence capabilities, SDK rendering |
-| 10 | [[12 Partner Admin Portal\|Partner admin portal]] (new) | 🚧 built, [PR #21](https://github.com/peersclub/Hippo/pull/21) open | plan doc 12 + full V1 (2026-07-18): stores/migration 008, `services/portal` :8795, invite mint in admin, `apps/portal` :5176; cross-service E2E green | merge PR #21; run against compose Postgres; memory visibility & invite delivery are [[Open Decisions]] #10/#11 |
+| 10 | [[12 Partner Admin Portal\|Partner admin portal]] | ✅ merged ([PR #21](https://github.com/peersclub/Hippo/pull/21), `8981113`) | full V1 (2026-07-18): stores/migration 008, `services/portal` :8795 (tenancy by construction), operator invite mint, `apps/portal` :5176; cross-service E2E green | run against compose Postgres; memory visibility & invite delivery are [[Open Decisions]] #10/#11; email/SSO later |
 
 Related: [[Home]] · [[00 Build Plan Overview]] · [[Open Decisions]] · [[Hippo Dev Progress]] · [[Ram JSX vs Victor Dev]]
