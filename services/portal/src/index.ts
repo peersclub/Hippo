@@ -47,7 +47,7 @@ const app = buildPortalService({
 })
 
 app
-  .listen({ port: PORT, host: '0.0.0.0' })
+  .listen({ port: PORT, host: '::' })
   .then(() =>
     console.log(
       `portal on :${PORT} — partner self-serve (own data, integration, plan) (${usePg ? 'postgres' : 'in-memory'})`,

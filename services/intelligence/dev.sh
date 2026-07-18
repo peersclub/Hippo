@@ -15,4 +15,4 @@ if ! cmp -s requirements.txt .venv/.requirements-stamp; then
   cp requirements.txt .venv/.requirements-stamp
 fi
 
-exec .venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port "${PORT:-8791}"
+exec .venv/bin/uvicorn main:app --reload --host :: --port "${PORT:-8791}"

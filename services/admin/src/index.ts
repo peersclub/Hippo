@@ -71,7 +71,7 @@ const app = buildAdminService({
   ...(pool ? { mauStore: new PostgresMauStore(pool) } : {}),
 })
 app
-  .listen({ port: PORT, host: '0.0.0.0' })
+  .listen({ port: PORT, host: '::' })
   .then(() =>
     console.log(
       `admin on :${PORT} — operators, partners, plans, users (${usePg ? 'postgres' : 'in-memory'})`,

@@ -31,7 +31,7 @@ function selectAdapter(): { adapter: VenueAdapter; label: string } {
 const { adapter, label } = selectAdapter()
 const app = buildService(adapter)
 app
-  .listen({ port: PORT, host: '0.0.0.0' })
+  .listen({ port: PORT, host: '::' })
   .then(() => console.log(`seam on :${PORT} — canonical trading interface, ${label}`))
   .catch((err) => {
     console.error(err)

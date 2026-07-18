@@ -249,6 +249,6 @@ export async function buildApp(opts: GatewayOptions = {}) {
 
 if (process.env.NODE_ENV !== 'test') {
   const { app } = await buildApp()
-  await app.listen({ port: PORT, host: '0.0.0.0' })
+  await app.listen({ port: PORT, host: '::' })
   console.log(`gateway on :${PORT} — sessions, SSE journal, orchestrator live`)
 }

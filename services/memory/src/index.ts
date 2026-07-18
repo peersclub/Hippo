@@ -12,7 +12,7 @@ const store = process.env.DATABASE_URL
 
 const app = buildService({ store })
 app
-  .listen({ port: PORT, host: '0.0.0.0' })
+  .listen({ port: PORT, host: '::' })
   .then(() =>
     console.log(
       `memory on :${PORT} — opt-in persona, per-partner scoped (${process.env.DATABASE_URL ? 'postgres' : 'in-memory'})`,

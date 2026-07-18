@@ -29,5 +29,5 @@ app.get('/health', async () => ({
   mode: FIXTURES ? 'fixtures' : 'live',
 }))
 
-await app.listen({ port: PORT, host: '0.0.0.0' })
+await app.listen({ port: PORT, host: '::' })
 console.log(`market-data on :${PORT} — ${FIXTURES ? 'fixture' : 'live (CCXT binance)'} mode`)

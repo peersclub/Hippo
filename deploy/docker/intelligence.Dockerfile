@@ -9,4 +9,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/intelligence/ ./
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8791
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8791}"]
+CMD ["sh", "-c", "uvicorn main:app --host :: --port ${PORT:-8791}"]

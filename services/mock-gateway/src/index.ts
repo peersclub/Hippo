@@ -152,5 +152,5 @@ app.post('/v1/turns', async (req, reply) => {
 
 app.get('/health', async () => ({ ok: true, service: 'mock-gateway' }))
 
-await app.listen({ port: PORT, host: '0.0.0.0' })
+await app.listen({ port: PORT, host: '::' })
 console.log(`mock-gateway on :${PORT} — golden conversation ready`)
