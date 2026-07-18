@@ -133,6 +133,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .bubble{align-self:flex-start;max-width:96%;border-radius:15px;padding:13px;background:var(--hippo-card);border:1px solid rgba(var(--hippo-white-rgb),.08)}
 .eyebrow{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.14em;margin-bottom:7px;display:flex;justify-content:space-between;color:var(--hippo-text-dim)}
 .eyebrow .live{color:var(--hippo-amber)}
+.eyebrow-right{display:flex;align-items:center;gap:8px}
+.model-tag{font-family:var(--hippo-font-mono);font-size:8px;letter-spacing:.04em;color:var(--hippo-text-faint);text-transform:none}
 .bubble h3{font-family:var(--hippo-font-display);font-size:15px;font-weight:600;margin-bottom:5px}
 .bubble p{font-size:12.5px;line-height:1.58;color:var(--hippo-text-mid)}
 .bubble p+p{margin-top:6px}

@@ -42,6 +42,9 @@ export type BriefResponse = {
   followups: string[]
   asOfIso: string
   cached: boolean
+  /** Real model id (e.g. "anthropic/claude-haiku-4.5"), or "mock" when the
+   * LLM was unreachable/unset — surfaced in the SDK card and admin panel. */
+  model: string
 }
 
 export type DeclineResponse = {

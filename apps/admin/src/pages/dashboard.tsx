@@ -8,6 +8,7 @@ type Metrics = {
     cache?: { hitRate: number | null }
     degraded?: { active: boolean; seconds: number }
   } | null
+  intelligence: { mode: string; model: string } | null
   alerts: Array<{ partnerId: string; venueName: string; mau: number; quota: number; pct: number }>
   counts: { partners: number; plans: number; users: number }
 }
@@ -35,6 +36,7 @@ export function DashboardPage() {
 
   const gw = metrics.gateway
   const hitRate = gw?.cache?.hitRate
+  const intel = metrics.intelligence
 
   return (
     <>
@@ -90,8 +92,24 @@ export function DashboardPage() {
           <div class="n">{gw ? (gw.degraded?.seconds ?? 0) : '—'}</div>
           <div class="l">Degraded seconds</div>
         </div>
+        <div class="stat">
+          <div class="n text">
+            {intel ? (
+              <>
+                {intel.model}{' '}
+                <span class={`badge ${intel.mode === 'llm' ? 'llm' : 'none'}`}>{intel.mode}</span>
+              </>
+            ) : (
+              '—'
+            )}
+          </div>
+          <div class="l">LLM · active model</div>
+        </div>
       </div>
       {!gw && <div class="dim">Gateway unreachable — live MAU/cache metrics unavailable.</div>}
+      {!intel && (
+        <div class="dim">Intelligence service unreachable — active model unknown.</div>
+      )}
     </>
   )
 }

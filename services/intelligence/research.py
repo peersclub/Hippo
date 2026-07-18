@@ -207,10 +207,12 @@ async def build_brief(
         if flagged:
             return await build_decline(text, symbol, language, snapshot=snapshot)
 
-    return _assemble_brief(prose, snapshot)
+    return _assemble_brief(prose, snapshot, router)
 
 
-def _assemble_brief(prose: dict[str, Any], snapshot: dict | None) -> dict[str, Any]:
+def _assemble_brief(
+    prose: dict[str, Any], snapshot: dict | None, router: ProviderRouter
+) -> dict[str, Any]:
     """Prose (generation) + snapshot card parts (retrieval) → brief dict."""
     brief: dict[str, Any] = {
         "kind": "brief",
@@ -221,6 +223,10 @@ def _assemble_brief(prose: dict[str, Any], snapshot: dict | None) -> dict[str, A
         "followups": prose["followups"],
         "asOfIso": str(snapshot.get("asOfIso")) if snapshot and snapshot.get("asOfIso") else _now_iso(),
         "cached": False,
+        # Reflects what actually produced this prose (real model id, or "mock"
+        # when the LLM was down/unset) — surfaced in both the SDK card and the
+        # admin dashboard so it's never a mystery which provider answered.
+        "model": router.model,
     }
     if snapshot and isinstance(snapshot.get("spark"), list):
         brief["sparkPoints"] = snapshot["spark"]
@@ -488,7 +494,7 @@ async def respond_stream(
         }
         return
 
-    brief = _assemble_brief(prose, snapshot)
+    brief = _assemble_brief(prose, snapshot, router)
     cache.set(
         text,
         cache_scope,

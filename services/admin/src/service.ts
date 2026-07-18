@@ -62,6 +62,8 @@ export type AdminServiceOptions = {
   internalToken?: string
   /** gateway base URL for /internal/metrics. */
   gatewayUrl?: string
+  /** intelligence base URL for /health (LLM provider mode + model). */
+  intelligenceUrl?: string
   /** Durable MAU counts (mau_events) — preferred over the gateway's
    * in-process snapshot when provided; survives gateway restarts. */
   mauStore?: MauStore
@@ -80,6 +82,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     memoryUrl = process.env.MEMORY_URL ?? 'http://localhost:8792',
     internalToken = process.env.INTERNAL_API_TOKEN ?? '',
     gatewayUrl = process.env.GATEWAY_URL ?? 'http://localhost:8788',
+    intelligenceUrl = process.env.INTELLIGENCE_URL ?? 'http://localhost:8791',
     mauStore,
     fetchImpl = fetch,
   } = opts
@@ -641,6 +644,19 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       /* gateway down — counts still render */
     }
 
+    let intelligence: { mode: string; model: string } | null = null
+    try {
+      const res = await fetchImpl(`${intelligenceUrl}/health`, {
+        signal: AbortSignal.timeout(3_000),
+      })
+      if (res.ok) {
+        const body = (await res.json()) as { mode?: string; model?: string }
+        intelligence = { mode: body.mode ?? 'mock', model: body.model ?? 'mock' }
+      }
+    } catch {
+      /* intelligence down — rest of the dashboard still renders */
+    }
+
     // Quota alerts: any planned partner at ≥80% of its MAU ceiling.
     // Durable counts win when available (survive gateway restarts); the
     // gateway's in-process snapshot is the fallback.
@@ -679,6 +695,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
 
     return {
       gateway,
+      intelligence,
       alerts,
       counts: {
         partners: (await partners.list()).length,

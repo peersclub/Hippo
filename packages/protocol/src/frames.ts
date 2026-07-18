@@ -55,6 +55,10 @@ export const ResearchBriefFrame = z.object({
   sources: z.array(z.string()).default([]),
   liveBar: LiveBar.optional(),
   followups: z.array(z.string()).default([]),
+  // Real model id (e.g. "anthropic/claude-haiku-4.5") that generated this
+  // prose, or "mock" when the LLM was unreachable/unset. Absent on frames
+  // that never call a model (degraded-mode, nudges, stopped streams).
+  model: z.string().optional(),
 })
 
 export const OrderTicketFrame = z.object({
