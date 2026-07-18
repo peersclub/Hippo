@@ -1,46 +1,393 @@
 {
-	"nodes":[
-		{"id":"title","type":"text","x":0,"y":-130,"width":2430,"height":80,"text":"# 🦛 Hippo — Dev Progress\nRoadmap (top) · Kanban (below) — snapshot: July 16, 2026. Full detail: [[00 Build Plan Overview]] · [[Open Decisions]] · [[Home]]"},
-		{"id":"g0","type":"group","x":0,"y":0,"width":380,"height":360,"label":"Phase 0 — Foundations","color":"4"},
-		{"id":"c0","type":"text","x":15,"y":45,"width":350,"height":300,"text":"**Weeks 1–2 · ✅ done**\n\n- Card protocol v1 (Zod, additive-only + fallback)\n- Eval harness v1 (300 queries, launch gates)\n- CI: build/test/size-gate/lint per PR"},
-		{"id":"g1","type":"group","x":410,"y":0,"width":380,"height":360,"label":"Phase 1 — Thin Client SDK","color":"4"},
-		{"id":"c1","type":"text","x":425,"y":45,"width":350,"height":300,"text":"**Weeks 2–6 · ✅ done (Jul 16)**\n\n- Core renderer, onboarding, share/feedback, mock-gateway demo\n- Posture matrix + tokenized themes (#12) · i18n + RTL (#15)\n- **Fold release** (`629251b`): contextual chips, composer v2 + drafts, scroll anchoring, offline outbox, a11y, settings (language + clear memory), brief copy — 108 tests\n- Remaining: Arabic copy (layout works, strings pending)"},
-		{"id":"g2","type":"group","x":820,"y":0,"width":380,"height":360,"label":"Phase 2 — Intelligence Backend","color":"3"},
-		{"id":"c2","type":"text","x":835,"y":45,"width":350,"height":300,"text":"**Weeks 4–10 · 🚧 nearly done**\n\n- Intelligence service merged (#8): intent + research, answer cache, guardrail, SSE streaming\n- Gateway core merged (#7) + streaming briefs (#9)\n- Memory v1 merged (#10) · Redis stores + OTel (#13)\n- Full loop verified live on qwen3:4b + market data\n- Open: the bake-off run vs 70B baseline (needs GPU)"},
-		{"id":"g3","type":"group","x":1230,"y":0,"width":380,"height":360,"label":"Phase 3 — Execution Seam","color":"3"},
-		{"id":"c3","type":"text","x":1245,"y":45,"width":350,"height":300,"text":"**Weeks 8–12 · 🚧 in progress**\n\n- Seam service + sim venue extracted from orchestrator\n- **Hand-built KoinBX adapter** (HMAC private trade API) + poll reconciler + audit log\n- Approach A locked (Open Decision #1)\n- Open: pilot-sandbox lifecycle round-trip · confirm-surface mode (Decision #6)"},
-		{"id":"g4","type":"group","x":1640,"y":0,"width":380,"height":360,"label":"Phase 4 — Agentic Installer","color":"3"},
-		{"id":"c4","type":"text","x":1655,"y":45,"width":350,"height":300,"text":"**Weeks 10–14 · 🚧 in progress**\n\n- `hippo scan v0` (discovery → integration report)\n- CTI conformance suite + `hippo conform`\n- Stage 3: deterministic adapter.config.yaml generator\n- Stage 4: mapping.ts + rejections.yaml codegen\n- Open: embed injection · second-venue dogfood"},
-		{"id":"g5","type":"group","x":2050,"y":0,"width":380,"height":360,"label":"Phase 5 — Pilot Launch","color":"6"},
-		{"id":"c5","type":"text","x":2065,"y":45,"width":350,"height":300,"text":"**Weeks 12–16 · ⬜ not started**\n\n- Onboarding hero live, ambient pulse, share cards (client parts shipped in Phase 1)\n- Pilot instrumentation: cache hit rate, queries/MAU, cost/MAU, lift telemetry\n- Degraded-mode banner demonstrable for procurement"},
-		{"id":"kb-backlog","type":"group","x":0,"y":420,"width":460,"height":800,"label":"📋 Backlog","color":"6"},
-		{"id":"bl1","type":"text","x":15,"y":480,"width":430,"height":85,"text":"Bake-off run vs 70B baseline — Phase 2 exit gate (needs GPU access)"},
-		{"id":"bl2","type":"text","x":15,"y":580,"width":430,"height":85,"text":"Arabic (ar) chrome copy — RTL layout done, strings fall back to EN"},
-		{"id":"bl3","type":"text","x":15,"y":680,"width":430,"height":85,"text":"Pilot-sandbox lifecycle round-trip — Phase 3 exit gate, all cards from real venue events"},
-		{"id":"bl4","type":"text","x":15,"y":780,"width":430,"height":85,"text":"CLI: embed injection + verification report (hippo init stages 5–6)"},
-		{"id":"bl5","type":"text","x":15,"y":880,"width":430,"height":85,"text":"Second-venue CLI dogfood — regenerate KoinBX adapter, diff vs hand-built"},
-		{"id":"bl6","type":"text","x":15,"y":980,"width":430,"height":85,"text":"Pilot instrumentation — cache hit rate, queries/MAU, cost/MAU, lift telemetry"},
-		{"id":"bl7","type":"text","x":15,"y":1080,"width":430,"height":85,"text":"Stop-streaming uplink (protocol addition) — deferred from the fold release"},
-		{"id":"kb-progress","type":"group","x":500,"y":420,"width":460,"height":300,"label":"🚧 In Progress","color":"3"},
-		{"id":"ip1","type":"text","x":515,"y":480,"width":430,"height":85,"text":"Admin panel (`feat/admin-panel`) — controller, live-session kill switch, operator mgmt, login lockout, durable MAU, quota alerts"},
-		{"id":"ip2","type":"text","x":515,"y":580,"width":430,"height":85,"text":"Point the site demo default at the real gateway (?gw=real exists; flip the default post-pilot-wiring)"},
-		{"id":"kb-blocked","type":"group","x":1000,"y":420,"width":460,"height":400,"label":"⛔ Blocked / Open Decisions","color":"1"},
-		{"id":"bk1","type":"text","x":1015,"y":480,"width":430,"height":85,"text":"Confirm-surface mode — API (pilot default) vs deep link vs JS callback vs hosted modal — Decision #6, with pilot partner eng"},
-		{"id":"bk2","type":"text","x":1015,"y":580,"width":430,"height":85,"text":"Layer-2 consent format per jurisdiction — counsel, before first Gulf contract (Decision #2)"},
-		{"id":"bk3","type":"text","x":1015,"y":680,"width":430,"height":85,"text":"CLI agent model — frontier vs open-source codegen (Decision #3) — blocks init stages 5–6 polish"},
-		{"id":"kb-done","type":"group","x":1500,"y":420,"width":460,"height":1500,"label":"✅ Done","color":"4"},
-		{"id":"dn1","type":"text","x":1515,"y":480,"width":430,"height":85,"text":"Card protocol v1 · eval harness v1 (300 queries) · CI gates"},
-		{"id":"dn2","type":"text","x":1515,"y":580,"width":430,"height":85,"text":"SDK core — renderer, onboarding, share/feedback, order-pill expand"},
-		{"id":"dn3","type":"text","x":1515,"y":680,"width":430,"height":85,"text":"SDK postures + tokenized light/dark themes (#12) · i18n + RTL (#15)"},
-		{"id":"dn4","type":"text","x":1515,"y":780,"width":430,"height":85,"text":"**SDK fold release (`629251b`)** — contextual chips, composer v2, scroll anchoring, offline outbox, a11y, settings completion, brief copy"},
-		{"id":"dn5","type":"text","x":1515,"y":880,"width":430,"height":85,"text":"`services/intelligence` (#8) — intent + research, cache, guardrail, streaming"},
-		{"id":"dn6","type":"text","x":1515,"y":980,"width":430,"height":85,"text":"Gateway core (#7) + streaming briefs (#9) — sessions, SSE journal + resume, orchestrator, degraded fallback"},
-		{"id":"dn7","type":"text","x":1515,"y":1080,"width":430,"height":85,"text":"Memory v1 (#10) — persona service, gateway wiring, experience-calibrated depth"},
-		{"id":"dn8","type":"text","x":1515,"y":1180,"width":430,"height":85,"text":"Redis-backed stores + OpenTelemetry (#13) — production persistence path"},
-		{"id":"dn9","type":"text","x":1515,"y":1280,"width":430,"height":85,"text":"Execution seam service + **hand-built KoinBX adapter** (HMAC, poll reconciler, audit log)"},
-		{"id":"dn10","type":"text","x":1515,"y":1380,"width":430,"height":85,"text":"CLI: scan v0 · CTI conformance + `hippo conform` · config generator (stage 3) · mapping/rejections codegen (stage 4)"},
-		{"id":"dn11","type":"text","x":1515,"y":1480,"width":430,"height":85,"text":"Marketing site — homepage (mascot logo), /design, /sdk + WebView mobile shell + theme toggle"},
-		{"id":"dn12","type":"text","x":1515,"y":1580,"width":430,"height":85,"text":"`services/market-data` (CCXT) · mock-gateway golden player · host-demo"}
-	],
-	"edges":[]
+ "nodes": [
+  {
+   "id": "title",
+   "type": "text",
+   "x": 0,
+   "y": -130,
+   "width": 2430,
+   "height": 80,
+   "text": "# \ud83e\udd9b Hippo \u2014 Dev Progress\nRoadmap (top) \u00b7 Kanban (below) \u2014 snapshot: July 18, 2026. Full detail: [[00 Build Plan Overview]] \u00b7 [[Open Decisions]] \u00b7 [[Home]]"
+  },
+  {
+   "id": "g0",
+   "type": "group",
+   "x": 0,
+   "y": 0,
+   "width": 380,
+   "height": 360,
+   "label": "Phase 0 \u2014 Foundations",
+   "color": "4"
+  },
+  {
+   "id": "c0",
+   "type": "text",
+   "x": 15,
+   "y": 45,
+   "width": 350,
+   "height": 300,
+   "text": "**Weeks 1\u20132 \u00b7 \u2705 done**\n\n- Card protocol v1 (Zod, additive-only + fallback)\n- Eval harness v1 (300 queries, launch gates)\n- CI: build/test/size-gate/lint per PR"
+  },
+  {
+   "id": "g1",
+   "type": "group",
+   "x": 410,
+   "y": 0,
+   "width": 380,
+   "height": 360,
+   "label": "Phase 1 \u2014 Thin Client SDK",
+   "color": "4"
+  },
+  {
+   "id": "c1",
+   "type": "text",
+   "x": 425,
+   "y": 45,
+   "width": 350,
+   "height": 300,
+   "text": "**Weeks 2\u20136 \u00b7 \u2705 done (Jul 16)**\n\n- Core renderer, onboarding, share/feedback, mock-gateway demo\n- Posture matrix + tokenized themes (#12) \u00b7 i18n + RTL (#15)\n- **Fold release** (`629251b`): contextual chips, composer v2 + drafts, scroll anchoring, offline outbox, a11y, settings (language + clear memory), brief copy \u2014 108 tests\n- Remaining: Arabic copy (layout works, strings pending)"
+  },
+  {
+   "id": "g2",
+   "type": "group",
+   "x": 820,
+   "y": 0,
+   "width": 380,
+   "height": 360,
+   "label": "Phase 2 \u2014 Intelligence Backend",
+   "color": "3"
+  },
+  {
+   "id": "c2",
+   "type": "text",
+   "x": 835,
+   "y": 45,
+   "width": 350,
+   "height": 300,
+   "text": "**Weeks 4\u201310 \u00b7 \ud83d\udea7 nearly done**\n\n- Intelligence service merged (#8): intent + research, answer cache, guardrail, SSE streaming\n- Gateway core merged (#7) + streaming briefs (#9)\n- Memory v1 merged (#10) \u00b7 Redis stores + OTel (#13)\n- Full loop verified live on qwen3:4b + market data\n- Open: the bake-off run vs 70B baseline (needs GPU)"
+  },
+  {
+   "id": "g3",
+   "type": "group",
+   "x": 1230,
+   "y": 0,
+   "width": 380,
+   "height": 360,
+   "label": "Phase 3 \u2014 Execution Seam",
+   "color": "3"
+  },
+  {
+   "id": "c3",
+   "type": "text",
+   "x": 1245,
+   "y": 45,
+   "width": 350,
+   "height": 300,
+   "text": "**Weeks 8\u201312 \u00b7 \ud83d\udea7 in progress**\n\n- Seam service + sim venue extracted from orchestrator\n- **Hand-built KoinBX adapter** (HMAC private trade API) + poll reconciler + audit log\n- Approach A locked (Open Decision #1)\n- Open: pilot-sandbox lifecycle round-trip \u00b7 confirm-surface mode (Decision #6)"
+  },
+  {
+   "id": "g4",
+   "type": "group",
+   "x": 1640,
+   "y": 0,
+   "width": 380,
+   "height": 360,
+   "label": "Phase 4 \u2014 Agentic Installer",
+   "color": "3"
+  },
+  {
+   "id": "c4",
+   "type": "text",
+   "x": 1655,
+   "y": 45,
+   "width": 350,
+   "height": 300,
+   "text": "**Weeks 10\u201314 \u00b7 \ud83d\udea7 in progress**\n\n- `hippo scan v0` (discovery \u2192 integration report)\n- CTI conformance suite + `hippo conform`\n- Stage 3: deterministic adapter.config.yaml generator\n- Stage 4: mapping.ts + rejections.yaml codegen\n- Open: embed injection \u00b7 second-venue dogfood"
+  },
+  {
+   "id": "g5",
+   "type": "group",
+   "x": 2050,
+   "y": 0,
+   "width": 380,
+   "height": 360,
+   "label": "Phase 5 \u2014 Pilot Launch",
+   "color": "6"
+  },
+  {
+   "id": "c5",
+   "type": "text",
+   "x": 2065,
+   "y": 45,
+   "width": 350,
+   "height": 300,
+   "text": "**Weeks 12\u201316 \u00b7 \u2b1c not started**\n\n- Onboarding hero live, ambient pulse, share cards (client parts shipped in Phase 1)\n- Pilot instrumentation: cache hit rate, queries/MAU, cost/MAU, lift telemetry\n- Degraded-mode banner demonstrable for procurement"
+  },
+  {
+   "id": "kb-backlog",
+   "type": "group",
+   "x": 0,
+   "y": 420,
+   "width": 460,
+   "height": 500,
+   "label": "\ud83d\udccb Backlog",
+   "color": "6"
+  },
+  {
+   "id": "bl1",
+   "type": "text",
+   "x": 15,
+   "y": 480,
+   "width": 430,
+   "height": 85,
+   "text": "Bake-off run vs 70B baseline \u2014 Phase 2 exit gate (needs GPU access)"
+  },
+  {
+   "id": "bl3",
+   "type": "text",
+   "x": 15,
+   "y": 580,
+   "width": 430,
+   "height": 85,
+   "text": "Pilot-sandbox lifecycle round-trip \u2014 Phase 3 exit gate, all cards from real venue events"
+  },
+  {
+   "id": "bl5",
+   "type": "text",
+   "x": 15,
+   "y": 680,
+   "width": 430,
+   "height": 85,
+   "text": "Second-venue CLI dogfood \u2014 regenerate KoinBX adapter, diff vs hand-built"
+  },
+  {
+   "id": "bl6",
+   "type": "text",
+   "x": 15,
+   "y": 780,
+   "width": 430,
+   "height": 85,
+   "text": "Pilot instrumentation \u2014 cache hit rate, queries/MAU, cost/MAU, lift telemetry"
+  },
+  {
+   "id": "kb-progress",
+   "type": "group",
+   "x": 500,
+   "y": 420,
+   "width": 460,
+   "height": 700,
+   "label": "\ud83d\udea7 In Progress",
+   "color": "3"
+  },
+  {
+   "id": "ip1",
+   "type": "text",
+   "x": 515,
+   "y": 480,
+   "width": 430,
+   "height": 85,
+   "text": "Admin panel (`feat/admin-panel`) \u2014 controller, live-session kill switch, operator mgmt, login lockout, durable MAU, quota alerts"
+  },
+  {
+   "id": "ip2",
+   "type": "text",
+   "x": 515,
+   "y": 580,
+   "width": 430,
+   "height": 85,
+   "text": "Point the site demo default at the real gateway (?gw=real exists; flip the default post-pilot-wiring)"
+  },
+  {
+   "id": "kb-blocked",
+   "type": "group",
+   "x": 1000,
+   "y": 420,
+   "width": 460,
+   "height": 400,
+   "label": "\u26d4 Blocked / Open Decisions",
+   "color": "1"
+  },
+  {
+   "id": "bk1",
+   "type": "text",
+   "x": 1015,
+   "y": 480,
+   "width": 430,
+   "height": 85,
+   "text": "Confirm-surface mode \u2014 API (pilot default) vs deep link vs JS callback vs hosted modal \u2014 Decision #6, with pilot partner eng"
+  },
+  {
+   "id": "bk2",
+   "type": "text",
+   "x": 1015,
+   "y": 580,
+   "width": 430,
+   "height": 85,
+   "text": "Layer-2 consent format per jurisdiction \u2014 counsel, before first Gulf contract (Decision #2)"
+  },
+  {
+   "id": "bk3",
+   "type": "text",
+   "x": 1015,
+   "y": 680,
+   "width": 430,
+   "height": 85,
+   "text": "CLI agent model \u2014 frontier vs open-source codegen (Decision #3) \u2014 blocks init stages 5\u20136 polish"
+  },
+  {
+   "id": "kb-done",
+   "type": "group",
+   "x": 1500,
+   "y": 420,
+   "width": 460,
+   "height": 1500,
+   "label": "\u2705 Done",
+   "color": "4"
+  },
+  {
+   "id": "dn1",
+   "type": "text",
+   "x": 1515,
+   "y": 480,
+   "width": 430,
+   "height": 85,
+   "text": "Card protocol v1 \u00b7 eval harness v1 (300 queries) \u00b7 CI gates"
+  },
+  {
+   "id": "dn2",
+   "type": "text",
+   "x": 1515,
+   "y": 580,
+   "width": 430,
+   "height": 85,
+   "text": "SDK core \u2014 renderer, onboarding, share/feedback, order-pill expand"
+  },
+  {
+   "id": "dn3",
+   "type": "text",
+   "x": 1515,
+   "y": 680,
+   "width": 430,
+   "height": 85,
+   "text": "SDK postures + tokenized light/dark themes (#12) \u00b7 i18n + RTL (#15)"
+  },
+  {
+   "id": "dn4",
+   "type": "text",
+   "x": 1515,
+   "y": 780,
+   "width": 430,
+   "height": 85,
+   "text": "**SDK fold release (`629251b`)** \u2014 contextual chips, composer v2, scroll anchoring, offline outbox, a11y, settings completion, brief copy"
+  },
+  {
+   "id": "dn5",
+   "type": "text",
+   "x": 1515,
+   "y": 880,
+   "width": 430,
+   "height": 85,
+   "text": "`services/intelligence` (#8) \u2014 intent + research, cache, guardrail, streaming"
+  },
+  {
+   "id": "dn6",
+   "type": "text",
+   "x": 1515,
+   "y": 980,
+   "width": 430,
+   "height": 85,
+   "text": "Gateway core (#7) + streaming briefs (#9) \u2014 sessions, SSE journal + resume, orchestrator, degraded fallback"
+  },
+  {
+   "id": "dn7",
+   "type": "text",
+   "x": 1515,
+   "y": 1080,
+   "width": 430,
+   "height": 85,
+   "text": "Memory v1 (#10) \u2014 persona service, gateway wiring, experience-calibrated depth"
+  },
+  {
+   "id": "dn8",
+   "type": "text",
+   "x": 1515,
+   "y": 1180,
+   "width": 430,
+   "height": 85,
+   "text": "Redis-backed stores + OpenTelemetry (#13) \u2014 production persistence path"
+  },
+  {
+   "id": "dn9",
+   "type": "text",
+   "x": 1515,
+   "y": 1280,
+   "width": 430,
+   "height": 85,
+   "text": "Execution seam service + **hand-built KoinBX adapter** (HMAC, poll reconciler, audit log)"
+  },
+  {
+   "id": "dn10",
+   "type": "text",
+   "x": 1515,
+   "y": 1380,
+   "width": 430,
+   "height": 85,
+   "text": "CLI: scan v0 \u00b7 CTI conformance + `hippo conform` \u00b7 config generator (stage 3) \u00b7 mapping/rejections codegen (stage 4)"
+  },
+  {
+   "id": "dn11",
+   "type": "text",
+   "x": 1515,
+   "y": 1480,
+   "width": 430,
+   "height": 85,
+   "text": "Marketing site \u2014 homepage (mascot logo), /design, /sdk + WebView mobile shell + theme toggle"
+  },
+  {
+   "id": "dn12",
+   "type": "text",
+   "x": 1515,
+   "y": 1580,
+   "width": 430,
+   "height": 85,
+   "text": "`services/market-data` (CCXT) \u00b7 mock-gateway golden player \u00b7 host-demo"
+  },
+  {
+   "id": "ip3",
+   "type": "text",
+   "x": 515,
+   "y": 680,
+   "width": 430,
+   "height": 85,
+   "text": "**PR #17** \u2014 Arabic chrome copy (complete ar catalog + RTL pill label) \u2014 in review"
+  },
+  {
+   "id": "ip4",
+   "type": "text",
+   "x": 515,
+   "y": 780,
+   "width": 430,
+   "height": 85,
+   "text": "**PR #18** \u2014 Stop-streaming: stream_stop uplink, gateway abort + honest stopped brief, SDK \u23f9 \u2014 in review"
+  },
+  {
+   "id": "ip5",
+   "type": "text",
+   "x": 515,
+   "y": 880,
+   "width": 430,
+   "height": 85,
+   "text": "**PR #19** \u2014 CLI hippo embed + hippo verify (init stages 5\u20136, deterministic) \u2014 in review"
+  },
+  {
+   "id": "ip6",
+   "type": "text",
+   "x": 515,
+   "y": 980,
+   "width": 430,
+   "height": 85,
+   "text": "**PR #16 (draft)** \u2014 canonical order model, capability-driven (trade framework keystone)"
+  }
+ ],
+ "edges": []
 }
