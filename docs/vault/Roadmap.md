@@ -1,10 +1,10 @@
 # 🦛 Hippo Roadmap — Done vs Pending
 
-**As of:** July 18, 2026 · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `b2d1990`) · Detail per phase: [[00 Build Plan Overview]]
+**As of:** July 18, 2026 (evening) · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `4abbafc`) · Detail per phase: [[00 Build Plan Overview]]
 
 > [!summary] Where we are
 > Phase 0 ✅ done · Phase 1 (SDK) ✅ core complete (postures #12, i18n Phase 1 #15, fold release, stop control #18) · Phase 2 (intelligence backend) ✅ core + Redis stores + OTel **merged to main**; bake-off pending (GPU) · Phase 3 (execution seam) 🚧 seam + sim + KoinBX adapter **merged to main**; blocked on Open Decisions #6/#9 · Phase 4 (CLI) 🚧 scan → conform → config codegen → `embed`/`verify` (stages 5–6, #19) all landed; model-driven codegen pending · Phase 5 (pilot) ⬜ · **Ops: admin panel + durable stores + provisioning (`hippo register`) merged to main**.
-> **New workstream (July 16–18): trade capabilities** — canonical order model keystone ([PR #16](https://github.com/peersclub/Hippo/pull/16), draft) + trade-type discovery ([PR #20](https://github.com/peersclub/Hippo/pull/20), draft) + seam/intelligence/SDK capability WIP in `wt-cap-*` worktrees.
+> **New workstream (July 16–18): trade capabilities** — canonical order model keystone (#16) and trade-type discovery in `hippo scan` (#20) **both merged July 18**; the seam/intelligence/SDK capability modules are WIP in the `wt-cap-*` worktrees (rebase onto main now that the keystone landed). Arabic chrome copy (#17) also merged — dormant until a partner sets `ar`; native review gates activation. **Partner portal V1 in review ([PR #21](https://github.com/peersclub/Hippo/pull/21))**.
 > The whole conversational loop is **verified end-to-end on main**: protocol turn → gateway orchestrator → intent/research engines (Ollama qwen3:4b) → live market data → research_brief / advice_decline / order_ticket frames — including the degraded-mode banner path when the model is cold.
 
 ---
@@ -34,12 +34,14 @@
 
 ## 🔄 In flight (PRs open / WIP)
 
-- [ ] **Canonical order model — trading framework keystone** ([PR #16](https://github.com/peersclub/Hippo/pull/16), draft, `feat/trade-capabilities`) — capability-driven `packages/protocol/src/orders.ts` + order test suite; the base the spot/futures/options capability work hangs off
-- [ ] **Trade-type feature discovery** ([PR #20](https://github.com/peersclub/Hippo/pull/20), draft, `feat/cap-discovery`) — `hippo scan` detects spot / futures_perp / options from the venue spec (~900 lines incl. OpenAPI fixtures + tests)
-- [ ] **Arabic chrome copy** ([PR #17](https://github.com/peersclub/Hippo/pull/17), open, `feat/i18n-ar-copy`) — complete `ar` catalog, compiler-enforced totality, RTL pill label; pending native-speaker review
-- [ ] **Capability WIP, uncommitted in worktrees:** `wt-cap-seam` (order-plans across seam: venue adapters, types, service — the biggest WIP) · `wt-cap-intelligence` (`services/intelligence/capabilities/`) · `wt-cap-sdk` (render test scaffolding)
+- [ ] **Partner admin portal V1** ([PR #21](https://github.com/peersclub/Hippo/pull/21), open, `feat/partner-portal`) — partner-facing accounts: own data (MAU vs quota), integration surface (embed tag, secret rotation), plan view + change request, own audit; `services/portal` :8795 + `apps/portal` :5176
+- [ ] **Capability modules, uncommitted in worktrees** (rebase onto main — keystone #16 is in): `wt-cap-seam` (order-plans across seam: venue adapters, types, service — the biggest WIP) · `wt-cap-intelligence` (`services/intelligence/capabilities/`) · `wt-cap-sdk` (render test scaffolding)
+- [ ] `ar` **native-speaker review** (Kartik/MENA) — gates enabling `data-hippo-locale="ar"` for any Arabic-market partner; copy itself is merged (#17)
 
 ### Merged July 17–18
+- [x] **Canonical order model — trading framework keystone** ([PR #16](https://github.com/peersclub/Hippo/pull/16), merged July 18) — capability-driven `packages/protocol/src/orders.ts` (spot / futures_perp / options discriminated union, money as strings, `VenueCapabilities` presence-=-enabled) + additive `capability` field on `order_ticket`
+- [x] **Trade-type feature discovery** ([PR #20](https://github.com/peersclub/Hippo/pull/20), merged July 18) — `hippo scan` stage 3: deterministic spot/futures_perp/options detection from OpenAPI specs, `paramsIncomplete` honesty flag, mirrors `VenueCapabilities`
+- [x] **Arabic chrome copy** ([PR #17](https://github.com/peersclub/Hippo/pull/17), merged July 18) — complete `ar` catalog (compiler-enforced totality), RTL pill label `اسأل Hippo`, brand in Latin script, Western numerals; dormant until enabled per-partner
 - [x] **Admin panel + durable stores → main** (incl. solidity pass `b31c8a4`: login lockout, durable MAU, typed confirms, search, bulk purge) — the operator plane: partners & B2B plans, users, user-wise memory management, full audit
 	- `packages/stores` (new): `PartnerStore`/`PlanStore`/`UserStore`/`OperatorStore`/`AuditStore` — **Postgres when `DATABASE_URL` is set, in-memory otherwise** (the seams BE doc §4 promised: `partners`, `users`, `users_memory`, `admin_*` tables); numbered-SQL migration runner; `docker-compose.yml` postgres:16 on :5433
 	- Memory service: async `PersonaStore` + `PostgresPersonaStore`, admin list/hard-delete surface guarded by `INTERNAL_API_TOKEN` (fail-closed); **experienceLevel finally has a write path** (admin-set; no user-facing one existed)
@@ -118,6 +120,13 @@
 - [ ] Pilot instrumentation (Sudha): load curves, cache hit rate, queries/MAU, true cost/MAU, lift telemetry
 - [ ] Degraded-mode banner demonstrable for procurement (SLA clause)
 
+### Ops — Partner admin portal (planned 2026-07-18, [[12 Partner Admin Portal]])
+- [ ] `@hippo/stores`: `partner_admins` (migration 008), `PartnerAdminStore`, shared scrypt helpers, audit filter by partner, per-partner MAU count
+- [ ] `services/portal` :8795 — partner-scoped auth (own cookie/secret), overview / users / integration (secret rotation) / plan / audit; tenancy by construction (partnerId only ever from the session)
+- [ ] `services/admin`: operator-side invite mint / list / revoke (`/v1/partners/:id/admins`), one-time claim links
+- [ ] `apps/portal` :5176 — login/claim, overview, users, integration, plan, audit
+- [ ] Exit gate: invite → claim → login → rotate secret → gateway mints sessions with the new secret; zero cross-tenant routes by construction
+
 ### Infra (cross-cutting)
 - [ ] India + Gulf GPU quotes (Kartik) → capacity plan
 - [ ] vLLM pods: regional intent (7–8B) + global research (~30B) + cache tier
@@ -130,13 +139,14 @@
 | # | Workstream | Status | Shipped | Next up |
 |---|---|---|---|---|
 | 1 | [[01 System Architecture\|Architecture & protocol]] | ✅ | protocol v1, topology locked | protocol additions for lifecycle |
-| 2 | [[02 Thin Client SDK\|Thin client SDK]] | ✅ core | renderer, onboarding, edge states, postures (#12), i18n Phase 1 (#15), fold release, stop control (#18), mobile WebView shell | Arabic copy (PR #17), hi/hi-Latn native review, stop-line review |
+| 2 | [[02 Thin Client SDK\|Thin client SDK]] | ✅ core | renderer, onboarding, edge states, postures (#12), i18n Phase 1 (#15) + Arabic copy (#17, dormant), fold release, stop control (#18), mobile WebView shell | ar/hi/hi-Latn native review, stop-line review, capability-aware ticket chrome (`wt-cap-sdk`) |
 | 3 | [[03 Intelligence Layer\|Intelligence layer]] | ✅ core on main | intent + research + cache + guardrail + streaming (#8, #9), market-data, gateway wiring (#7), memory v1 (#10), Redis + OTel (#13) | bake-off (GPU), capability awareness (`wt-cap-intelligence` WIP) |
 | 4 | [[04 Execution Seam & Partner Adapter\|Execution seam]] | ✅ on main | canonical interface + sim + KoinBX adapter (merged); conformance-certified sim | confirm-surface (#6), venue lifecycle feedback (#9), sandbox round-trip; order-plans WIP (`wt-cap-seam`) |
-| 5 | [[05 Agentic Installer — Hippo CLI\|Agentic installer]] | 🚧 ~70% | `hippo scan` v0, CTI conformance, config codegen, `register` (WS-1), `embed` + `verify` (#19), trade-type discovery (PR #20 draft) | model-driven `mapping.ts` codegen, theming extraction, KoinBX dogfood (needs live keys) |
+| 5 | [[05 Agentic Installer — Hippo CLI\|Agentic installer]] | 🚧 ~75% | `hippo scan` v0, CTI conformance, config codegen, `register` (WS-1), `embed` + `verify` (#19), trade-type discovery (#20, merged) | model-driven `mapping.ts` codegen, theming extraction, KoinBX dogfood (needs live keys) |
 | 6 | [[06 Eval Harness & Data\|Eval harness]] | ✅ v1 | 300-query set, runner, gates | run the bake-off, continuous probing |
 | 7 | [[07 Infrastructure & Pods\|Infra & pods]] | ⬜ | local dev only (compose postgres :5433) | GPU quotes, vLLM pods |
 | 8 | Admin panel & durable stores | ✅ merged | `packages/stores` (Postgres-or-memory), memory admin surface, gateway enforcement (suspend/block/MAU quota), `services/admin` + `apps/admin` SPA, audit trail, solidity pass | run against compose Postgres in prod topology; operator SSO later |
-| 9 | Trade capabilities (new) | 🚧 keystone in review | canonical order model (PR #16 draft), trade-type discovery (PR #20 draft) | land keystone, then seam order-plans / intelligence capabilities / SDK rendering from `wt-cap-*` |
+| 9 | Trade capabilities (new) | 🚧 keystone merged | canonical order model (#16) + trade-type discovery (#20) on main | rebase + land the capability modules from `wt-cap-*`: seam order-plans, intelligence capabilities, SDK rendering |
+| 10 | [[12 Partner Admin Portal\|Partner admin portal]] (new) | 🚧 built, [PR #21](https://github.com/peersclub/Hippo/pull/21) open | plan doc 12 + full V1 (2026-07-18): stores/migration 008, `services/portal` :8795, invite mint in admin, `apps/portal` :5176; cross-service E2E green | merge PR #21; run against compose Postgres; memory visibility & invite delivery are [[Open Decisions]] #10/#11 |
 
 Related: [[Home]] · [[00 Build Plan Overview]] · [[Open Decisions]] · [[Hippo Dev Progress]] · [[Ram JSX vs Victor Dev]]
