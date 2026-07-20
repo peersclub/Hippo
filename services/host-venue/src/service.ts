@@ -3,7 +3,8 @@
  *
  * TWO audiences, deliberately separated:
  *   • The PARASITE (Hippo's seam adapter) → the signed `/api/v1/trade/*` wire,
- *     KoinBX-shaped so what we test matches the real pilot rails.
+ *     a standard HMAC-signed venue trade API so the integration is exercised
+ *     against genuine rails, not a sim timer.
  *   • The HOST'S OWN UI (first-party) → unsigned `/ui/*`, `/stream` (SSE),
  *     `/v1/capabilities`, `/admin/config`. The UI is the venue's own front end;
  *     it doesn't sign, it has a session.
@@ -39,7 +40,7 @@ export type BuildOptions = {
 
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v))
 
-/** Parse the KoinBX-shaped (+ perp extension) wire body into a PlaceRequest. */
+/** Parse the signed (+ perp extension) wire body into a PlaceRequest. */
 function parsePlace(body: Record<string, unknown>): PlaceRequest | string {
   const pairName = String(body.pairName ?? '')
   if (!/^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}$/.test(pairName)) return 'invalid pairName'
@@ -62,7 +63,7 @@ function parsePlace(body: Record<string, unknown>): PlaceRequest | string {
   return req
 }
 
-/** KoinBX-shaped open-order row the parasite reconciler reads. */
+/** Open-order row the parasite reconciler reads. */
 function toOpenRow(o: Order) {
   return {
     id: o.id,

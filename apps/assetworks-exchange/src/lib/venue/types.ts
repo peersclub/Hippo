@@ -72,7 +72,7 @@ export type StreamEvent =
   | { type: "config"; config: AdminConfig }
   | { type: "handoff"; handoff: Handoff }
 
-/** Order ticket the human fills in (before mapping to the KoinBX-shaped wire). */
+/** Order ticket the human fills in (before mapping to the signed wire). */
 export interface TicketInput {
   market: Market
   side: Side

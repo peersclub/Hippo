@@ -1,17 +1,16 @@
 /**
- * Assetworks Exchange venue adapter — the test-host counterpart to
- * koinbx-venue.ts. It is intentionally the SAME shape as the KoinBX pilot
- * adapter (HMAC-signed private trade API, poll reconciler as the webhook
- * backstop), which is the point: a parasite adapter for one venue is a small
- * diff from another, and the Assetworks host lets us exercise the whole
- * Canonical Trading Interface against a venue we fully control.
+ * Assetworks Exchange venue adapter — the reference implementation of the
+ * Canonical Trading Interface against a real HTTP venue we fully control (the
+ * host-venue service). It talks a standard HMAC-signed private trade API with a
+ * poll reconciler as the webhook backstop, so the parasite integration is
+ * exercised end to end (signing, reconcile, confirm surfaces) not simulated.
  *
- * Two things it adds over the KoinBX adapter, both requested for the test host:
+ * Two capabilities worth calling out:
  *   1. BOTH confirm surfaces (Open Decision #6). The active surface is read
  *      from the host's /admin/config at confirm time, so the host's admin
  *      switch is authoritative — flip it in the UI and the next order takes
  *      the other path with no redeploy.
- *        • 'api'         → place directly with the scoped key (as KoinBX does).
+ *        • 'api'         → place directly with the scoped key.
  *        • 'js_callback' → hand off; the HOST renders a native confirm modal;
  *          on approval the host places; we poll the handoff to learn the venue
  *          order id, then reconcile normally.

@@ -13,7 +13,7 @@
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { KoinbxVenueAdapter, SimVenueAdapter, type VenueAdapter } from '@hippo/seam'
+import { AssetworksVenueAdapter, SimVenueAdapter, type VenueAdapter } from '@hippo/seam'
 import { Command } from 'commander'
 import { inProcessDriver } from './conform/in-process-driver.js'
 import { renderConformanceReport, renderConformanceSummary } from './conform/report.js'
@@ -139,29 +139,29 @@ program
   .description(
     'Run the CTI conformance suite against a venue adapter (the verifier a generated adapter must pass)',
   )
-  .option('--venue <venue>', 'which adapter to exercise: sim | koinbx', 'sim')
+  .option('--venue <venue>', 'which adapter to exercise: sim | assetworks', 'sim')
   .option('--instrument <symbol>', 'instrument to exercise', 'BTC/USDT')
   .option('--json', 'also write the typed ConformanceReport as JSON for `hippo verify`')
   .action(async (opts: { venue: string; instrument: string; json?: boolean }) => {
     let adapter: VenueAdapter
-    if (opts.venue === 'koinbx') {
-      const { KOINBX_API_KEY, KOINBX_SECRET, KOINBX_BASE_URL } = process.env
-      if (!KOINBX_API_KEY || !KOINBX_SECRET || !KOINBX_BASE_URL) {
+    if (opts.venue === 'assetworks') {
+      const { ASSETWORKS_API_KEY, ASSETWORKS_SECRET, ASSETWORKS_BASE_URL } = process.env
+      if (!ASSETWORKS_API_KEY || !ASSETWORKS_SECRET || !ASSETWORKS_BASE_URL) {
         console.error(
-          'hippo conform --venue koinbx requires KOINBX_API_KEY, KOINBX_SECRET and KOINBX_BASE_URL.',
+          'hippo conform --venue assetworks requires ASSETWORKS_API_KEY, ASSETWORKS_SECRET and ASSETWORKS_BASE_URL.',
         )
         process.exitCode = 1
         return
       }
-      adapter = new KoinbxVenueAdapter({
-        apiKey: KOINBX_API_KEY,
-        secret: KOINBX_SECRET,
-        baseUrl: KOINBX_BASE_URL,
+      adapter = new AssetworksVenueAdapter({
+        apiKey: ASSETWORKS_API_KEY,
+        secret: ASSETWORKS_SECRET,
+        baseUrl: ASSETWORKS_BASE_URL,
       })
     } else if (opts.venue === 'sim') {
       adapter = new SimVenueAdapter()
     } else {
-      console.error(`hippo conform — unknown venue "${opts.venue}" (expected sim | koinbx).`)
+      console.error(`hippo conform — unknown venue "${opts.venue}" (expected sim | assetworks).`)
       process.exitCode = 1
       return
     }

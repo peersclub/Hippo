@@ -50,7 +50,7 @@
   </div>
 
   <h2 id="model">The model — a parasite on a real host</h2>
-  <p><b>Assetworks Exchange</b> is a self-contained venue with its own signed trade API, fill engine, balances and positions, streaming live prices from <b>Binance public feeds</b>. <b>Hippo</b> embeds as a parasite via one <code>&lt;script&gt;</code> tag and trades through the execution seam. Because the host speaks the same signed wire shape as the KoinBX pilot, the parasite drives it through <b>production code paths</b> — HMAC signing, capability discovery, the poll reconciler, both confirm surfaces — not a sim timer.</p>
+  <p><b>Assetworks Exchange</b> is a self-contained venue with its own signed trade API, fill engine, balances and positions, streaming live prices from <b>Binance public feeds</b>. <b>Hippo</b> embeds as a parasite via one <code>&lt;script&gt;</code> tag and trades through the execution seam. Because the host speaks a standard HMAC-signed venue wire, the parasite drives it through <b>production code paths</b> — HMAC signing, capability discovery, the poll reconciler, both confirm surfaces — not a sim timer.</p>
   <p>The payoff: an order the conversational parasite places lands in the <b>same book, same wallet</b> (<code>trader-1</code>) as the host's own order ticket, so it shows in the native blotter and moves the same balances — exactly like a real third-party integration.</p>
 
   <h2 id="run">Run it</h2>

@@ -2,9 +2,8 @@
  * Simulated venue adapter — the dev/demo implementation of the Canonical
  * Trading Interface. Quotes come from the live market-data service (real
  * prices, honest tickets); the confirm→fill lifecycle is simulated with a
- * timer where a real venue sends webhooks. The hand-built KoinBX adapter
- * (Phase 3 pilot) replaces this class behind the same interface — and later
- * becomes the `hippo init` codegen reference.
+ * timer where a real venue sends webhooks. The Assetworks adapter replaces this
+ * class behind the same interface for full-fidelity, real-HTTP testing.
  */
 import { randomUUID } from 'node:crypto'
 import type {

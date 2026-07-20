@@ -35,7 +35,7 @@ Vars marked ⬅ reference other Railway services (use Railway's
 | **intelligence** | `LLM_BASE_URL=https://openrouter.ai/api/v1` `LLM_MODEL=<exact OpenRouter slug>` `LLM_API_KEY` · `MARKET_DATA_URL` ⬅ `REDIS_URL` |
 | **market-data** | *(none — live CCXT public data)* |
 | **memory** | `DATABASE_URL` `INTERNAL_API_TOKEN` |
-| **seam** | `VENUE=sim` `GATEWAY_CALLBACK_URL` ⬅ (gateway's `/internal/venue-events`; KoinBX creds when live keys exist) |
+| **seam** | `VENUE=sim` `GATEWAY_CALLBACK_URL` ⬅ (gateway's `/internal/venue-events`) |
 | **admin** | `DATABASE_URL` `ADMIN_JWT_SECRET` (random) `ADMIN_BOOTSTRAP_EMAIL` `ADMIN_BOOTSTRAP_PASSWORD` `ADMIN_COOKIE_SECURE=1` `ADMIN_ALLOWED_ORIGIN=https://<admin>.vercel.app` · `MEMORY_URL` ⬅ `GATEWAY_URL` ⬅ `INTERNAL_API_TOKEN` |
 | **portal** | `DATABASE_URL` `PORTAL_JWT_SECRET` (random, ≠ admin's) `PORTAL_COOKIE_SECURE=1` `PORTAL_ALLOWED_ORIGIN=https://<portal>.vercel.app` · `HIPPO_SDK_URL=https://<host-demo>.vercel.app/loader.js` |
 
@@ -80,5 +80,5 @@ exists precisely to keep this small) · Vercel hobby free.
 
 ## Not in this deployment
 
-`mock-gateway` (dev tool), Ollama (local dev), the KoinBX live adapter
+`mock-gateway` (dev tool), Ollama (local dev)
 (needs partner keys — Open Decisions #6/#9), OTel export (collector TBD).

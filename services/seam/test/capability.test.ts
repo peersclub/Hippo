@@ -3,10 +3,40 @@
  * path (spot/futures_perp/options), and capability gating on the HTTP surface.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KoinbxVenueAdapter } from '../src/koinbx-venue.js'
 import { buildService } from '../src/service.js'
 import { SimVenueAdapter } from '../src/sim-venue.js'
-import type { FuturesPerpPlan } from '../src/types.js'
+import type {
+  Portfolio,
+  PreparedTicket,
+  PrepareRequest,
+  VenueAdapter,
+  VenueCapabilitiesShape,
+} from '../src/types.js'
+
+/** Minimal spot-only venue — the gating counterpart to the all-caps sim. */
+class SpotOnlyAdapter implements VenueAdapter {
+  async capabilities(): Promise<VenueCapabilitiesShape> {
+    return { spot: {} }
+  }
+  async prepare(_req: PrepareRequest): Promise<PreparedTicket> {
+    return {
+      ticketId: 't_x',
+      side: 'buy',
+      instrument: 'BTC/USDT',
+      orderType: 'market',
+      rows: [],
+      sideLabel: 'BUY · MKT',
+    }
+  }
+  async confirm(): Promise<void> {}
+  async cancel(): Promise<boolean> {
+    return true
+  }
+  async portfolio(): Promise<Portfolio> {
+    return { positions: [], openOrders: [] }
+  }
+  onEvent(): void {}
+}
 
 const TOKEN = 'tok'
 const HDR = { 'x-hippo-internal-token': TOKEN, 'content-type': 'application/json' }
@@ -38,14 +68,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('capability framework', () => {
-  it('sim advertises all three capabilities; koinbx only spot', async () => {
+  it('sim advertises all three capabilities; a spot-only venue advertises just spot', async () => {
     expect(Object.keys(await new SimVenueAdapter().capabilities()).sort()).toEqual([
       'futures_perp',
       'options',
       'spot',
     ])
-    const kbx = new KoinbxVenueAdapter({ apiKey: 'k', secret: 's', baseUrl: 'https://kbx.test' })
-    expect(await kbx.capabilities()).toEqual({ spot: {} })
+    expect(await new SpotOnlyAdapter().capabilities()).toEqual({ spot: {} })
   })
 
   it('sim prepareOrder builds a perp ticket with a liquidation row', async () => {
@@ -74,8 +103,7 @@ describe('capability framework', () => {
   })
 
   it('HTTP: a perp plan is rejected (422) on a spot-only venue', async () => {
-    const kbx = new KoinbxVenueAdapter({ apiKey: 'k', secret: 's', baseUrl: 'https://kbx.test' })
-    const app = buildService(kbx, { internalToken: TOKEN })
+    const app = buildService(new SpotOnlyAdapter(), { internalToken: TOKEN })
     const res = await app.inject({
       method: 'POST',
       url: '/v1/prepare-order',

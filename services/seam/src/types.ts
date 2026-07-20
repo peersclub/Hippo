@@ -156,7 +156,7 @@ export type AdapterLog = {
 /**
  * Per-venue adapter contract. One implementation per venue, loaded by
  * partner config; `SimVenueAdapter` is the dev implementation and the
- * hand-built KoinBX adapter (Phase 3 pilot) is the CLI's codegen target.
+ * Assetworks adapter is the reference implementation against a real HTTP venue.
  * Venue events are delivered through `onEvent` — in production they arrive
  * from the venue's webhooks plus a poll reconciler; the adapter normalizes
  * both into LifecycleEvent.

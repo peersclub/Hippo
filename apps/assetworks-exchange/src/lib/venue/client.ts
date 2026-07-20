@@ -4,7 +4,7 @@ import type { AdminConfig, StreamEvent, TicketInput } from "./types"
 
 const V = "/venue"
 
-/** Map the human ticket to the KoinBX-shaped wire body host-venue expects. */
+/** Map the human ticket to the signed wire body host-venue expects. */
 function toWire(t: TicketInput) {
   const body: Record<string, unknown> = {
     pairName: t.pair.replace("/", "-"),

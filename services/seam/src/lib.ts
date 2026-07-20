@@ -4,8 +4,8 @@
  * which is the runnable server and must never execute on import.
  */
 
-export type { ConfirmSurface, KoinbxOptions } from './koinbx-venue.js'
-export { KoinbxVenueAdapter } from './koinbx-venue.js'
+export type { AssetworksOptions, ConfirmSurface } from './assetworks-venue.js'
+export { AssetworksVenueAdapter } from './assetworks-venue.js'
 export { buildService } from './service.js'
 export { SimVenueAdapter } from './sim-venue.js'
 export type {
