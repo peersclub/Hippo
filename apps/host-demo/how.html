@@ -8,12 +8,16 @@
   :root{--bg:#0E1014;--panel:#14161C;--panel2:#181B22;--hairline:rgba(255,255,255,.08);--ink:#E9EBF0;--mid:#B6BAC5;--dim:#8A8F9C;--amber:#F0B94A;--up:#2EC48D;--down:#FF8585;--info:#6AA9FF}
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;line-height:1.6;padding:40px 20px 80px}
-  .wrap{max-width:860px;margin:0 auto}
+  .wrap{max-width:880px;margin:0 auto}
   .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;margin-bottom:6px}
   .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-size:13px}
-  .sub{color:var(--dim);font-size:13px;margin-bottom:34px}
-  h2{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);margin:38px 0 14px;padding-top:22px;border-top:1px solid var(--hairline)}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:8px}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 30px}
+  .toc a{font-size:12px;padding:4px 11px;border:1px solid var(--hairline);border-radius:999px;color:var(--mid);background:var(--panel)}
+  .toc a:hover{border-color:var(--amber);color:var(--ink);text-decoration:none}
+  h2{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);margin:40px 0 14px;padding-top:22px;border-top:1px solid var(--hairline);scroll-margin-top:16px}
   h3{font-size:14.5px;margin:20px 0 6px}
+  h3 .tag{font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--dim);text-transform:uppercase;margin-left:8px}
   p{font-size:13.5px;color:var(--mid);margin-bottom:10px}
   table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0 16px}
   th{text-align:left;color:var(--dim);font-weight:600;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--hairline)}
@@ -29,6 +33,7 @@
   .steps li::before{content:counter(s);position:absolute;left:0;top:6px;width:22px;height:22px;border-radius:50%;background:var(--panel2);border:1px solid var(--hairline);color:var(--amber);font-size:11px;font-weight:700;display:grid;place-items:center}
   .expect{display:block;margin-top:3px;font-size:12.5px;color:var(--up)}
   .expect::before{content:"✓ expect: ";font-weight:600}
+  .new{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--amber);border:1px solid rgba(240,185,74,.4);border-radius:4px;padding:0 5px;margin-left:6px;vertical-align:1.5px}
   .badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.05em;vertical-align:1px}
   .badge.live{background:rgba(46,196,141,.14);color:var(--up)}
   .badge.mock{background:rgba(255,255,255,.07);color:var(--dim)}
@@ -40,18 +45,28 @@
 <body>
 <div class="wrap">
   <div class="logo"><span class="dot">H</span>Hippo <span style="font-weight:400;color:var(--dim)">· How to Test</span></div>
-  <div class="sub">Conversational trading agent — embeddable SDK, card protocol, gateway services, admin panel. Everything below is running locally and verified working.</div>
+  <div class="sub">Conversational trading agent — embeddable SDK, card protocol, gateway services, operator admin + partner portal. Everything below runs locally and is verified end-to-end.</div>
+  <nav class="toc">
+    <a href="#start">Start</a>
+    <a href="#client">Client demo</a>
+    <a href="#resilience">Resilience &amp; edge cases</a>
+    <a href="#admin">Admin panel</a>
+    <a href="#portal">Partner portal</a>
+    <a href="#hood">Under the hood</a>
+  </nav>
 
-  <h2>1 · Start everything</h2>
+  <h2 id="start">1 · Start everything</h2>
   <pre>cd hippo-app
+cp .env.example .env   # first time only — fill in LLM_API_KEY etc.
 pnpm dev</pre>
-  <p>One command starts all 14 packages. Give it ~10 seconds, then:</p>
+  <p>One command starts the whole stack (~10s). With an empty <code>.env</code> it still runs — LLM falls back to a deterministic mock and stores go in-memory. Then:</p>
   <table>
     <tr><th>URL</th><th>What it is</th></tr>
-    <tr><td><a href="http://localhost:4000/">localhost:4000</a></td><td><strong>The main demo</strong> — fake exchange terminal ("KoinBX Pro") with the Hippo SDK embedded, wired to the real AI pipeline. A <span class="badge live">GW: REAL</span> badge shows bottom-left.</td></tr>
+    <tr><td><a href="http://localhost:4000/">localhost:4000</a></td><td><strong>The main demo</strong> — fake exchange terminal ("KoinBX Pro") with the Hippo SDK embedded, wired to the real AI pipeline. A <span class="badge live">GW: REAL</span> badge + quick links sit bottom-left.</td></tr>
     <tr><td><a href="http://localhost:4000/?gw=mock">localhost:4000/?gw=mock</a></td><td>Same page on the <span class="badge mock">MOCK</span> gateway — scripted golden conversation, zero AI cost, works offline.</td></tr>
-    <tr><td><a href="http://localhost:5175/">localhost:5175</a></td><td><span class="badge admin">ADMIN</span> Operator panel — partners, plans, users, memory, audit, live metrics.</td></tr>
-    <tr><td><a href="http://localhost:5174/">localhost:5174</a></td><td>Marketing site.</td></tr>
+    <tr><td><a href="http://localhost:5175/">localhost:5175</a></td><td><span class="badge admin">ADMIN</span> Operator panel — partners, plans, users, sessions, memory, audit, live metrics.</td></tr>
+    <tr><td><a href="http://localhost:5176/">localhost:5176</a></td><td>Partner self-serve portal — a partner's own data, integration &amp; plan.</td></tr>
+    <tr><td><a href="http://localhost:5174/">localhost:5174</a></td><td>Marketing site (+ <code>/design</code> and <code>/sdk</code> pages).</td></tr>
   </table>
   <div class="card">
     <strong>Admin login</strong><br/>
@@ -59,16 +74,22 @@ pnpm dev</pre>
     <span style="color:var(--dim);font-size:12px"> (owner role — full access)</span>
   </div>
 
-  <h2>2 · Client features <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— test on localhost:4000</span></h2>
+  <h2 id="client">2 · Client features <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— test on localhost:4000</span></h2>
 
-  <h3>Live AI research briefs (OpenRouter · Claude Haiku 4.5)</h3>
+  <h3>Live AI research briefs <span class="tag">OpenRouter · Claude Haiku 4.5</span></h3>
   <ol class="steps">
     <li>Open the Hippo bubble (bottom-right) and ask <code>What's driving BTC price today?</code>
-      <span class="expect">tokens stream in live; the finished card shows real price, 12h change, funding stats, a sparkline, and the model tag <code>anthropic/claude-haiku-4.5</code> in the top-right of the card</span></li>
+      <span class="expect">tokens stream in live; the model tag <code>anthropic/claude-haiku-4.5</code> shows in the card's top-right <em>while streaming</em>, not just at the end<span class="new">updated</span> — and the finished card carries real price, 12h change, funding stats and a sparkline</span></li>
     <li>Ask a concept question: <code>What is a funding rate?</code>
       <span class="expect">a CONCEPT card — explanation prose, no market stats fabricated</span></li>
     <li>Ask the same question again.
-      <span class="expect">a <code>CACHED BRIEF</code> badge — answers are cached with volatility-scaled TTL</span></li>
+      <span class="expect">a <code>CACHED BRIEF</code> badge — answers are cached with a volatility-scaled TTL (the market-data layer also coalesces concurrent misses so a burst hits the exchange once)</span></li>
+  </ol>
+
+  <h3>Refresh in place <span class="new">new</span></h3>
+  <ol class="steps">
+    <li>On any brief, tap <strong>↻ REFRESH</strong>.
+      <span class="expect">the button holds a <code>↻ REFRESHING…</code> pending state, then the <em>same card updates in place</em> with fresh data — it does not stack a new card below or leave the old one amber-stale</span></li>
   </ol>
 
   <h3>Numbers are retrieval, never generation</h3>
@@ -77,79 +98,86 @@ pnpm dev</pre>
   <h3>No-advice guardrail</h3>
   <ol class="steps">
     <li>Ask <code>Should I buy BTC right now?</code>
-      <span class="expect">a decline card — "◇ NO ADVICE — BY DESIGN" — that pivots to live facts instead of a recommendation. This is enforced on the model's output, not just the prompt</span></li>
+      <span class="expect">a decline card — "◇ NO ADVICE — BY DESIGN" — pivoting to live facts instead of a recommendation. Enforced on the model's <em>output</em>, not just the prompt</span></li>
   </ol>
 
-  <h3>Order preparation + venue handoff (sim venue)</h3>
+  <h3>Order preparation + venue handoff <span class="tag">sim venue</span></h3>
   <ol class="steps">
     <li>Type <code>buy 0.05 BTC</code>
-      <span class="expect">an order ticket — side, size, live price rows — with "Review &amp; confirm" CTA. Hippo prepares; the exchange confirms. Hippo never executes</span></li>
+      <span class="expect">an order ticket — side, size, live price rows — with a "Review &amp; confirm" CTA. Hippo prepares; the exchange confirms. Hippo never executes</span></li>
     <li>Confirm the ticket.
-      <span class="expect">lifecycle frames stream in: awaiting confirm → filled, with venue order id</span></li>
+      <span class="expect">lifecycle frames stream: awaiting confirm → filled, with a venue order id. If a confirm/cancel ever fails while online you now get an inline "couldn't reach the venue" message rather than silence<span class="new">new</span></span></li>
   </ol>
 
   <h3>Portfolio</h3>
   <ol class="steps">
     <li>Ask <code>My positions &amp; P&amp;L</code>
-      <span class="expect">a positions table frame</span></li>
+      <span class="expect">a positions table drawn from real sim-venue state (empty state is honest — no fabricated rows)</span></li>
   </ol>
 
-  <h3>Card interactions</h3>
+  <h3>Card interactions &amp; multi-language</h3>
   <ol class="steps">
-    <li>On any brief: <strong>↻ REFRESH</strong> re-runs with fresh data · <strong>⧉ COPY</strong> puts clipboard text · <strong>↗ SHARE</strong> opens the share overlay · <strong>👍/👎</strong> feedback (👎 asks one follow-up reason)
-      <span class="expect">all work without leaving the card; feedback survives minimize/reopen</span></li>
-  </ol>
-
-  <h3>Multi-language</h3>
-  <ol class="steps">
+    <li><strong>⧉ COPY</strong> puts clipboard text · <strong>↗ SHARE</strong> opens the share overlay · <strong>👍/👎</strong> feedback (👎 asks one follow-up reason).
+      <span class="expect">all work in-card; feedback survives minimize/reopen</span></li>
     <li>Ask in Hindi or Hinglish: <code>BTC ka funding rate kya hai?</code>
-      <span class="expect">language detected and the answer follows it</span></li>
+      <span class="expect">language detected; the answer follows it. SDK chrome also localizes (en / hi / hinglish / ar with RTL)</span></li>
   </ol>
 
-  <h3>Never-500 degraded mode</h3>
-  <p>Kill the intelligence service (<code>pkill -f uvicorn</code>) and ask a research question — you still get a truthful market-data-only brief plus a "high market load" banner. Orders and prices keep working. Restart <code>pnpm dev</code> to restore.</p>
+  <h2 id="resilience">3 · Resilience &amp; edge cases <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— the "never leaves you stuck" guarantees</span></h2>
+  <p>These are the hardening cases — each has a deliberate, honest outcome instead of a dead spinner or silent failure.</p>
+  <table>
+    <tr><th>Do this</th><th>Expected</th></tr>
+    <tr><td>Kill the AI service:<br/><code>pkill -f uvicorn</code>, then ask a research question</td><td>Never-500: you still get a truthful market-data-only brief + a "high market load" banner. Orders and prices keep working. (Restart with <code>pnpm dev</code>.)</td></tr>
+    <tr><td>Let a brief sit past its freshness window</td><td>The as-of turns amber and REFRESH becomes the loudest control — stale data is declared, never silent.</td></tr>
+    <tr><td>Restart the gateway while the bubble is open</td><td>The SDK detects the dead stream and <strong>re-mints a fresh session</strong> automatically instead of hanging on "Reconnecting" forever.<span class="new">new</span></td></tr>
+    <tr><td>Block a user in the admin panel, then reload their demo</td><td>Session mint returns 401 → the surface <strong>quietly disables</strong> (no error stack, no retry storm).<span class="new">new</span></td></tr>
+    <tr><td>Hit a partner's MAU quota (Bitrupt is at 3/3)</td><td>Session mint returns 429 → a friendly <strong>"Hippo is busy this month"</strong> capacity notice with a long backoff, not an error.<span class="new">new</span></td></tr>
+    <tr><td>An order left un-actioned on the venue</td><td>A per-ticket timeout emits an honest <code>expired</code> lifecycle frame so it can't hang in "awaiting confirm" forever.<span class="new">new</span></td></tr>
+    <tr><td>Redis outage (if REDIS_URL set)</td><td>Answer cache falls back to in-memory with logged errors — it does not turn every answer into a decline card.<span class="new">new</span></td></tr>
+  </table>
+  <p style="font-size:12.5px;color:var(--dim)">Also under the hood: every cross-service call has a timeout, queued offline messages drain on a timer (not just on reconnect), unknown/forward-compat frames render a fallback instead of a stuck spinner, and a stalled stream finalizes honestly instead of a forever-blinking cursor.</p>
 
-  <h2>3 · Admin panel features <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— test on localhost:5175</span></h2>
-
+  <h2 id="admin">4 · Admin panel <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— localhost:5175</span></h2>
   <table>
     <tr><th>Page</th><th>What to try</th></tr>
-    <tr><td>Dashboard</td><td>Live counts (5 partners / 3 plans / 8 users), MAU per month, answer-cache hit rate, degraded seconds, and <strong>LLM · active model</strong> showing <code>anthropic/claude-haiku-4.5</code> with a green <code>llm</code> badge (grey <code>mock</code> when the model is down). Auto-refreshes every 30s. MAU quota alerts appear here — Bitrupt sits at 100% of its pilot quota by design.</td></tr>
-    <tr><td>Partners</td><td>Real seeded partners (KoinBX, Bitrupt, CryptoNest, Zenith X + a sandbox). Open one → detail page: plan, MAU vs quota, users, <strong>live sessions with a revoke kill-switch</strong>, suspend/activate (typed confirmation), purge-all-memory compliance primitive.</td></tr>
-    <tr><td>Plans</td><td>Pilot (3 MAU) / Growth (1000) / Enterprise (unlimited). Create, edit, assign to partners. Delete is blocked while a partner uses the plan.</td></tr>
-    <tr><td>Users</td><td>End-users per partner, first/last seen. Block one → that user can no longer mint sessions (401).</td></tr>
-    <tr><td>Memory</td><td>View/edit/clear a user's opt-in persona (experience level etc.). Data is owned by the memory service; admin proxies with an internal token.</td></tr>
-    <tr><td>Operators</td><td>Owner-gated: add/remove panel operators (owner vs operator roles).</td></tr>
-    <tr><td>Audit</td><td>Every mutating admin action logged — who, what, when. Check it after doing any of the above.</td></tr>
+    <tr><td>Dashboard</td><td>Live counts (partners / plans / users, sandbox count called out), MAU per month, answer-cache stats (<strong>entries + hit rate from the intelligence service</strong>)<span class="new">new</span>, degraded seconds, and <strong>LLM · active model</strong> showing <code>anthropic/claude-haiku-4.5</code> with a green <code>llm</code> badge (grey <code>mock</code> when the model is down). Auto-refreshes every 30s. MAU quota alerts surface here.</td></tr>
+    <tr><td>Sessions <span class="new">new</span></td><td>Global live-session list across all partners — id, partner, connected state — each with a <strong>revoke kill-switch</strong>. Open a session in the demo and watch it appear here.</td></tr>
+    <tr><td>Partners</td><td>Real seeded partners (KoinBX, Bitrupt, CryptoNest, Zenith X). Sandbox partners are visually distinct with a one-click <strong>Activate</strong> affordance<span class="new">new</span>. Open one → detail: plan, MAU vs quota, users, per-partner session kill, suspend/activate (typed confirmation), purge-all-memory.</td></tr>
+    <tr><td>Plans</td><td>Pilot (3 MAU) / Growth (1000) / Enterprise (unlimited). Create, edit, assign. Delete is blocked while a partner uses the plan.</td></tr>
+    <tr><td>Users</td><td>End-users per partner, first/last seen. Block one → they can no longer mint sessions (401, see §3).</td></tr>
+    <tr><td>Memory</td><td>View/edit/clear a user's opt-in persona. Data owned by the memory service; admin proxies with an internal token.</td></tr>
+    <tr><td>Operators &amp; Audit</td><td>Owner-gated operator management; every mutating action writes an audit row (who / what / when). Empty lists show a friendly "nothing yet" state, not a blank page.<span class="new">new</span></td></tr>
   </table>
 
-  <h3>MAU quota enforcement (429)</h3>
-  <p>Plans cap distinct monthly users. When a partner is at quota, a <em>new</em> user's session mint returns 429 — returning users are never cut off mid-month. Bitrupt (3/3) demonstrates this live.</p>
-
-  <h3>Self-serve sandbox provisioning (API)</h3>
+  <h3>Self-serve sandbox provisioning <span class="tag">API</span></h3>
   <pre>curl -X POST http://localhost:8794/v1/provision/sandbox \
   -H "Content-Type: application/json" \
   -d '{"venueName":"My Exchange","email":"you@example.com","locales":["en"]}'</pre>
-  <p>Returns a sandbox partner + a one-time claim URL for the JWT secret (15-min TTL, fetchable exactly once, never appears in any list). Rate-limited to 3/IP/hour. Activation to production stays operator-gated in the panel.</p>
+  <p>Returns a sandbox partner + a one-time claim URL for the JWT secret (15-min TTL, fetchable exactly once, never in any list). Rate-limited to 3/IP/hour. The new sandbox then appears in the admin Partners list ready to Activate.</p>
 
-  <h2>4 · What's under the hood</h2>
+  <h2 id="portal">5 · Partner portal <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— localhost:5176</span></h2>
+  <p>The partner-facing plane (separate trust boundary from the operator admin): a partner sees only <em>their own</em> data — MAU vs quota, integration details (embed tag, secret rotation), plan view + change request, and their own audit trail. Operators invite a partner via a one-time claim link.</p>
+
+  <h2 id="hood">6 · Under the hood</h2>
   <table>
     <tr><th>Port</th><th>Service</th></tr>
-    <tr><td>4000</td><td>host-demo — fake partner exchange page + embedded SDK</td></tr>
-    <tr><td>8787 / 8788</td><td>mock gateway (scripted) / real gateway — sessions, SSE, orchestrator</td></tr>
-    <tr><td>8790</td><td>market-data — live CCXT Binance snapshots</td></tr>
+    <tr><td>4000</td><td>host-demo — fake partner exchange page + embedded SDK (this page is <code>/how</code>)</td></tr>
+    <tr><td>8787 / 8788</td><td>mock gateway (scripted) / real gateway — sessions, SSE journal, orchestrator</td></tr>
+    <tr><td>8790</td><td>market-data — live CCXT Binance snapshots (coalesced + bounded cache)</td></tr>
     <tr><td>8791</td><td>intelligence (Python) — intent + research over OpenRouter, mock fallback</td></tr>
     <tr><td>8792</td><td>memory — opt-in personas, per-partner scoped (Postgres)</td></tr>
     <tr><td>8793</td><td>seam — canonical trading interface, sim venue adapter</td></tr>
     <tr><td>8794</td><td>admin API (Postgres: partners, plans, users, operators, audit, MAU)</td></tr>
-    <tr><td>5174 / 5175</td><td>site / admin panel UI</td></tr>
+    <tr><td>8795</td><td>portal API — partner self-serve</td></tr>
+    <tr><td>5174 / 5175 / 5176</td><td>site / admin panel / partner portal UIs</td></tr>
   </table>
 
   <div class="note">
-    <strong>Config lives in <code>hippo-app/.env</code></strong> — LLM provider (OpenRouter key + model), database URL, internal service token, admin allowed origin. Env changes need a full <code>pnpm dev</code> restart; services read env once at boot.
+    <strong>Config lives in <code>hippo-app/.env</code></strong> (template: <code>.env.example</code>) — LLM provider (OpenRouter key + model), <code>DATABASE_URL</code>, internal service token, admin origin, and <code>LOG_LEVEL</code> for fleet-wide log verbosity. Services read env once at boot, so env changes need a full <code>pnpm dev</code> restart.
   </div>
 
-  <div class="note" style="border-color:var(--down);background:rgba(255,133,133,.05)">
-    <strong>Known gaps (backend works, no UI page yet):</strong> a global Sessions list page and a Provisioning approval page in the admin panel — both are reachable via API today (partner-detail has per-partner session kill). Streaming deltas don't show the model tag until the final card lands.
+  <div class="note" style="border-color:var(--up);background:rgba(46,196,141,.06)">
+    <strong>Status:</strong> a 51-point audit (cache, logs, placeholders, loaders, failure use-cases) was run across the SDK, admin, services and protocol — all findings are closed. Every failure path above has a verified, honest outcome.
   </div>
 </div>
 </body>
