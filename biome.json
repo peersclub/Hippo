@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
   "files": {
-    "includes": ["**", "!**/dist", "!**/node_modules", "!**/.turbo", "!docs/vault"]
+    "includes": ["**", "!**/dist", "!**/node_modules", "!**/.turbo", "!**/.next", "!docs/vault", "!apps/assetworks-exchange"]
   },
   "formatter": {
     "enabled": true,

@@ -1,0 +1,21 @@
+{
+  "name": "@hippo/host-venue",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Assetworks Exchange — a self-contained test HOST that speaks the venue trade API (HMAC-signed, KoinBX-shaped for spot + a perps extension). Hippo embeds as a parasite and places real orders against it; the host UI reflects every order/fill/balance so the integration behaves as if it were a real third-party exchange.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "^5.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

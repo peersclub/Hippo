@@ -3,21 +3,21 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Hippo — How to Test</title>
+<title>Assetworks Exchange × Hippo — How to Test</title>
 <style>
   :root{--bg:#0E1014;--panel:#14161C;--panel2:#181B22;--hairline:rgba(255,255,255,.08);--ink:#E9EBF0;--mid:#B6BAC5;--dim:#8A8F9C;--amber:#F0B94A;--up:#2EC48D;--down:#FF8585;--info:#6AA9FF}
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;line-height:1.6;padding:40px 20px 80px}
-  .wrap{max-width:880px;margin:0 auto}
+  .wrap{max-width:920px;margin:0 auto}
   .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;margin-bottom:6px}
   .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--amber);color:#15171D;display:grid;place-items:center;font-size:13px}
   .sub{color:var(--dim);font-size:13px;margin-bottom:8px}
+  a{color:var(--info);text-decoration:none}a:hover{text-decoration:underline}
   .toc{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 30px}
   .toc a{font-size:12px;padding:4px 11px;border:1px solid var(--hairline);border-radius:999px;color:var(--mid);background:var(--panel)}
   .toc a:hover{border-color:var(--amber);color:var(--ink);text-decoration:none}
   h2{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);margin:40px 0 14px;padding-top:22px;border-top:1px solid var(--hairline);scroll-margin-top:16px}
   h3{font-size:14.5px;margin:20px 0 6px}
-  h3 .tag{font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--dim);text-transform:uppercase;margin-left:8px}
   p{font-size:13.5px;color:var(--mid);margin-bottom:10px}
   table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0 16px}
   th{text-align:left;color:var(--dim);font-weight:600;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--hairline)}
@@ -25,160 +25,100 @@
   td:first-child{color:var(--ink);white-space:nowrap}
   code,.mono{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;background:var(--panel2);border:1px solid var(--hairline);border-radius:5px;padding:1.5px 6px;color:var(--ink)}
   pre{background:var(--panel2);border:1px solid var(--hairline);border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12.5px;overflow-x:auto;margin:8px 0 16px;color:var(--ink)}
-  a{color:var(--info);text-decoration:none}
-  a:hover{text-decoration:underline}
   .card{background:var(--panel);border:1px solid var(--hairline);border-radius:10px;padding:16px 18px;margin:12px 0}
   .steps{counter-reset:s;list-style:none;margin:8px 0 14px}
   .steps li{counter-increment:s;position:relative;padding:5px 0 5px 34px;font-size:13.5px;color:var(--mid)}
   .steps li::before{content:counter(s);position:absolute;left:0;top:6px;width:22px;height:22px;border-radius:50%;background:var(--panel2);border:1px solid var(--hairline);color:var(--amber);font-size:11px;font-weight:700;display:grid;place-items:center}
   .expect{display:block;margin-top:3px;font-size:12.5px;color:var(--up)}
   .expect::before{content:"✓ expect: ";font-weight:600}
-  .new{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--amber);border:1px solid rgba(240,185,74,.4);border-radius:4px;padding:0 5px;margin-left:6px;vertical-align:1.5px}
-  .badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.05em;vertical-align:1px}
-  .badge.live{background:rgba(46,196,141,.14);color:var(--up)}
-  .badge.mock{background:rgba(255,255,255,.07);color:var(--dim)}
-  .badge.admin{background:rgba(106,169,255,.14);color:var(--info)}
-  .note{border-left:3px solid var(--amber);background:rgba(240,185,74,.06);padding:10px 14px;border-radius:0 8px 8px 0;font-size:13px;color:var(--mid);margin:12px 0}
-  .cred{font-family:ui-monospace,monospace;font-size:12.5px}
+  .badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.05em}
+  .badge.human{background:rgba(106,169,255,.14);color:var(--info)}
+  .badge.para{background:rgba(240,185,74,.14);color:var(--amber)}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="logo"><span class="dot">H</span>Hippo <span style="font-weight:400;color:var(--dim)">· How to Test</span></div>
-  <div class="sub">Conversational trading agent — embeddable SDK, card protocol, gateway services, operator admin + partner portal. Everything below runs locally and is verified end-to-end.</div>
-  <nav class="toc">
-    <a href="#start">Start</a>
-    <a href="#client">Client demo</a>
-    <a href="#resilience">Resilience &amp; edge cases</a>
-    <a href="#admin">Admin panel</a>
-    <a href="#portal">Partner portal</a>
-    <a href="#hood">Under the hood</a>
-  </nav>
+  <div class="logo"><span class="dot">A</span>Assetworks Exchange × Hippo</div>
+  <div class="sub">How to test the parasite integration — spot &amp; perps, both confirm surfaces, human &amp; conversational order paths.</div>
+  <div class="toc">
+    <a href="#model">The model</a><a href="#run">Run it</a><a href="#paths">Two order paths</a>
+    <a href="#matrix">Use-case matrix</a><a href="#surfaces">Confirm surfaces</a><a href="#flows">Walkthroughs</a>
+  </div>
 
-  <h2 id="start">1 · Start everything</h2>
-  <pre>cd hippo-app
-cp .env.example .env   # first time only — fill in LLM_API_KEY etc.
-pnpm dev</pre>
-  <p>One command starts the whole stack (~10s). With an empty <code>.env</code> it still runs — LLM falls back to a deterministic mock and stores go in-memory. Then:</p>
-  <table>
-    <tr><th>URL</th><th>What it is</th></tr>
-    <tr><td><a href="http://localhost:4000/">localhost:4000</a></td><td><strong>The main demo</strong> — fake exchange terminal ("KoinBX Pro") with the Hippo SDK embedded, wired to the real AI pipeline. A <span class="badge live">GW: REAL</span> badge + quick links sit bottom-left.</td></tr>
-    <tr><td><a href="http://localhost:4000/?gw=mock">localhost:4000/?gw=mock</a></td><td>Same page on the <span class="badge mock">MOCK</span> gateway — scripted golden conversation, zero AI cost, works offline.</td></tr>
-    <tr><td><a href="http://localhost:5175/">localhost:5175</a></td><td><span class="badge admin">ADMIN</span> Operator panel — partners, plans, users, sessions, memory, audit, live metrics.</td></tr>
-    <tr><td><a href="http://localhost:5176/">localhost:5176</a></td><td>Partner self-serve portal — a partner's own data, integration &amp; plan.</td></tr>
-    <tr><td><a href="http://localhost:5174/">localhost:5174</a></td><td>Marketing site (+ <code>/design</code> and <code>/sdk</code> pages).</td></tr>
-  </table>
+  <h2 id="model">The model — parasite on a real host</h2>
+  <p><b>Assetworks Exchange</b> (this host, the light UI at <code>:4000</code>) is a self-contained venue with its own signed trade API, fill engine, balances, and positions, streaming live market data from <b>Binance public WebSockets</b>. <b>Hippo</b> embeds as a parasite via the single <code>/loader.js</code> tag and places orders through the execution seam. Because the host speaks the same signed wire shape as the KoinBX pilot, the parasite drives it through <b>production code paths</b> — HMAC signing, the poll reconciler, capability discovery, and both confirm surfaces — not a sim timer.</p>
+  <p>The point: an order the conversational parasite places lands in the <b>same backend</b> the human order ticket uses, so it appears in the host's native blotter and moves the same balances — exactly as a real third-party integration would.</p>
+
+  <h2 id="run">Run it</h2>
   <div class="card">
-    <strong>Admin login</strong><br/>
-    <span class="cred">victor@hippo.dev&nbsp;&nbsp;/&nbsp;&nbsp;EdjxW0Omm-1_QH4M</span>
-    <span style="color:var(--dim);font-size:12px"> (owner role — full access)</span>
+    <p style="margin:0 0 8px"><code>pnpm dev</code> from <code>hippo-app/</code> brings up the full stack. The relevant members:</p>
+    <table>
+      <tr><th>Service</th><th>Port</th><th>Role</th></tr>
+      <tr><td>host-demo</td><td>4000</td><td>Assetworks Exchange UI + Hippo embed → <a href="http://localhost:4000">localhost:4000</a></td></tr>
+      <tr><td>host-venue</td><td>8796</td><td>Assetworks backend: signed trade API, fill engine, SSE, admin</td></tr>
+      <tr><td>seam</td><td>8793</td><td><code>VENUE=assetworks</code> → drives the host over HMAC</td></tr>
+      <tr><td>market-data</td><td>8790</td><td>CCXT → Binance public (quotes + fill prices)</td></tr>
+      <tr><td>gateway / intelligence</td><td>8788 / 8791</td><td>the parasite's turn + intent/research path</td></tr>
+    </table>
+    <p style="margin:0"><code>.env</code> ships with <code>VENUE=assetworks</code> and matching <code>ASSETWORKS_*</code> keys. Set <code>VENUE=sim</code> to detach the host and use the old timer venue.</p>
   </div>
 
-  <h2 id="client">2 · Client features <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— test on localhost:4000</span></h2>
-
-  <h3>Live AI research briefs <span class="tag">OpenRouter · Claude Haiku 4.5</span></h3>
-  <ol class="steps">
-    <li>Open the Hippo bubble (bottom-right) and ask <code>What's driving BTC price today?</code>
-      <span class="expect">tokens stream in live; the model tag <code>anthropic/claude-haiku-4.5</code> shows in the card's top-right <em>while streaming</em>, not just at the end<span class="new">updated</span> — and the finished card carries real price, 12h change, funding stats and a sparkline</span></li>
-    <li>Ask a concept question: <code>What is a funding rate?</code>
-      <span class="expect">a CONCEPT card — explanation prose, no market stats fabricated</span></li>
-    <li>Ask the same question again.
-      <span class="expect">a <code>CACHED BRIEF</code> badge — answers are cached with a volatility-scaled TTL (the market-data layer also coalesces concurrent misses so a burst hits the exchange once)</span></li>
-  </ol>
-
-  <h3>Refresh in place <span class="new">new</span></h3>
-  <ol class="steps">
-    <li>On any brief, tap <strong>↻ REFRESH</strong>.
-      <span class="expect">the button holds a <code>↻ REFRESHING…</code> pending state, then the <em>same card updates in place</em> with fresh data — it does not stack a new card below or leave the old one amber-stale</span></li>
-  </ol>
-
-  <h3>Numbers are retrieval, never generation</h3>
-  <p>Every stat, sparkline and as-of timestamp comes straight from the live market-data feed (CCXT/Binance) — the model only writes prose. A hallucinated price cannot reach a stat cell.</p>
-
-  <h3>No-advice guardrail</h3>
-  <ol class="steps">
-    <li>Ask <code>Should I buy BTC right now?</code>
-      <span class="expect">a decline card — "◇ NO ADVICE — BY DESIGN" — pivoting to live facts instead of a recommendation. Enforced on the model's <em>output</em>, not just the prompt</span></li>
-  </ol>
-
-  <h3>Order preparation + venue handoff <span class="tag">sim venue</span></h3>
-  <ol class="steps">
-    <li>Type <code>buy 0.05 BTC</code>
-      <span class="expect">an order ticket — side, size, live price rows — with a "Review &amp; confirm" CTA. Hippo prepares; the exchange confirms. Hippo never executes</span></li>
-    <li>Confirm the ticket.
-      <span class="expect">lifecycle frames stream: awaiting confirm → filled, with a venue order id. If a confirm/cancel ever fails while online you now get an inline "couldn't reach the venue" message rather than silence<span class="new">new</span></span></li>
-  </ol>
-
-  <h3>Portfolio</h3>
-  <ol class="steps">
-    <li>Ask <code>My positions &amp; P&amp;L</code>
-      <span class="expect">a positions table drawn from real sim-venue state (empty state is honest — no fabricated rows)</span></li>
-  </ol>
-
-  <h3>Card interactions &amp; multi-language</h3>
-  <ol class="steps">
-    <li><strong>⧉ COPY</strong> puts clipboard text · <strong>↗ SHARE</strong> opens the share overlay · <strong>👍/👎</strong> feedback (👎 asks one follow-up reason).
-      <span class="expect">all work in-card; feedback survives minimize/reopen</span></li>
-    <li>Ask in Hindi or Hinglish: <code>BTC ka funding rate kya hai?</code>
-      <span class="expect">language detected; the answer follows it. SDK chrome also localizes (en / hi / hinglish / ar with RTL)</span></li>
-  </ol>
-
-  <h2 id="resilience">3 · Resilience &amp; edge cases <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— the "never leaves you stuck" guarantees</span></h2>
-  <p>These are the hardening cases — each has a deliberate, honest outcome instead of a dead spinner or silent failure.</p>
+  <h2 id="paths">Two order paths, one book</h2>
   <table>
-    <tr><th>Do this</th><th>Expected</th></tr>
-    <tr><td>Kill the AI service:<br/><code>pkill -f uvicorn</code>, then ask a research question</td><td>Never-500: you still get a truthful market-data-only brief + a "high market load" banner. Orders and prices keep working. (Restart with <code>pnpm dev</code>.)</td></tr>
-    <tr><td>Let a brief sit past its freshness window</td><td>The as-of turns amber and REFRESH becomes the loudest control — stale data is declared, never silent.</td></tr>
-    <tr><td>Restart the gateway while the bubble is open</td><td>The SDK detects the dead stream and <strong>re-mints a fresh session</strong> automatically instead of hanging on "Reconnecting" forever.<span class="new">new</span></td></tr>
-    <tr><td>Block a user in the admin panel, then reload their demo</td><td>Session mint returns 401 → the surface <strong>quietly disables</strong> (no error stack, no retry storm).<span class="new">new</span></td></tr>
-    <tr><td>Hit a partner's MAU quota (Bitrupt is at 3/3)</td><td>Session mint returns 429 → a friendly <strong>"Hippo is busy this month"</strong> capacity notice with a long backoff, not an error.<span class="new">new</span></td></tr>
-    <tr><td>An order left un-actioned on the venue</td><td>A per-ticket timeout emits an honest <code>expired</code> lifecycle frame so it can't hang in "awaiting confirm" forever.<span class="new">new</span></td></tr>
-    <tr><td>Redis outage (if REDIS_URL set)</td><td>Answer cache falls back to in-memory with logged errors — it does not turn every answer into a decline card.<span class="new">new</span></td></tr>
+    <tr><th>Path</th><th>How to place</th><th>Auth</th></tr>
+    <tr><td><span class="badge human">HUMAN</span></td><td>The order ticket on the right of the exchange UI (spot/perp, buy/sell, market/limit).</td><td>First-party <code>/ui/orders</code> — no signing.</td></tr>
+    <tr><td><span class="badge para">PARASITE</span></td><td>Talk to Hippo: e.g. <i>“buy 0.01 BTC”</i> → research/ticket → confirm.</td><td>HMAC-signed <code>/api/v1/trade/orders</code> via the seam.</td></tr>
   </table>
-  <p style="font-size:12.5px;color:var(--dim)">Also under the hood: every cross-service call has a timeout, queued offline messages drain on a timer (not just on reconnect), unknown/forward-compat frames render a fallback instead of a stuck spinner, and a stalled stream finalizes honestly instead of a forever-blinking cursor.</p>
+  <p>Both write to the same <code>trader-1</code> book, so whatever you place either way shows in the <b>Open orders / Positions / Balances</b> blotter (live over SSE) and in Hippo's <b>positions</b> card.</p>
 
-  <h2 id="admin">4 · Admin panel <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— localhost:5175</span></h2>
+  <h2 id="matrix">Use-case matrix</h2>
   <table>
-    <tr><th>Page</th><th>What to try</th></tr>
-    <tr><td>Dashboard</td><td>Live counts (partners / plans / users, sandbox count called out), MAU per month, answer-cache stats (<strong>entries + hit rate from the intelligence service</strong>)<span class="new">new</span>, degraded seconds, and <strong>LLM · active model</strong> showing <code>anthropic/claude-haiku-4.5</code> with a green <code>llm</code> badge (grey <code>mock</code> when the model is down). Auto-refreshes every 30s. MAU quota alerts surface here.</td></tr>
-    <tr><td>Sessions <span class="new">new</span></td><td>Global live-session list across all partners — id, partner, connected state — each with a <strong>revoke kill-switch</strong>. Open a session in the demo and watch it appear here.</td></tr>
-    <tr><td>Partners</td><td>Real seeded partners (KoinBX, Bitrupt, CryptoNest, Zenith X). Sandbox partners are visually distinct with a one-click <strong>Activate</strong> affordance<span class="new">new</span>. Open one → detail: plan, MAU vs quota, users, per-partner session kill, suspend/activate (typed confirmation), purge-all-memory.</td></tr>
-    <tr><td>Plans</td><td>Pilot (3 MAU) / Growth (1000) / Enterprise (unlimited). Create, edit, assign. Delete is blocked while a partner uses the plan.</td></tr>
-    <tr><td>Users</td><td>End-users per partner, first/last seen. Block one → they can no longer mint sessions (401, see §3).</td></tr>
-    <tr><td>Memory</td><td>View/edit/clear a user's opt-in persona. Data owned by the memory service; admin proxies with an internal token.</td></tr>
-    <tr><td>Operators &amp; Audit</td><td>Owner-gated operator management; every mutating action writes an audit row (who / what / when). Empty lists show a friendly "nothing yet" state, not a blank page.<span class="new">new</span></td></tr>
+    <tr><th>Case</th><th>Try</th><th>Expected</th></tr>
+    <tr><td>Spot market buy</td><td>Buy 0.01 BTC market</td><td>Rests ~2.5s (working window) then FILLED; USDT down, BTC up</td></tr>
+    <tr><td>Spot market sell</td><td>Sell 0.01 BTC market</td><td>FILLED; BTC down, USDT up (minus fee)</td></tr>
+    <tr><td>Spot limit (rests)</td><td>Buy limit 10% below market</td><td>Stays ACTIVE in open orders until price crosses</td></tr>
+    <tr><td>Spot limit (crosses)</td><td>Buy limit above market</td><td>Crosses on the next sweep → FILLED</td></tr>
+    <tr><td>Cancel</td><td>Cancel a resting order</td><td>Drops from open orders; reserve released back to balance</td></tr>
+    <tr><td>Insufficient balance</td><td>Buy 1000 BTC</td><td>Rejected up front with a clear reason (no order created)</td></tr>
+    <tr><td>Partial fill</td><td>Admin → enable partial fills, then market order</td><td>PARTIAL frame, then FILLED — parasite lifecycle shows both</td></tr>
+    <tr><td>Perp open long</td><td>Perp · Buy/Long · 10x · 0.1 BTC</td><td>Position appears with entry, leverage, liquidation price; margin locked</td></tr>
+    <tr><td>Perp open short</td><td>Perp · Sell/Short · 10x</td><td>Short position; liquidation above entry</td></tr>
+    <tr><td>Perp close (PnL)</td><td>Reduce/close after price moves</td><td>Position clears; realized PnL credited to USDT</td></tr>
+    <tr><td>Portfolio read</td><td>Ask Hippo “what are my positions?”</td><td>Merges spot balances + perp positions + open orders from the host</td></tr>
   </table>
 
-  <h3>Self-serve sandbox provisioning <span class="tag">API</span></h3>
-  <pre>curl -X POST http://localhost:8794/v1/provision/sandbox \
-  -H "Content-Type: application/json" \
-  -d '{"venueName":"My Exchange","email":"you@example.com","locales":["en"]}'</pre>
-  <p>Returns a sandbox partner + a one-time claim URL for the JWT secret (15-min TTL, fetchable exactly once, never in any list). Rate-limited to 3/IP/hour. The new sandbox then appears in the admin Partners list ready to Activate.</p>
-
-  <h2 id="portal">5 · Partner portal <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— localhost:5176</span></h2>
-  <p>The partner-facing plane (separate trust boundary from the operator admin): a partner sees only <em>their own</em> data — MAU vs quota, integration details (embed tag, secret rotation), plan view + change request, and their own audit trail. Operators invite a partner via a one-time claim link.</p>
-
-  <h2 id="hood">6 · Under the hood</h2>
+  <h2 id="surfaces">Confirm surfaces — the admin switch <span class="badge para">Open Decision #6</span></h2>
+  <p>Open the <b>⚙ admin drawer</b> (top-right of the exchange) and flip <b>Confirm surface</b>. The parasite reads it live from <code>/admin/config</code> at confirm time — no restart.</p>
   <table>
-    <tr><th>Port</th><th>Service</th></tr>
-    <tr><td>4000</td><td>host-demo — fake partner exchange page + embedded SDK (this page is <code>/how</code>)</td></tr>
-    <tr><td>8787 / 8788</td><td>mock gateway (scripted) / real gateway — sessions, SSE journal, orchestrator</td></tr>
-    <tr><td>8790</td><td>market-data — live CCXT Binance snapshots (coalesced + bounded cache)</td></tr>
-    <tr><td>8791</td><td>intelligence (Python) — intent + research over OpenRouter, mock fallback</td></tr>
-    <tr><td>8792</td><td>memory — opt-in personas, per-partner scoped (Postgres)</td></tr>
-    <tr><td>8793</td><td>seam — canonical trading interface, sim venue adapter</td></tr>
-    <tr><td>8794</td><td>admin API (Postgres: partners, plans, users, operators, audit, MAU)</td></tr>
-    <tr><td>8795</td><td>portal API — partner self-serve</td></tr>
-    <tr><td>5174 / 5175 / 5176</td><td>site / admin panel / partner portal UIs</td></tr>
+    <tr><th>Surface</th><th>Behaviour</th></tr>
+    <tr><td><code>api</code></td><td>Hippo confirms in <b>its own panel</b> and places directly with the scoped key. The order shows up in the host blotter after placement.</td></tr>
+    <tr><td><code>js_callback</code></td><td>Hippo hands off; <b>the host renders its own confirm modal</b>; nothing is placed until you approve there. Decline → parasite lifecycle shows DECLINED.</td></tr>
   </table>
 
-  <div class="note">
-    <strong>Config lives in <code>hippo-app/.env</code></strong> (template: <code>.env.example</code>) — LLM provider (OpenRouter key + model), <code>DATABASE_URL</code>, internal service token, admin origin, and <code>LOG_LEVEL</code> for fleet-wide log verbosity. Services read env once at boot, so env changes need a full <code>pnpm dev</code> restart.
+  <h2 id="flows">Walkthroughs</h2>
+  <div class="card">
+    <h3>A · Parasite spot buy, <code>api</code> surface</h3>
+    <ol class="steps">
+      <li>Admin drawer → Confirm surface = <code>api</code>.</li>
+      <li>Open Hippo, say <i>“buy 0.01 BTC”</i>. Review the ticket, tap confirm.</li>
+      <li>Watch the exchange <b>Open orders</b> tab.<span class="expect">the order appears (ACTIVE), then flips to FILLED within a few seconds</span></li>
+      <li>Check <b>Balances</b> and Hippo's positions card.<span class="expect">USDT decreased, BTC increased — same numbers on both sides</span></li>
+    </ol>
+    <h3>B · Parasite order, <code>js_callback</code> surface</h3>
+    <ol class="steps">
+      <li>Admin drawer → Confirm surface = <code>js_callback</code>.</li>
+      <li>Ask Hippo to buy again and confirm in Hippo's panel.<span class="expect">a native Assetworks confirm modal pops on THIS host, not in Hippo</span></li>
+      <li>Click <b>Confirm &amp; place</b>.<span class="expect">order places, fills, and Hippo's lifecycle card resolves to FILLED</span></li>
+      <li>Repeat and click <b>Decline</b> instead.<span class="expect">nothing is placed; Hippo shows DECLINED ON THE VENUE</span></li>
+    </ol>
+    <h3>C · Perps (human ticket)</h3>
+    <ol class="steps">
+      <li>Ticket → <b>Perp</b>, <b>Buy/Long</b>, leverage 10x, size 0.1, place.</li>
+      <li>Open the <b>Positions</b> tab.<span class="expect">a long with entry, 10x, and a liquidation price below entry</span></li>
+      <li>Let the live price move, then place a reduce-only close.<span class="expect">position clears; realized PnL lands in the USDT balance</span></li>
+    </ol>
   </div>
-
-  <div class="note" style="border-color:var(--up);background:rgba(46,196,141,.06)">
-    <strong>Status:</strong> a 51-point audit (cache, logs, placeholders, loaders, failure use-cases) was run across the SDK, admin, services and protocol — all findings are closed. Every failure path above has a verified, honest outcome.
-  </div>
+  <p style="margin-top:20px"><a href="/">← back to Assetworks Exchange</a></p>
 </div>
 </body>
 </html>

@@ -18,6 +18,20 @@
     "FIXTURES",
     "VENUE",
     "KOINBX_DEV_JWT_SECRET",
+    "ASSETWORKS_API_KEY",
+    "ASSETWORKS_SECRET",
+    "ASSETWORKS_BASE_URL",
+    "ASSETWORKS_CONFIRM_SURFACE",
+    "ASSETWORKS_WORKING_WINDOW_MS",
+    "ASSETWORKS_FEE_RATE",
+    "ASSETWORKS_PARTIAL_FILLS",
+    "ASSETWORKS_ADMIN_TOKEN",
+    "ASSETWORKS_INSTRUMENTS",
+    "ASSETWORKS_UI_USER",
+    "HOST_VENUE_URL",
+    "NEXT_PUBLIC_HIPPO_LOADER_URL",
+    "NEXT_PUBLIC_HIPPO_GATEWAY",
+    "NEXT_PUBLIC_HIPPO_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
     "LLM_API_KEY",
@@ -33,7 +47,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "test": {
       "dependsOn": ["^build"]

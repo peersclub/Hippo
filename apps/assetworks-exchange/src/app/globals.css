@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+/* Class-based dark mode driven by ThemeProvider (adds/removes `.dark` on <html>),
+   matching assetwork-ai-web's ThemeProvider. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* AssetWorks aw-* design tokens (from assetwork-ai-web/tailwind.config.ts),
+   made theme-responsive: the @theme maps utilities to runtime CSS vars, and
+   :root / .dark swap the values. Trading up/down are additive. */
+:root {
+  --aw-bg-primary: #ffffff;
+  --aw-bg-secondary: #f8fafc;
+  --aw-bg-tertiary: #f1f5f9;
+  --aw-panel: #ffffff;
+  --aw-text-primary: #1a1a1a;
+  --aw-text-secondary: #4b5563;
+  --aw-text-tertiary: #6b7280;
+  --aw-text-light: #9ca3af;
+  --aw-border: #e5e7eb;
+  --aw-border-light: #f3f4f6;
+  --aw-brand-primary: #000000;
+  --aw-brand-secondary: #1e293b;
+  --aw-brand-accent: #3b82f6;
+  --aw-accent-soft: #eff6ff;
+  --aw-up: #10b981;
+  --aw-down: #ef4444;
+  --aw-warn: #f59e0b;
+  --aw-success: #10b981;
+  --aw-error: #ef4444;
+}
+
+.dark {
+  --aw-bg-primary: #0b0d12;
+  --aw-bg-secondary: #0e1117;
+  --aw-bg-tertiary: #161a22;
+  --aw-panel: #12151c;
+  --aw-text-primary: #e9ebf0;
+  --aw-text-secondary: #b6bac5;
+  --aw-text-tertiary: #8a8f9c;
+  --aw-text-light: #6b7280;
+  --aw-border: #222835;
+  --aw-border-light: #1a1f29;
+  --aw-brand-primary: #ffffff;
+  --aw-brand-secondary: #cbd5e1;
+  --aw-brand-accent: #60a5fa;
+  --aw-accent-soft: #16233b;
+  --aw-up: #2ec48d;
+  --aw-down: #ff8585;
+  --aw-warn: #f59e0b;
+  --aw-success: #2ec48d;
+  --aw-error: #ff8585;
+}
+
+@theme inline {
+  --color-aw-bg-primary: var(--aw-bg-primary);
+  --color-aw-bg-secondary: var(--aw-bg-secondary);
+  --color-aw-bg-tertiary: var(--aw-bg-tertiary);
+  --color-aw-panel: var(--aw-panel);
+  --color-aw-text-primary: var(--aw-text-primary);
+  --color-aw-text-secondary: var(--aw-text-secondary);
+  --color-aw-text-tertiary: var(--aw-text-tertiary);
+  --color-aw-text-light: var(--aw-text-light);
+  --color-aw-border: var(--aw-border);
+  --color-aw-border-light: var(--aw-border-light);
+  --color-aw-brand-primary: var(--aw-brand-primary);
+  --color-aw-brand-secondary: var(--aw-brand-secondary);
+  --color-aw-brand-accent: var(--aw-brand-accent);
+  --color-aw-accent-soft: var(--aw-accent-soft);
+  --color-aw-up: var(--aw-up);
+  --color-aw-down: var(--aw-down);
+  --color-aw-warn: var(--aw-warn);
+  --color-aw-success: var(--aw-success);
+  --color-aw-error: var(--aw-error);
+
+  --radius-aw-sm: 0.125rem;
+  --radius-aw-md: 0.375rem;
+  --radius-aw-lg: 0.5rem;
+  --radius-aw-xl: 0.75rem;
+  --radius-aw-2xl: 1rem;
+
+  --font-aw-sans: var(--font-inter), "Inter", system-ui, sans-serif;
+  --font-aw-mono: var(--font-jbmono), "JetBrains Mono", ui-monospace, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+body {
+  background: var(--aw-bg-secondary);
+  color: var(--aw-text-primary);
+  font-family: var(--font-aw-sans);
+  -webkit-font-smoothing: antialiased;
+}
