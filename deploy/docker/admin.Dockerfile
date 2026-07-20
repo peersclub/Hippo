@@ -5,7 +5,7 @@ FROM node:24-alpine
 WORKDIR /app
 RUN npm install -g pnpm@10.18.0
 COPY . .
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @hippo/admin...
 RUN pnpm --filter @hippo/admin... build
 ENV NODE_ENV=production
 EXPOSE 8794
