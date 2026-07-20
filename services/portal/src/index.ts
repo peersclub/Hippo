@@ -32,8 +32,13 @@ const users = pool ? new PostgresUserStore(pool) : new InMemoryUserStore()
 const partnerAdmins = pool ? new PostgresPartnerAdminStore(pool) : new InMemoryPartnerAdminStore()
 const audit = pool ? new PostgresAuditStore(pool) : new InMemoryAuditStore()
 
-// Session-signing secret: env in production; ephemeral per boot in dev.
+// Session-signing secret: REQUIRED in production (fail loud — see admin).
 // MUST differ from ADMIN_JWT_SECRET — the token universes never intersect.
+if (process.env.NODE_ENV === 'production' && !process.env.PORTAL_JWT_SECRET) {
+  throw new Error(
+    'PORTAL_JWT_SECRET is required in production (a per-boot random secret drops all partner sessions on every restart)',
+  )
+}
 const jwtSecret = process.env.PORTAL_JWT_SECRET ?? randomBytes(32).toString('hex')
 
 const app = buildPortalService({

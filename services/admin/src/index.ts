@@ -41,8 +41,15 @@ const operators = pool ? new PostgresOperatorStore(pool) : new InMemoryOperatorS
 const partnerAdmins = pool ? new PostgresPartnerAdminStore(pool) : new InMemoryPartnerAdminStore()
 const audit = pool ? new PostgresAuditStore(pool) : new InMemoryAuditStore()
 
-// Session-signing secret: env in production; ephemeral per boot in dev
-// (operator sessions simply die on restart — honest and safe).
+// Session-signing secret: REQUIRED in production (fail loud — a per-boot
+// random secret silently logs every operator out on each deploy/restart and
+// breaks multi-instance sessions). Ephemeral per boot in dev, which is honest
+// and safe for a single local process.
+if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_JWT_SECRET) {
+  throw new Error(
+    'ADMIN_JWT_SECRET is required in production (a per-boot random secret drops all operator sessions on every restart)',
+  )
+}
 const jwtSecret = process.env.ADMIN_JWT_SECRET ?? randomBytes(32).toString('hex')
 
 // Bootstrap the first operator when the table is empty.

@@ -7,7 +7,7 @@ import {
   InMemoryUserStore,
 } from '@hippo/stores'
 import { describe, expect, it } from 'vitest'
-import { hashPassword, verifyPassword } from '../src/opauth.js'
+import { hashPassword, sessionCookie, verifyPassword } from '../src/opauth.js'
 import { buildAdminService } from '../src/service.js'
 
 const JWT_SECRET = 'test-admin-secret'
@@ -823,5 +823,45 @@ describe('partner admin invites (portal seats)', () => {
     })
     expect(ghost.statusCode).toBe(404)
     await app.close()
+  })
+})
+
+describe('session cookie Secure flag', () => {
+  const withEnv = (val: string | undefined, prodEnv: string | undefined, fn: () => void) => {
+    const savedSecure = process.env.ADMIN_COOKIE_SECURE
+    const savedNode = process.env.NODE_ENV
+    if (val === undefined) delete process.env.ADMIN_COOKIE_SECURE
+    else process.env.ADMIN_COOKIE_SECURE = val
+    if (prodEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = prodEnv
+    try {
+      fn()
+    } finally {
+      if (savedSecure === undefined) delete process.env.ADMIN_COOKIE_SECURE
+      else process.env.ADMIN_COOKIE_SECURE = savedSecure
+      if (savedNode === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = savedNode
+    }
+  }
+
+  it('is Secure by default in production', () => {
+    withEnv(undefined, 'production', () => {
+      expect(sessionCookie('tok')).toContain('; Secure')
+    })
+  })
+
+  it('can be forced off in production with ADMIN_COOKIE_SECURE=0', () => {
+    withEnv('0', 'production', () => {
+      expect(sessionCookie('tok')).not.toContain('; Secure')
+    })
+  })
+
+  it('is off by default in dev but opt-in with =1', () => {
+    withEnv(undefined, 'development', () => {
+      expect(sessionCookie('tok')).not.toContain('; Secure')
+    })
+    withEnv('1', 'development', () => {
+      expect(sessionCookie('tok')).toContain('; Secure')
+    })
   })
 })

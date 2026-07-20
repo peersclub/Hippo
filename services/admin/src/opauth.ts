@@ -26,9 +26,17 @@ export function mintSessionToken(op: OperatorSession, secret: string): string {
 }
 
 export function sessionCookie(token: string): string {
-  // Secure flag is env-gated: on in any HTTPS deployment, off for local http.
-  const secure = process.env.ADMIN_COOKIE_SECURE === '1' ? '; Secure' : ''
+  // Secure by default in production (opt out only with ADMIN_COOKIE_SECURE=0 for
+  // an http-only deploy); off by default in dev, opt in with =1 for local https.
+  const secure = cookieSecure() ? '; Secure' : ''
   return `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_S}${secure}`
+}
+
+function cookieSecure(): boolean {
+  const flag = process.env.ADMIN_COOKIE_SECURE
+  if (flag === '1') return true
+  if (flag === '0') return false
+  return process.env.NODE_ENV === 'production'
 }
 
 export function clearedSessionCookie(): string {
