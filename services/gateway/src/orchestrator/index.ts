@@ -358,11 +358,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * never a re-classification of the raw "refresh:f_…" string. */
   const briefTurns = new Map<string, { text: string; intent: string }>()
 
-  function rememberBrief(
-    frame: ReturnType<EmitFrame>,
-    text: string,
-    intent: string,
-  ): void {
+  function rememberBrief(frame: ReturnType<EmitFrame>, text: string, intent: string): void {
     if (!frame) return
     briefTurns.set(frame.id, { text, intent })
     if (briefTurns.size > BRIEF_TURNS_CAP) {
@@ -409,15 +405,33 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // gateway forwards the prepared ticket verbatim — it never computes money.
     let ticket: import('./seam.js').PreparedTicket
     try {
-      ticket = await seam.prepare({
-        partnerId: session.partner.partnerId,
-        userId: userKey(session),
-        side: order.side,
-        size: order.size,
-        instrument: order.instrument,
-        orderType: order.orderType,
-        ...(order.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
-      })
+      if (order.capability === 'futures_perp' && order.direction && order.leverage) {
+        // Futures perp → the seam's capability plan path.
+        ticket = await seam.prepareOrder({
+          capability: 'futures_perp',
+          partnerId: session.partner.partnerId,
+          userId: userKey(session),
+          instrument: order.instrument,
+          direction: order.direction,
+          action: order.action ?? 'open',
+          leverage: order.leverage,
+          marginMode: order.marginMode ?? 'isolated',
+          size: order.size,
+          reduceOnly: order.reduceOnly ?? false,
+          orderType: order.orderType,
+          ...(order.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
+        })
+      } else {
+        ticket = await seam.prepare({
+          partnerId: session.partner.partnerId,
+          userId: userKey(session),
+          side: order.side,
+          size: order.size,
+          instrument: order.instrument,
+          orderType: order.orderType,
+          ...(order.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
+        })
+      }
     } catch (err) {
       log.error({ err, instrument: order.instrument }, 'seam prepare failed')
       emit(session, {

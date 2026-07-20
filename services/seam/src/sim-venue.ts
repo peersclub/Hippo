@@ -8,12 +8,24 @@
  */
 import { randomUUID } from 'node:crypto'
 import type {
+  FuturesPerpPlan,
   LifecycleEvent,
+  OptionsPlan,
+  OrderPlan,
   Portfolio,
   PreparedTicket,
   PrepareRequest,
   VenueAdapter,
+  VenueCapabilitiesShape,
 } from './types.js'
+
+/** Sim enables all three framework capabilities with generous dev params, so
+ *  every capability can be exercised without a real venue. */
+const SIM_CAPABILITIES: VenueCapabilitiesShape = {
+  spot: {},
+  futures_perp: { maxLeverage: 100, marginModes: ['isolated', 'cross'] },
+  options: { settlement: 'cash' },
+}
 
 const MARKET_DATA_URL = process.env.MARKET_DATA_URL ?? 'http://localhost:8790'
 
@@ -96,6 +108,126 @@ export class SimVenueAdapter implements VenueAdapter {
     }
   }
 
+  async capabilities(): Promise<VenueCapabilitiesShape> {
+    return SIM_CAPABILITIES
+  }
+
+  /**
+   * Capability-tagged prepare — one entry point for all three capabilities.
+   * Each plan is reduced to a stored ticket that rides the SAME confirm→fill→
+   * portfolio machinery as spot (perp/options synthesize a PrepareRequest so the
+   * lifecycle and position recording stay identical); only the display rows and
+   * the reference price differ per capability.
+   */
+  async prepareOrder(plan: OrderPlan): Promise<PreparedTicket> {
+    if (plan.capability === 'spot') {
+      const ticket = await this.prepare(plan)
+      return { ...ticket, capability: 'spot' }
+    }
+    if (plan.capability === 'futures_perp') return this.prepareFutures(plan)
+    return this.prepareOptions(plan)
+  }
+
+  private async prepareFutures(plan: FuturesPerpPlan): Promise<PreparedTicket> {
+    const sizeNum = Number(plan.size)
+    if (!Number.isFinite(sizeNum) || sizeNum <= 0) throw new Error('invalid order size')
+    const maxLeverage = SIM_CAPABILITIES.futures_perp?.maxLeverage ?? 100
+    if (!Number.isFinite(plan.leverage) || plan.leverage < 1 || plan.leverage > maxLeverage)
+      throw new Error(`invalid leverage (venue max ${maxLeverage}×)`)
+
+    const isLimit = plan.orderType === 'limit'
+    const entry = isLimit ? Number(plan.limitPrice) : await this.quote(plan.instrument)
+    if (!Number.isFinite(entry) || entry <= 0) throw new Error('invalid price')
+
+    // Liquidation APPROXIMATION (isolated, ignoring maintenance margin/fees/
+    // funding): an isolated position exhausts its margin ~1/leverage against it.
+    const liquidation =
+      plan.direction === 'long' ? entry * (1 - 1 / plan.leverage) : entry * (1 + 1 / plan.leverage)
+    const margin = (sizeNum * entry) / plan.leverage
+    const baseAsset = plan.instrument.split('/')[0] ?? plan.instrument
+    const quoteAsset = plan.instrument.split('/')[1] ?? 'USDT'
+    // Open long / close short = buy; open short / close long = sell.
+    const side = (plan.action === 'open') === (plan.direction === 'long') ? 'buy' : 'sell'
+    const ticketId = `t_${randomUUID().replaceAll('-', '').slice(0, 10)}`
+    this.tickets.set(ticketId, {
+      req: {
+        partnerId: plan.partnerId,
+        userId: plan.userId,
+        side,
+        size: plan.size,
+        instrument: plan.instrument,
+        orderType: plan.orderType,
+        ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}),
+      },
+      price: entry,
+      sizeNum,
+    })
+
+    return {
+      ticketId,
+      side,
+      instrument: plan.instrument,
+      orderType: plan.orderType,
+      capability: 'futures_perp',
+      sideLabel: `${plan.action.toUpperCase()} ${plan.direction.toUpperCase()} ${plan.leverage}× · ${isLimit ? 'LMT' : 'MKT'}`,
+      rows: [
+        { label: 'Instrument', value: `${plan.instrument.replace('/', ' / ')} PERP` },
+        { label: 'Direction', value: plan.direction.toUpperCase() },
+        { label: 'Leverage', value: `${plan.leverage}×` },
+        { label: 'Margin mode', value: plan.marginMode === 'cross' ? 'Cross' : 'Isolated' },
+        { label: 'Size', value: `${plan.size} ${baseAsset}` },
+        { label: isLimit ? 'Limit entry' : 'Est. entry', value: formatPrice(entry) },
+        { label: 'Est. liquidation price', value: formatPrice(liquidation) },
+        { label: 'Est. margin', value: `${formatAmount(margin)} ${quoteAsset}` },
+        ...(plan.reduceOnly ? [{ label: 'Reduce only', value: 'Yes' }] : []),
+      ],
+    }
+  }
+
+  private async prepareOptions(plan: OptionsPlan): Promise<PreparedTicket> {
+    const contracts = Number(plan.size)
+    if (!Number.isFinite(contracts) || contracts <= 0) throw new Error('invalid order size')
+    const strike = Number(plan.strike)
+    if (!Number.isFinite(strike) || strike <= 0) throw new Error('invalid strike')
+
+    const isLimit = plan.orderType === 'limit'
+    // Premium STAND-IN: the sim has no options chain, so a limit order's price
+    // is the premium; a market order borrows the live underlying quote.
+    const premium = isLimit ? Number(plan.limitPrice) : await this.quote(`${plan.underlying}/USDT`)
+    if (!Number.isFinite(premium) || premium <= 0) throw new Error('invalid price')
+
+    const instrument = `${plan.underlying} ${plan.strike} ${plan.optionType.toUpperCase()} ${plan.expiry}`
+    const ticketId = `t_${randomUUID().replaceAll('-', '').slice(0, 10)}`
+    this.tickets.set(ticketId, {
+      req: {
+        partnerId: plan.partnerId,
+        userId: plan.userId,
+        side: plan.side,
+        size: plan.size,
+        instrument,
+        orderType: plan.orderType,
+      },
+      price: premium,
+      sizeNum: contracts,
+    })
+
+    return {
+      ticketId,
+      side: plan.side,
+      instrument,
+      orderType: plan.orderType,
+      capability: 'options',
+      sideLabel: `${plan.side.toUpperCase()} ${plan.optionType.toUpperCase()} · ${isLimit ? 'LMT' : 'MKT'}`,
+      rows: [
+        { label: 'Type', value: plan.optionType.toUpperCase() },
+        { label: 'Strike', value: formatPrice(strike) },
+        { label: 'Expiry', value: plan.expiry },
+        { label: 'Contracts', value: plan.size },
+        { label: 'Est. premium', value: `${formatAmount(premium * contracts)} USDT` },
+      ],
+    }
+  }
+
   private recordFill(req: PrepareRequest, sizeNum: number, price: number): void {
     const bookKey = `${req.partnerId}:${req.userId}`
     const book = this.books.get(bookKey) ?? new Map<string, PositionAgg>()
@@ -150,9 +282,7 @@ export class SimVenueAdapter implements VenueAdapter {
     // from actual fills and are marked to the LIVE market price. Never a
     // fabricated row. NEVER cached.
     const openOrders = [...this.tickets.entries()]
-      .filter(
-        ([, t]) => t.confirmed && t.req.partnerId === partnerId && t.req.userId === userId,
-      )
+      .filter(([, t]) => t.confirmed && t.req.partnerId === partnerId && t.req.userId === userId)
       .map(([ticketId, t]) => {
         const base = t.req.instrument.split('/')[0] ?? t.req.instrument
         const summary =
@@ -182,7 +312,8 @@ export class SimVenueAdapter implements VenueAdapter {
           entry: formatPrice(entry),
           mark: mark === null ? '—' : formatPrice(mark),
           pnl: pnl === null ? '—' : `${pnl >= 0 ? '+' : '−'}${formatAmount(Math.abs(pnl))} USDT`,
-          tone: pnl === null ? ('neutral' as const) : pnl >= 0 ? ('pos' as const) : ('neg' as const),
+          tone:
+            pnl === null ? ('neutral' as const) : pnl >= 0 ? ('pos' as const) : ('neg' as const),
         }
       }),
     )
