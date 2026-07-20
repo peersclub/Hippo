@@ -60,6 +60,11 @@ do not point the SPAs at Railway directly.
 
 ## 3 · Smoke checklist (in order)
 
+Steps 1, 3, and 4 are automated by `scripts/smoke.sh` (health + session posture
++ a full research turn). Run it against local (`scripts/smoke.sh`) or a live
+gateway (`GATEWAY_URL=https://<gw> EXPECT_DEV=0 CHECK_SERVICES=0 scripts/smoke.sh`).
+Steps 2, 5, 6 are UI and still need a human.
+
 1. Every Railway service `/health` returns `ok:true` (intelligence shows `mode:"llm"` + your model)
 2. Admin SPA: log in with the bootstrap operator → create a real partner (id, `pk_` key, JWT secret) + plan
 3. Gateway: `POST /v1/session` **without** a token → 401 (dev mode is off)
