@@ -59,9 +59,64 @@ _LIMIT_RE = re.compile(
 )
 _MARKET_RE = re.compile(r"^(?:at\s+market|market)\s*$", re.IGNORECASE)
 
+# "[open|close] long/short <qty> <asset> [<lev>x] [isolated|cross] [reduce] …"
+_PERP_RE = re.compile(
+    r"^\s*(?P<action>open\s+|close\s+)?"
+    r"(?P<dir>long|short)\s+"
+    r"(?P<size>\d+(?:\.\d+)?)\s+"
+    r"(?P<asset>[a-zA-Z]{2,10})"
+    r"(?P<rest>\s+.*)?$",
+    re.IGNORECASE,
+)
+_LEV_RE = re.compile(r"\b(?P<lev>\d{1,3})x\b", re.IGNORECASE)
 
-def parse_order(text: str) -> dict[str, str] | None:
-    """Extract a fully-specified order, else None. Asset → "XXX/USDT" pair."""
+
+def parse_perp(text: str) -> dict | None:
+    """Extract a fully-specified perpetual-futures order, else None."""
+    m = _PERP_RE.match(text.strip())
+    if not m:
+        return None
+    asset = normalize_asset(m.group("asset"))
+    if asset is None:
+        return None
+    rest = (m.group("rest") or "").strip()
+    lev_m = _LEV_RE.search(rest)
+    direction = m.group("dir").lower()
+    action = (m.group("action") or "open").strip().lower() or "open"
+    order: dict = {
+        "capability": "futures_perp",
+        # open long / close short = buy; open short / close long = sell.
+        "side": "buy" if (action == "open") == (direction == "long") else "sell",
+        "direction": direction,
+        "action": action,
+        "leverage": int(lev_m.group("lev")) if lev_m else 10,
+        "marginMode": "cross" if re.search(r"\bcross\b", rest, re.IGNORECASE) else "isolated",
+        "reduceOnly": action == "close" or bool(re.search(r"\breduce\b", rest, re.IGNORECASE)),
+        "size": m.group("size"),
+        "instrument": to_pair(asset),
+        "orderType": "market",
+    }
+    # Strip the parts we consumed, then look for an explicit limit price.
+    residue = _LEV_RE.sub("", rest)
+    residue = re.sub(r"\b(isolated|cross|reduce(?:\s+only)?)\b", "", residue, flags=re.IGNORECASE).strip()
+    if residue and not _MARKET_RE.match(residue):
+        limit = _LIMIT_RE.match(residue)
+        if limit is None:
+            return None  # trailing text we don't understand → let the LLM try
+        order["orderType"] = "limit"
+        order["limitPrice"] = limit.group("price").replace(",", "")
+    return order
+
+
+def parse_order(text: str) -> dict | None:
+    """Extract a fully-specified order, else None. Asset → "XXX/USDT" pair.
+
+    Tries perpetual-futures phrasing ("long 0.5 BTC 10x") first, then spot
+    ("buy 0.5 BTC"). Spot orders are tagged capability='spot' for symmetry.
+    """
+    perp = parse_perp(text)
+    if perp is not None:
+        return perp
     m = _ORDER_RE.match(text.strip())
     if not m:
         return None
@@ -69,6 +124,8 @@ def parse_order(text: str) -> dict[str, str] | None:
     if asset is None:
         return None
     rest = (m.group("rest") or "").strip()
+    # Spot stays byte-identical (untagged) — the gateway treats an order with no
+    # capability as spot; only richer capabilities carry an explicit tag.
     order: dict[str, str] = {
         "side": m.group("side").lower(),
         "size": m.group("size"),

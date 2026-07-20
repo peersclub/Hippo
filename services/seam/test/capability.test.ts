@@ -29,7 +29,8 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string | URL) => {
-      if (String(url).includes('/v1/snapshot')) return new Response(JSON.stringify({ last: 60_000 }), { status: 200 })
+      if (String(url).includes('/v1/snapshot'))
+        return new Response(JSON.stringify({ last: 60_000 }), { status: 200 })
       return new Response('not found', { status: 404 })
     }),
   )
@@ -38,7 +39,11 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('capability framework', () => {
   it('sim advertises all three capabilities; koinbx only spot', async () => {
-    expect(Object.keys(await new SimVenueAdapter().capabilities()).sort()).toEqual(['futures_perp', 'options', 'spot'])
+    expect(Object.keys(await new SimVenueAdapter().capabilities()).sort()).toEqual([
+      'futures_perp',
+      'options',
+      'spot',
+    ])
     const kbx = new KoinbxVenueAdapter({ apiKey: 'k', secret: 's', baseUrl: 'https://kbx.test' })
     expect(await kbx.capabilities()).toEqual({ spot: {} })
   })
@@ -58,7 +63,12 @@ describe('capability framework', () => {
     const caps = await app.inject({ method: 'GET', url: '/v1/capabilities', headers: HDR })
     expect(caps.json().futures_perp.maxLeverage).toBe(100)
 
-    const ok = await app.inject({ method: 'POST', url: '/v1/prepare-order', headers: HDR, payload: JSON.stringify(perpPlan) })
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare-order',
+      headers: HDR,
+      payload: JSON.stringify(perpPlan),
+    })
     expect(ok.statusCode).toBe(200)
     expect(ok.json().capability).toBe('futures_perp')
   })
@@ -66,7 +76,12 @@ describe('capability framework', () => {
   it('HTTP: a perp plan is rejected (422) on a spot-only venue', async () => {
     const kbx = new KoinbxVenueAdapter({ apiKey: 'k', secret: 's', baseUrl: 'https://kbx.test' })
     const app = buildService(kbx, { internalToken: TOKEN })
-    const res = await app.inject({ method: 'POST', url: '/v1/prepare-order', headers: HDR, payload: JSON.stringify(perpPlan) })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare-order',
+      headers: HDR,
+      payload: JSON.stringify(perpPlan),
+    })
     expect(res.statusCode).toBe(422)
     expect(res.json().error).toMatch(/not supported/i)
   })

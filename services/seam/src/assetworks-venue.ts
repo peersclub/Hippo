@@ -80,7 +80,12 @@ type StoredTicket = {
   poll?: ReturnType<typeof setInterval>
   /** Present for futures_perp tickets — sent to the host on confirm so the
    *  order is placed as a perp (market:'perp' + direction/leverage/margin). */
-  perp?: { direction: 'long' | 'short'; leverage: number; marginMode: 'isolated' | 'cross'; reduceOnly: boolean }
+  perp?: {
+    direction: 'long' | 'short'
+    leverage: number
+    marginMode: 'isolated' | 'cross'
+    reduceOnly: boolean
+  }
 }
 
 type HostEnvelope<T> = { status: boolean; data?: T; error?: string }
@@ -222,7 +227,9 @@ export class AssetworksVenueAdapter implements VenueAdapter {
    *  own /v1/capabilities. Falls back to the known Assetworks set if offline. */
   async capabilities(): Promise<VenueCapabilitiesShape> {
     try {
-      const res = await this.opts.fetchImpl(`${this.opts.baseUrl}/v1/capabilities`, { signal: AbortSignal.timeout(2_000) })
+      const res = await this.opts.fetchImpl(`${this.opts.baseUrl}/v1/capabilities`, {
+        signal: AbortSignal.timeout(2_000),
+      })
       if (res.ok) {
         const body = (await res.json()) as { capabilities?: VenueCapabilitiesShape }
         if (body.capabilities) return body.capabilities
@@ -273,12 +280,25 @@ export class AssetworksVenueAdapter implements VenueAdapter {
       { label: 'Est. margin', value: `${formatAmount(margin)} ${quoteAsset}` },
     ]
     this.tickets.set(ticketId, {
-      req: { partnerId: plan.partnerId, userId: plan.userId, side, size: plan.size, instrument: plan.instrument, orderType: plan.orderType, ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}) },
+      req: {
+        partnerId: plan.partnerId,
+        userId: plan.userId,
+        side,
+        size: plan.size,
+        instrument: plan.instrument,
+        orderType: plan.orderType,
+        ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}),
+      },
       price: entry,
       sizeNum,
       pairName: toPairName(plan.instrument),
       rows,
-      perp: { direction: plan.direction, leverage: plan.leverage, marginMode: plan.marginMode, reduceOnly: plan.reduceOnly },
+      perp: {
+        direction: plan.direction,
+        leverage: plan.leverage,
+        marginMode: plan.marginMode,
+        reduceOnly: plan.reduceOnly,
+      },
     })
     return {
       ticketId,

@@ -18,7 +18,9 @@ function selectAdapter(): { adapter: VenueAdapter; label: string } {
   if (process.env.VENUE === 'assetworks') {
     const { ASSETWORKS_API_KEY, ASSETWORKS_SECRET, ASSETWORKS_BASE_URL } = process.env
     if (!ASSETWORKS_API_KEY || !ASSETWORKS_SECRET || !ASSETWORKS_BASE_URL)
-      throw new Error('VENUE=assetworks requires ASSETWORKS_API_KEY, ASSETWORKS_SECRET and ASSETWORKS_BASE_URL')
+      throw new Error(
+        'VENUE=assetworks requires ASSETWORKS_API_KEY, ASSETWORKS_SECRET and ASSETWORKS_BASE_URL',
+      )
     return {
       adapter: new AssetworksVenueAdapter({
         apiKey: ASSETWORKS_API_KEY,

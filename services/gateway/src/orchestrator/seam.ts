@@ -64,6 +64,9 @@ export interface SeamClient {
     orderType: 'market' | 'limit'
     limitPrice?: string
   }): Promise<PreparedTicket>
+  /** Capability-tagged prepare (futures_perp/options) via /v1/prepare-order.
+   *  The gateway forwards the plan verbatim; the seam quotes and validates. */
+  prepareOrder(plan: Record<string, unknown>): Promise<PreparedTicket>
   confirm(ticketId: string): Promise<void>
   cancel(ticketId: string): Promise<void>
   /** Rejects when the seam is down — portfolio is never served stale. */
@@ -92,6 +95,11 @@ export function createSeamClient(
       json<PreparedTicket>(`${baseUrl}/v1/prepare`, {
         method: 'POST',
         body: JSON.stringify(req),
+      }),
+    prepareOrder: (plan) =>
+      json<PreparedTicket>(`${baseUrl}/v1/prepare-order`, {
+        method: 'POST',
+        body: JSON.stringify(plan),
       }),
     confirm: async (ticketId) => {
       await json(`${baseUrl}/v1/tickets/${ticketId}/confirm`, {

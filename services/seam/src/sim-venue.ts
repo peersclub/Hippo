@@ -150,7 +150,15 @@ export class SimVenueAdapter implements VenueAdapter {
     const side = (plan.action === 'open') === (plan.direction === 'long') ? 'buy' : 'sell'
     const ticketId = `t_${randomUUID().replaceAll('-', '').slice(0, 10)}`
     this.tickets.set(ticketId, {
-      req: { partnerId: plan.partnerId, userId: plan.userId, side, size: plan.size, instrument: plan.instrument, orderType: plan.orderType, ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}) },
+      req: {
+        partnerId: plan.partnerId,
+        userId: plan.userId,
+        side,
+        size: plan.size,
+        instrument: plan.instrument,
+        orderType: plan.orderType,
+        ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}),
+      },
       price: entry,
       sizeNum,
     })
@@ -191,7 +199,14 @@ export class SimVenueAdapter implements VenueAdapter {
     const instrument = `${plan.underlying} ${plan.strike} ${plan.optionType.toUpperCase()} ${plan.expiry}`
     const ticketId = `t_${randomUUID().replaceAll('-', '').slice(0, 10)}`
     this.tickets.set(ticketId, {
-      req: { partnerId: plan.partnerId, userId: plan.userId, side: plan.side, size: plan.size, instrument, orderType: plan.orderType },
+      req: {
+        partnerId: plan.partnerId,
+        userId: plan.userId,
+        side: plan.side,
+        size: plan.size,
+        instrument,
+        orderType: plan.orderType,
+      },
       price: premium,
       sizeNum: contracts,
     })
@@ -267,9 +282,7 @@ export class SimVenueAdapter implements VenueAdapter {
     // from actual fills and are marked to the LIVE market price. Never a
     // fabricated row. NEVER cached.
     const openOrders = [...this.tickets.entries()]
-      .filter(
-        ([, t]) => t.confirmed && t.req.partnerId === partnerId && t.req.userId === userId,
-      )
+      .filter(([, t]) => t.confirmed && t.req.partnerId === partnerId && t.req.userId === userId)
       .map(([ticketId, t]) => {
         const base = t.req.instrument.split('/')[0] ?? t.req.instrument
         const summary =
@@ -299,7 +312,8 @@ export class SimVenueAdapter implements VenueAdapter {
           entry: formatPrice(entry),
           mark: mark === null ? '—' : formatPrice(mark),
           pnl: pnl === null ? '—' : `${pnl >= 0 ? '+' : '−'}${formatAmount(Math.abs(pnl))} USDT`,
-          tone: pnl === null ? ('neutral' as const) : pnl >= 0 ? ('pos' as const) : ('neg' as const),
+          tone:
+            pnl === null ? ('neutral' as const) : pnl >= 0 ? ('pos' as const) : ('neg' as const),
         }
       }),
     )

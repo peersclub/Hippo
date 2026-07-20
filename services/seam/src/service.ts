@@ -16,7 +16,14 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { SimVenueAdapter } from './sim-venue.js'
-import type { Capability, LifecycleEvent, OrderPlan, PrepareRequest, VenueAdapter } from './types.js'
+import type {
+  Capability,
+  LifecycleEvent,
+  OrderPlan,
+  PreparedTicket,
+  PrepareRequest,
+  VenueAdapter,
+} from './types.js'
 
 type AuditEntry = {
   ts: number
@@ -125,21 +132,55 @@ function parsePlan(body: unknown): OrderPlan | null {
   if (r.capability === 'spot') {
     if (typeof r.instrument !== 'string' || !INSTRUMENT.test(r.instrument)) return null
     if (!SIDES.has(String(r.side))) return null
-    return { capability: 'spot', partnerId: r.partnerId, userId: r.userId, side: r.side as 'buy' | 'sell', size: r.size, instrument: r.instrument, orderType, ...limit }
+    return {
+      capability: 'spot',
+      partnerId: r.partnerId,
+      userId: r.userId,
+      side: r.side as 'buy' | 'sell',
+      size: r.size,
+      instrument: r.instrument,
+      orderType,
+      ...limit,
+    }
   }
   if (r.capability === 'futures_perp') {
     if (typeof r.instrument !== 'string' || !INSTRUMENT.test(r.instrument)) return null
     if (r.direction !== 'long' && r.direction !== 'short') return null
     if (r.marginMode !== 'isolated' && r.marginMode !== 'cross') return null
     if (typeof r.leverage !== 'number' || !(r.leverage >= 1)) return null
-    return { capability: 'futures_perp', partnerId: r.partnerId, userId: r.userId, instrument: r.instrument, direction: r.direction, action: r.action === 'close' ? 'close' : 'open', leverage: r.leverage, marginMode: r.marginMode, size: r.size, reduceOnly: r.reduceOnly === true, orderType, ...limit }
+    return {
+      capability: 'futures_perp',
+      partnerId: r.partnerId,
+      userId: r.userId,
+      instrument: r.instrument,
+      direction: r.direction,
+      action: r.action === 'close' ? 'close' : 'open',
+      leverage: r.leverage,
+      marginMode: r.marginMode,
+      size: r.size,
+      reduceOnly: r.reduceOnly === true,
+      orderType,
+      ...limit,
+    }
   }
   // options
   if (typeof r.underlying !== 'string') return null
   if (r.optionType !== 'call' && r.optionType !== 'put') return null
   if (!SIDES.has(String(r.side))) return null
   if (typeof r.strike !== 'string' || typeof r.expiry !== 'string') return null
-  return { capability: 'options', partnerId: r.partnerId, userId: r.userId, underlying: r.underlying, optionType: r.optionType, side: r.side as 'buy' | 'sell', strike: r.strike, expiry: r.expiry, size: r.size, orderType, ...limit }
+  return {
+    capability: 'options',
+    partnerId: r.partnerId,
+    userId: r.userId,
+    underlying: r.underlying,
+    optionType: r.optionType,
+    side: r.side as 'buy' | 'sell',
+    strike: r.strike,
+    expiry: r.expiry,
+    size: r.size,
+    orderType,
+    ...limit,
+  }
 }
 
 export function buildService(
@@ -265,17 +306,28 @@ export function buildService(
     if (plan === null) return reply.code(400).send({ error: 'invalid order plan' })
     const caps = await adapter.capabilities()
     if (caps[plan.capability] === undefined)
-      return reply.code(422).send({ error: `capability '${plan.capability}' not supported on this venue` })
+      return reply
+        .code(422)
+        .send({ error: `capability '${plan.capability}' not supported on this venue` })
     const detail =
       plan.capability === 'options'
         ? `options ${plan.underlying}`
         : `${plan.capability} ${plan.instrument}`
     try {
-      let ticket
+      let ticket: PreparedTicket
       if (adapter.prepareOrder) ticket = await adapter.prepareOrder(plan)
       else if (plan.capability === 'spot')
-        ticket = await adapter.prepare({ partnerId: plan.partnerId, userId: plan.userId, side: plan.side, size: plan.size, instrument: plan.instrument, orderType: plan.orderType, ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}) })
-      else return reply.code(422).send({ error: `venue adapter cannot prepare '${plan.capability}'` })
+        ticket = await adapter.prepare({
+          partnerId: plan.partnerId,
+          userId: plan.userId,
+          side: plan.side,
+          size: plan.size,
+          instrument: plan.instrument,
+          orderType: plan.orderType,
+          ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}),
+        })
+      else
+        return reply.code(422).send({ error: `venue adapter cannot prepare '${plan.capability}'` })
       record({ kind: 'prepare', ticketId: ticket.ticketId, detail })
       return ticket
     } catch (err) {

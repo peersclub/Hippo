@@ -22,12 +22,20 @@ const BREAKER_MS = 15_000
 export type IntentKind = 'research' | 'concept' | 'action' | 'advice' | 'portfolio' | 'smalltalk'
 
 export type OrderIntent = {
+  /** Absent/'spot' = spot; 'futures_perp' routes to the seam's plan path. */
+  capability?: 'spot' | 'futures_perp'
   side: 'buy' | 'sell'
   size: string
   /** e.g. "BTC/USDT" */
   instrument: string
   orderType: 'market' | 'limit'
   limitPrice?: string
+  // futures_perp only:
+  direction?: 'long' | 'short'
+  leverage?: number
+  marginMode?: 'isolated' | 'cross'
+  action?: 'open' | 'close'
+  reduceOnly?: boolean
 }
 
 export type IntentResult = {
@@ -204,6 +212,35 @@ export function createIntelligenceClient(baseUrl = INTELLIGENCE_URL): Intelligen
  */
 export function guessIntent(text: string): IntentResult {
   const t = text.toLowerCase()
+
+  // "long 0.5 btc 10x" / "short 1 eth 20x isolated" → futures_perp action.
+  const p = t.match(/\b(long|short)\s+([\d,]*\.?\d+)\s*([a-z]{2,10})\b(?:\D*?(\d{1,3})x)?/)
+  if (p) {
+    const [, dir, size, asset, lev] = p as unknown as [
+      string,
+      'long' | 'short',
+      string,
+      string,
+      string | undefined,
+    ]
+    return {
+      intent: 'action',
+      confidence: 0.5,
+      language: 'en',
+      order: {
+        capability: 'futures_perp',
+        side: dir === 'long' ? 'buy' : 'sell',
+        direction: dir,
+        action: 'open',
+        leverage: lev ? Number(lev) : 10,
+        marginMode: /\bcross\b/.test(t) ? 'cross' : 'isolated',
+        reduceOnly: /\b(reduce|close)\b/.test(t),
+        size: size.replaceAll(',', ''),
+        instrument: `${asset.toUpperCase()}/USDT`,
+        orderType: 'market',
+      },
+    }
+  }
 
   // "buy 0.05 btc" / "sell 12 sol" → action with extracted order params.
   const m = t.match(/\b(buy|sell)\s+([\d,]*\.?\d+)\s*([a-z]{2,10})\b/)

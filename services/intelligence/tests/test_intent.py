@@ -45,6 +45,51 @@ class OrderParsing(unittest.TestCase):
         self.assertEqual(order["orderType"], "market")
         self.assertEqual(order["instrument"], "ETH/USDT")
 
+    def test_perp_long_with_leverage(self) -> None:
+        order = parse_order("long 0.5 btc 10x")
+        self.assertEqual(
+            order,
+            {
+                "capability": "futures_perp",
+                "side": "buy",
+                "direction": "long",
+                "action": "open",
+                "leverage": 10,
+                "marginMode": "isolated",
+                "reduceOnly": False,
+                "size": "0.5",
+                "instrument": "BTC/USDT",
+                "orderType": "market",
+            },
+        )
+
+    def test_perp_short_cross(self) -> None:
+        order = parse_order("short 1 eth 20x cross")
+        assert order is not None
+        self.assertEqual(order["capability"], "futures_perp")
+        self.assertEqual(order["side"], "sell")
+        self.assertEqual(order["leverage"], 20)
+        self.assertEqual(order["marginMode"], "cross")
+
+    def test_perp_close_is_reduce_only(self) -> None:
+        order = parse_order("close long 0.5 btc")
+        assert order is not None
+        self.assertEqual(order["action"], "close")
+        self.assertTrue(order["reduceOnly"])
+        self.assertEqual(order["side"], "sell")  # closing a long sells
+
+    def test_perp_limit(self) -> None:
+        order = parse_order("long 2 sol 5x limit 140")
+        assert order is not None
+        self.assertEqual(order["orderType"], "limit")
+        self.assertEqual(order["limitPrice"], "140")
+        self.assertEqual(order["leverage"], 5)
+
+    def test_spot_stays_untagged(self) -> None:
+        order = parse_order("buy 0.5 btc")
+        assert order is not None
+        self.assertNotIn("capability", order)  # spot contract byte-identical
+
     def test_limit_with_at_symbol_and_commas(self) -> None:
         order = parse_order("sell 2 eth @ 3,100.50")
         assert order is not None
