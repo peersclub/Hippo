@@ -129,8 +129,11 @@ function Composer() {
   const text = composerDraft.value
   const [failed, setFailed] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const offline = connection.value === 'offline'
-  const blocked = connection.value !== 'live'
+  const conn = connection.value
+  // Terminal/dropped states where typing is pointless — disable the input.
+  // `connecting` keeps it enabled so the draft can be composed while we warm up.
+  const offline = conn === 'offline' || conn === 'blocked' || conn === 'capacity'
+  const blocked = conn !== 'live'
   const autosize = () => {
     const el = inputRef.current
     if (!el) return
@@ -171,11 +174,16 @@ function Composer() {
   const L = locale.value
   const count = counterLabel(text.length)
   const queued = outbox.value.length
-  const placeholder = offline
-    ? t(L, 'composer_placeholder_offline')
-    : blocked
-      ? t(L, 'composer_placeholder_connecting')
-      : t(L, 'composer_placeholder')
+  const placeholder =
+    conn === 'blocked'
+      ? t(L, 'composer_placeholder_unavailable')
+      : conn === 'capacity'
+        ? t(L, 'composer_placeholder_capacity')
+        : conn === 'offline'
+          ? t(L, 'composer_placeholder_offline')
+          : blocked
+            ? t(L, 'composer_placeholder_connecting')
+            : t(L, 'composer_placeholder')
   return (
     <div class="cwrap">
       {failed && (
@@ -429,6 +437,16 @@ function Thread() {
             <div>
               <b>{t(locale.value, 'connection_lost')}</b>
               {t(locale.value, 'connection_lost_body')}
+            </div>
+          </div>
+        )}
+        {/* Capacity (429) reads as a friendly notice, not a broken connection.
+            `blocked` (401) is deliberately silent — the surface just disables. */}
+        {connection.value === 'capacity' && (
+          <div class="banner degraded" role="status">
+            <div>
+              <b>{t(locale.value, 'capacity_title')}</b>
+              {t(locale.value, 'capacity_body')}
             </div>
           </div>
         )}

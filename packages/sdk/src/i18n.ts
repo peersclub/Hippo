@@ -67,6 +67,10 @@ export type MessageKey =
   | 'copy_brief'
   | 'copied'
   | 'stop_streaming'
+  | 'composer_placeholder_unavailable'
+  | 'composer_placeholder_capacity'
+  | 'capacity_title'
+  | 'capacity_body'
 
 type Catalog = Record<MessageKey, string>
 
@@ -116,6 +120,11 @@ const en: Catalog = {
   copy_brief: 'Copy this brief',
   copied: 'Copied',
   stop_streaming: 'Stop generating',
+  composer_placeholder_unavailable: 'Hippo isn’t available right now',
+  composer_placeholder_capacity: 'Hippo is busy this month',
+  capacity_title: 'HIPPO IS BUSY THIS MONTH',
+  capacity_body:
+    'Hippo has reached this month’s capacity. Your thread is safe — please check back soon.',
 }
 
 // First pass — pending native review.
@@ -165,6 +174,10 @@ const hi: Catalog = {
   copy_brief: 'यह ब्रीफ़ कॉपी करें',
   copied: 'कॉपी हो गया',
   stop_streaming: 'जनरेट करना रोकें',
+  composer_placeholder_unavailable: 'Hippo अभी उपलब्ध नहीं है',
+  composer_placeholder_capacity: 'Hippo इस महीने व्यस्त है',
+  capacity_title: 'Hippo इस महीने व्यस्त है',
+  capacity_body: 'Hippo इस महीने की क्षमता तक पहुँच गया है। आपकी बातचीत सुरक्षित है — कृपया कुछ देर बाद देखें।',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -216,6 +229,11 @@ const hiLatn: Catalog = {
   copy_brief: 'Yeh brief copy karo',
   copied: 'Copy ho gaya',
   stop_streaming: 'Generate karna roko',
+  composer_placeholder_unavailable: 'Hippo abhi available nahi hai',
+  composer_placeholder_capacity: 'Hippo is mahine busy hai',
+  capacity_title: 'Hippo IS MAHINE BUSY HAI',
+  capacity_body:
+    'Hippo is mahine ki capacity tak pahunch gaya hai. Aapki baat-cheet safe hai — thodi der baad dekhein.',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -267,6 +285,10 @@ const ar: Catalog = {
   copy_brief: 'نسخ هذا الموجز',
   copied: 'تم النسخ',
   stop_streaming: 'إيقاف التوليد',
+  composer_placeholder_unavailable: 'Hippo غير متاح حاليًا',
+  composer_placeholder_capacity: 'Hippo مشغول هذا الشهر',
+  capacity_title: 'Hippo مشغول هذا الشهر',
+  capacity_body: 'وصل Hippo إلى سعة هذا الشهر. محادثتك آمنة — يُرجى المحاولة لاحقًا.',
 }
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }

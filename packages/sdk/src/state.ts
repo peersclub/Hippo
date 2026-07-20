@@ -22,7 +22,16 @@ export const orders = signal<OrdersSnapshot | null>(null)
 /** Where the panel sits on the page. `pill` = minimized launcher (panel
  * renders null). Full matrix + transitions live in posture.ts. */
 export const posture = signal<Posture>('pill')
-export const connection = signal<'connecting' | 'live' | 'offline'>('connecting')
+/**
+ * Connection lifecycle. `connecting`/`live`/`offline` are the transient stream
+ * states; `blocked` (invalid key / blocked user — 401) and `capacity` (MAU
+ * quota — 429) are terminal-for-this-user mint outcomes the composer renders
+ * distinctly. `blocked` disables the surface quietly (no error); `capacity`
+ * shows a friendly "busy this month" state while a long-backoff retry runs.
+ */
+export const connection = signal<'connecting' | 'live' | 'offline' | 'blocked' | 'capacity'>(
+  'connecting',
+)
 export const pulseTag = signal<string | null>(null)
 
 /** Pinned banners (degraded/offline/info) — rendered above the orders strip,
