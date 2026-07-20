@@ -22,12 +22,15 @@
 import { createHmac, randomUUID } from 'node:crypto'
 import type {
   AdapterLog,
+  FuturesPerpPlan,
   LifecycleEvent,
   LifecyclePhase,
+  OrderPlan,
   Portfolio,
   PreparedTicket,
   PrepareRequest,
   VenueAdapter,
+  VenueCapabilitiesShape,
 } from './types.js'
 
 const ORDER_TY = { buy: 0, sell: 1 } as const
@@ -75,6 +78,9 @@ type StoredTicket = {
   rows: Array<{ label: string; value: string }>
   venueOrderId?: number
   poll?: ReturnType<typeof setInterval>
+  /** Present for futures_perp tickets — sent to the host on confirm so the
+   *  order is placed as a perp (market:'perp' + direction/leverage/margin). */
+  perp?: { direction: 'long' | 'short'; leverage: number; marginMode: 'isolated' | 'cross'; reduceOnly: boolean }
 }
 
 type HostEnvelope<T> = { status: boolean; data?: T; error?: string }
@@ -212,6 +218,79 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     }
   }
 
+  /** Discover what the host supports (spot + perps), read live from the host's
+   *  own /v1/capabilities. Falls back to the known Assetworks set if offline. */
+  async capabilities(): Promise<VenueCapabilitiesShape> {
+    try {
+      const res = await this.opts.fetchImpl(`${this.opts.baseUrl}/v1/capabilities`, { signal: AbortSignal.timeout(2_000) })
+      if (res.ok) {
+        const body = (await res.json()) as { capabilities?: VenueCapabilitiesShape }
+        if (body.capabilities) return body.capabilities
+      }
+    } catch {
+      /* fall through */
+    }
+    return { spot: {}, futures_perp: { maxLeverage: 50, marginModes: ['isolated', 'cross'] } }
+  }
+
+  /** Capability-tagged prepare. Spot reuses prepare(); futures_perp builds a
+   *  perp ticket that confirm() places on the host as a perp order. Options are
+   *  not offered by this venue. */
+  async prepareOrder(plan: OrderPlan): Promise<PreparedTicket> {
+    if (plan.capability === 'spot') {
+      const ticket = await this.prepare(plan)
+      return { ...ticket, capability: 'spot' }
+    }
+    if (plan.capability === 'futures_perp') return this.prepareFutures(plan)
+    throw new Error('options are not supported on this venue')
+  }
+
+  private async prepareFutures(plan: FuturesPerpPlan): Promise<PreparedTicket> {
+    const sizeNum = Number(plan.size)
+    if (!Number.isFinite(sizeNum) || sizeNum <= 0) throw new Error('invalid order size')
+    if (!Number.isFinite(plan.leverage) || plan.leverage < 1 || plan.leverage > 50)
+      throw new Error('invalid leverage (venue max 50×)')
+    const isLimit = plan.orderType === 'limit'
+    const entry = isLimit ? Number(plan.limitPrice) : await this.quote(plan.instrument)
+    if (!Number.isFinite(entry) || entry <= 0) throw new Error('invalid price')
+
+    const liquidation =
+      plan.direction === 'long' ? entry * (1 - 1 / plan.leverage) : entry * (1 + 1 / plan.leverage)
+    const margin = (sizeNum * entry) / plan.leverage
+    const baseAsset = plan.instrument.split('/')[0] ?? plan.instrument
+    const quoteAsset = plan.instrument.split('/')[1] ?? 'USDT'
+    // Open long / close short = buy; open short / close long = sell.
+    const side = (plan.action === 'open') === (plan.direction === 'long') ? 'buy' : 'sell'
+    const ticketId = `t_${randomUUID().replaceAll('-', '').slice(0, 10)}`
+    const rows = [
+      { label: 'Instrument', value: `${plan.instrument.replace('/', ' / ')} PERP` },
+      { label: 'Direction', value: plan.direction.toUpperCase() },
+      { label: 'Leverage', value: `${plan.leverage}×` },
+      { label: 'Margin mode', value: plan.marginMode === 'cross' ? 'Cross' : 'Isolated' },
+      { label: 'Size', value: `${plan.size} ${baseAsset}` },
+      { label: isLimit ? 'Limit entry' : 'Est. entry', value: formatPrice(entry) },
+      { label: 'Est. liquidation price', value: formatPrice(liquidation) },
+      { label: 'Est. margin', value: `${formatAmount(margin)} ${quoteAsset}` },
+    ]
+    this.tickets.set(ticketId, {
+      req: { partnerId: plan.partnerId, userId: plan.userId, side, size: plan.size, instrument: plan.instrument, orderType: plan.orderType, ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}) },
+      price: entry,
+      sizeNum,
+      pairName: toPairName(plan.instrument),
+      rows,
+      perp: { direction: plan.direction, leverage: plan.leverage, marginMode: plan.marginMode, reduceOnly: plan.reduceOnly },
+    })
+    return {
+      ticketId,
+      side,
+      instrument: plan.instrument,
+      orderType: plan.orderType,
+      capability: 'futures_perp',
+      sideLabel: `${plan.action.toUpperCase()} ${plan.direction.toUpperCase()} ${plan.leverage}× · ${isLimit ? 'LMT' : 'MKT'}`,
+      rows,
+    }
+  }
+
   async confirm(ticketId: string): Promise<void> {
     const ticket = this.tickets.get(ticketId)
     if (!ticket) throw new Error(`unknown ticket ${ticketId}`)
@@ -224,6 +303,13 @@ export class AssetworksVenueAdapter implements VenueAdapter {
       tradeType: isLimit ? TRADE_TY.limit : TRADE_TY.market,
       qty: ticket.sizeNum,
       rate: ticket.price,
+    }
+    if (ticket.perp) {
+      orderBody.market = 'perp'
+      orderBody.direction = ticket.perp.direction
+      orderBody.leverage = ticket.perp.leverage
+      orderBody.marginMode = ticket.perp.marginMode
+      orderBody.reduceOnly = ticket.perp.reduceOnly
     }
 
     if (surface === 'js_callback') {

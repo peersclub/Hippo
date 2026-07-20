@@ -42,6 +42,7 @@ import type {
   PreparedTicket,
   PrepareRequest,
   VenueAdapter,
+  VenueCapabilitiesShape,
 } from './types.js'
 
 // KoinBX trade enums (koinbx/private-api-trade common/enums/trade.enum.ts).
@@ -155,6 +156,14 @@ export class KoinbxVenueAdapter implements VenueAdapter {
 
   setLogger(log: AdapterLog): void {
     this.log = log
+  }
+
+  /** The KoinBX pilot binds the spot private-trade API only; futures live on a
+   *  separate backend not wired here, so this venue advertises spot alone. The
+   *  capability framework then gates any perp/options plan out with a clean
+   *  "not supported on this venue" rather than a bad order. */
+  async capabilities(): Promise<VenueCapabilitiesShape> {
+    return { spot: {} }
   }
 
   /** Signed POST to the KoinBX private trade API. */
