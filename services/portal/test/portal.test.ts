@@ -9,6 +9,7 @@ import {
   tokenHash,
 } from '@hippo/stores'
 import { describe, expect, it } from 'vitest'
+import { sessionCookie } from '../src/auth.js'
 import { buildPortalService } from '../src/service.js'
 
 const JWT_SECRET = 'test-portal-secret'
@@ -357,5 +358,45 @@ describe('plan', () => {
       detail: { partnerId: 'kbx', currentPlanId: 'pilot' },
     })
     await app.close()
+  })
+})
+
+describe('session cookie Secure flag', () => {
+  const withEnv = (val: string | undefined, prodEnv: string | undefined, fn: () => void) => {
+    const savedSecure = process.env.PORTAL_COOKIE_SECURE
+    const savedNode = process.env.NODE_ENV
+    if (val === undefined) delete process.env.PORTAL_COOKIE_SECURE
+    else process.env.PORTAL_COOKIE_SECURE = val
+    if (prodEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = prodEnv
+    try {
+      fn()
+    } finally {
+      if (savedSecure === undefined) delete process.env.PORTAL_COOKIE_SECURE
+      else process.env.PORTAL_COOKIE_SECURE = savedSecure
+      if (savedNode === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = savedNode
+    }
+  }
+
+  it('is Secure by default in production', () => {
+    withEnv(undefined, 'production', () => {
+      expect(sessionCookie('tok')).toContain('; Secure')
+    })
+  })
+
+  it('can be forced off in production with PORTAL_COOKIE_SECURE=0', () => {
+    withEnv('0', 'production', () => {
+      expect(sessionCookie('tok')).not.toContain('; Secure')
+    })
+  })
+
+  it('is off by default in dev but opt-in with =1', () => {
+    withEnv(undefined, 'development', () => {
+      expect(sessionCookie('tok')).not.toContain('; Secure')
+    })
+    withEnv('1', 'development', () => {
+      expect(sessionCookie('tok')).toContain('; Secure')
+    })
   })
 })

@@ -29,8 +29,17 @@ export function mintSessionToken(session: PortalSession, secret: string): string
 }
 
 export function sessionCookie(token: string): string {
-  const secure = process.env.PORTAL_COOKIE_SECURE === '1' ? '; Secure' : ''
+  // Secure by default in production (opt out with PORTAL_COOKIE_SECURE=0);
+  // off by default in dev, opt in with =1 for local https.
+  const secure = cookieSecure() ? '; Secure' : ''
   return `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_S}${secure}`
+}
+
+function cookieSecure(): boolean {
+  const flag = process.env.PORTAL_COOKIE_SECURE
+  if (flag === '1') return true
+  if (flag === '0') return false
+  return process.env.NODE_ENV === 'production'
 }
 
 export function clearedSessionCookie(): string {
