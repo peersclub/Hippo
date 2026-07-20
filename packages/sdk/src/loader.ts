@@ -13,6 +13,7 @@ type LoaderConfig = {
   gateway: string
   panelUrl: string
   locale: string
+  tokenUrl: string
 }
 
 /** Pill label per locale — inlined (the loader stays zero-dep and under its
@@ -46,6 +47,10 @@ function normalizeLocale(raw: string): string {
       gateway: script.dataset.hippoGateway ?? 'https://gw.hippo.app',
       panelUrl: script.dataset.hippoPanel ?? new URL('panel.js', script.src).href,
       locale: normalizeLocale(script.dataset.hippoLocale ?? 'en'),
+      // Host endpoint that mints a partner-signed session JWT (the partner's
+      // backend holds the secret — it never reaches this script). Unset =
+      // bare-key mint, which only dev-mode gateways accept.
+      tokenUrl: script.dataset.hippoTokenUrl ?? '',
     }
     if (!config.key) return
 
