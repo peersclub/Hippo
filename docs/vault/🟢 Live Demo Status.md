@@ -9,11 +9,31 @@
 
 | Surface | Link | Access |
 |---|---|---|
-| **Demo** (the main event) | https://hippo-host-demo.vercel.app | Open, click the **Ask Hippo** pill |
-| Test guide | https://hippo-host-demo.vercel.app/how | Walks every flow with expected results |
-| Operator admin | https://hippo-admin-six.vercel.app | `suresh.victor@askthehippo.com` (password was in the ephemeral July 18 scratchpad — needs a reset if lost) |
-| Partner portal | https://hippo-partner-portal.vercel.app | Demo seat `admin@koinbx-demo.com` |
-| Marketing site | https://hippo-site.vercel.app | Open |
+| **Demo** (the main event) | https://hippo-host-demo.vercel.app | Open, click the **Ask Hippo** pill — no login |
+| Test guide | https://hippo-host-demo.vercel.app/how | Open — walks every flow with expected results |
+| Operator admin | https://hippo-admin-six.vercel.app | Login below |
+| Partner portal | https://hippo-partner-portal.vercel.app | Login below |
+| Marketing site | https://hippo-site.vercel.app | Open — no login |
+
+## Demo credentials
+
+> [!note] Demo-environment credentials only
+> These unlock demo data on the demo deployment — nothing real sits behind them. Both logins reset + verified live July 20. Rotate via the runbook below if this note's audience ever widens.
+
+| Product | URL | Username | Password |
+|---|---|---|---|
+| Operator admin (Hippo ops view: partners, plans, users, audit) | https://hippo-admin-six.vercel.app | `suresh.victor@askthehippo.com` | `HippoOps!2026` |
+| Partner portal (KoinBX's own view: MAU, integration, plan) | https://hippo-partner-portal.vercel.app | `admin@koinbx-demo.com` | `HippoPartner!2026` |
+| Demo + test guide + site | — | none | none |
+| Prototype (living spec) | https://project-iducy.vercel.app | access phrase | managed by Ram — ask him directly |
+
+**Rotate a password** (scrypt `salthex:keyhex`, shared scheme from `packages/stores/src/password.ts`):
+
+```bash
+HASH=$(node -e "const{scryptSync,randomBytes}=require('node:crypto');const s=randomBytes(16);console.log(s.toString('hex')+':'+scryptSync(process.argv[1],s,32).toString('hex'))" 'NewPassword')
+psql "$DATABASE_PUBLIC_URL" -c "update admin_operators set password_hash='$HASH' where email='suresh.victor@askthehippo.com';"
+# portal seat: same, against partner_admins where email='admin@koinbx-demo.com'
+```
 
 ## Why the link is safe to share
 
@@ -34,7 +54,6 @@
 ## Known issues
 
 - **Main CI red** (as of the July 20 merge, inherited from the AssetWorks push whose own run was cancelled): 7 biome formatting errors + 1 failing CLI codegen test (`init-mapping.test.ts` typecheck). Deployed product unaffected.
-- Operator admin password lost with the ephemeral scratchpad — reset needed before handing admin to anyone.
 - OpenRouter key rotation still pending (same key as `.env`).
 
 ## Redeploy runbook (any of the four frontends)

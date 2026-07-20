@@ -3,7 +3,7 @@
 Conversational trading agent embedded in partner exchanges: **thin client, heavy core**. A one-script-tag surface that attaches to any website without harming it, deeply connected to the product underneath — it understands the user and places orders from inside the conversation. Installation is agentic and CLI-based: `hippo init` understands the partner's site and generates the integration.
 
 **Prototype (living spec):** https://project-iducy.vercel.app/ · local copy at `Reference/prototype-index.html`
-**🟢 Live demo (share this):** [[Live Demo Status]] — https://hippo-host-demo.vercel.app · full loop verified July 20
+**🟢 Live demo (share this):** [[🟢 Live Demo Status]] — https://hippo-host-demo.vercel.app · full loop verified July 20
 **Team:** Ram (strategy/brand) · Sudha (data/trust/evals) · Victor (product/SDK) · Kartik (commercial/MENA)
 
 ## Strategy
