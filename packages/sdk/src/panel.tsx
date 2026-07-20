@@ -46,7 +46,7 @@ import { connect, send } from './transport.js'
 type MountOpts = {
   shadow: ShadowRoot
   pill: HTMLButtonElement
-  config: { key: string; gateway: string; panelUrl: string; locale?: string }
+  config: { key: string; gateway: string; panelUrl: string; locale?: string; tokenUrl?: string }
 }
 
 let onboarding: OnboardingStore | null = null
@@ -693,5 +693,9 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
 
   pill.addEventListener('hippo:open', open)
   // Connect eagerly (hover-preload warms the session too) — but only a click opens.
-  void connect({ gateway: config.gateway, key: config.key })
+  void connect({
+    gateway: config.gateway,
+    key: config.key,
+    tokenUrl: config.tokenUrl || undefined,
+  })
 }

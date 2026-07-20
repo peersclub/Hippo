@@ -274,3 +274,122 @@ describe('session-mint status codes', () => {
     expect(sessN).toBe(before + 1)
   })
 })
+
+describe('partner token mint (data-hippo-token-url)', () => {
+  const tokenCfg = { ...cfg, tokenUrl: 'https://host.test/api/hippo-token' }
+  const tokenOk: Resp = { ok: true, status: 200, json: async () => ({ token: 'jwt.abc.sig' }) }
+
+  type Init = { body?: string; headers?: Record<string, string> }
+  function stubFetchWithInit(handler: (url: string, init?: Init) => Resp) {
+    const fn = vi.fn(async (url: string, init?: Init) => handler(url, init) as Response)
+    vi.stubGlobal('fetch', fn)
+    return fn
+  }
+
+  it('fetches a token and carries it as a Bearer header on the mint', async () => {
+    const calls: Array<{ url: string; init?: Init }> = []
+    stubFetchWithInit((url, init) => {
+      calls.push({ url, init })
+      if (url.includes('/api/hippo-token')) return tokenOk
+      return sessionOk('s1')
+    })
+    const { connect, connection } = await load()
+
+    await connect(tokenCfg)
+    mockEventSources[0]?.open()
+    expect(connection.value).toBe('live')
+
+    expect(calls[0]?.url).toContain('/api/hippo-token')
+    expect(calls[1]?.url).toContain('/v1/session')
+    expect(calls[1]?.init?.headers?.authorization).toBe('Bearer jwt.abc.sig')
+    // The bare key still rides along — the gateway may use it as a fallback
+    // partner lookup when the token's iss is absent.
+    expect(calls[1]?.init?.body).toContain('pk_x')
+  })
+
+  it('omits the token fetch and Authorization header without a tokenUrl', async () => {
+    const calls: Array<{ url: string; init?: Init }> = []
+    stubFetchWithInit((url, init) => {
+      calls.push({ url, init })
+      return sessionOk('s1')
+    })
+    const { connect } = await load()
+
+    await connect(cfg)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url).toContain('/v1/session')
+    expect(calls[0]?.init?.headers?.authorization).toBeUndefined()
+  })
+
+  it('token endpoint 401 is terminal — blocked, gateway never called', async () => {
+    const urls: string[] = []
+    stubFetchWithInit((url) => {
+      urls.push(url)
+      return { ok: false, status: 401 }
+    })
+    const { connect, connection } = await load()
+
+    await connect(tokenCfg)
+    expect(connection.value).toBe('blocked')
+    expect(urls.every((u) => u.includes('/api/hippo-token'))).toBe(true)
+  })
+
+  it('token endpoint 5xx backs off and retries like any transient failure', async () => {
+    vi.useFakeTimers()
+    let tokenN = 0
+    stubFetchWithInit((url) => {
+      if (url.includes('/api/hippo-token')) {
+        tokenN++
+        return { ok: false, status: 503 }
+      }
+      return sessionOk('s1')
+    })
+    const { connect, connection } = await load()
+
+    await connect(tokenCfg)
+    expect(connection.value).toBe('offline')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(tokenN).toBe(2)
+  })
+
+  it('a malformed token payload is retryable, never a crash', async () => {
+    vi.useFakeTimers()
+    let tokenN = 0
+    stubFetchWithInit((url) => {
+      if (url.includes('/api/hippo-token')) {
+        tokenN++
+        return { ok: true, status: 200, json: async () => ({}) }
+      }
+      return sessionOk('s1')
+    })
+    const { connect, connection } = await load()
+
+    await connect(tokenCfg)
+    expect(connection.value).toBe('offline')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(tokenN).toBe(2)
+  })
+
+  it('re-mint after stream death fetches a FRESH token', async () => {
+    vi.useFakeTimers()
+    let tokenN = 0
+    let sessN = 0
+    stubFetchWithInit((url) => {
+      if (url.includes('/api/hippo-token')) {
+        tokenN++
+        return tokenOk
+      }
+      sessN++
+      return sessionOk(`s${sessN}`)
+    })
+    const { connect } = await load()
+
+    await connect(tokenCfg)
+    mockEventSources[0]?.open()
+    mockEventSources[0]?.fail(MockEventSource.CLOSED)
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(sessN).toBe(2)
+    expect(tokenN).toBe(2) // one per mint — short-lived tokens are never reused
+  })
+})

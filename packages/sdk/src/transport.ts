@@ -1,7 +1,7 @@
 import { parseFrame, type Uplink } from '@hippo/protocol'
 import { connection, pushFrame, sessionId, suggestedQueries, venueName } from './state.js'
 
-export type TransportConfig = { gateway: string; key: string }
+export type TransportConfig = { gateway: string; key: string; tokenUrl?: string }
 
 let cfg: TransportConfig | null = null
 let es: EventSource | null = null
@@ -33,16 +33,49 @@ function nextBackoff(): number {
 type MintResult = 'ok' | 'blocked' | 'capacity' | 'retry'
 
 /**
+ * Fetch a partner-signed session JWT from the host's token endpoint
+ * (data-hippo-token-url). Fetched fresh on EVERY mint — partner tokens are
+ * short-lived, and every re-mint path (expiry, revocation, gateway restart)
+ * must present a live one. 401/403 mean the host refused this visitor a
+ * token — terminal, same as a gateway 401. Anything else is retryable.
+ */
+async function fetchToken(url: string): Promise<{ token: string } | 'blocked' | 'retry'> {
+  let res: Response
+  try {
+    res = await fetch(url, { method: 'GET' })
+  } catch {
+    return 'retry'
+  }
+  if (res.status === 401 || res.status === 403) return 'blocked'
+  if (!res.ok) return 'retry'
+  try {
+    const data = (await res.json()) as { token?: unknown }
+    if (typeof data.token !== 'string' || data.token.length === 0) return 'retry'
+    return { token: data.token }
+  } catch {
+    return 'retry'
+  }
+}
+
+/**
  * POST /v1/session and, on success, stamp the session state. Classifies the
  * status so callers can branch: 401 is terminal (blocked), 429 is terminal for
  * now (capacity), everything else non-ok — 5xx and network — is retryable.
+ * With a tokenUrl configured, the mint carries a partner-signed JWT; the
+ * bare-key body remains for dev-mode gateways.
  */
 async function mint(config: TransportConfig): Promise<MintResult> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (config.tokenUrl) {
+    const t = await fetchToken(config.tokenUrl)
+    if (t === 'blocked' || t === 'retry') return t
+    headers.authorization = `Bearer ${t.token}`
+  }
   let res: Response
   try {
     res = await fetch(`${config.gateway}/v1/session`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({ partnerKey: config.key }),
     })
   } catch {
