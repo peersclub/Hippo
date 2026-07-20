@@ -65,7 +65,9 @@ export type ServiceOptions = {
 export function buildService(opts: ServiceOptions = {}): FastifyInstance {
   const store = opts.store ?? new InMemoryPersonaStore()
   const internalToken = opts.internalToken ?? process.env.INTERNAL_API_TOKEN ?? ''
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } })
+  const app = Fastify({
+    logger: process.env.NODE_ENV !== 'test' && { level: process.env.LOG_LEVEL ?? 'info' },
+  })
 
   type Params = { partnerId: string; userId: string }
 

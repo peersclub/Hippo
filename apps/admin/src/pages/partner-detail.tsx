@@ -1,8 +1,8 @@
 import type { PartnerRecord, PlanRecord, UserRecord } from '@hippo/stores'
 import { useState } from 'preact/hooks'
-import { del, get, post } from '../api.js'
+import { ApiError, del, get, post } from '../api.js'
 import { navigate } from '../router.js'
-import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
+import { Busy, confirmAction, Empty, ErrorBanner, toast, useLoad } from '../ui.js'
 
 type SessionRow = {
   id: string
@@ -20,13 +20,36 @@ type Detail = {
   sessions: SessionRow[]
 }
 
+type AdminSeat = {
+  email: string
+  role: 'admin' | 'viewer'
+  claimed: boolean
+  inviteExpiresAt: number | null
+  createdAt: number
+}
+
+type InviteDraft = { email: string; role: 'admin' | 'viewer' }
+
+/** POST /v1/partners/:id/admins response — inviteToken appears here ONCE. */
+type MintedInvite = { email: string; inviteToken: string; inviteExpiresAt: number }
+
 const fmt = (ts: number) => new Date(ts).toLocaleString()
 
 export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
   const [detail, setDetail] = useState<Detail | null>(null)
+  const [admins, setAdmins] = useState<AdminSeat[] | null>([])
+  const [invite, setInvite] = useState<InviteDraft | null>(null)
+  const [minted, setMinted] = useState<MintedInvite | null>(null)
 
   const state = useLoad(async () => {
-    setDetail(await get<Detail>(`/v1/partners/${encodeURIComponent(partnerId)}/detail`))
+    // Seats degrade to an inline notice (null) — they never take down the
+    // whole detail view.
+    const [d, seats] = await Promise.all([
+      get<Detail>(`/v1/partners/${encodeURIComponent(partnerId)}/detail`),
+      get<AdminSeat[]>(`/v1/partners/${encodeURIComponent(partnerId)}/admins`).catch(() => null),
+    ])
+    setDetail(d)
+    setAdmins(seats)
   }, [partnerId])
 
   async function killSession(id: string) {
@@ -36,12 +59,17 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
       confirmLabel: 'Revoke',
     })
     if (!ok) return
-    await del(`/v1/sessions/${encodeURIComponent(id)}`)
-    toast('Session revoked')
-    state.retry()
+    try {
+      await del(`/v1/sessions/${encodeURIComponent(id)}`)
+      toast('Session revoked')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'revoke failed', 'err')
+    }
   }
 
   async function setStatus(action: 'suspend' | 'activate') {
+    const fromSandbox = detail?.partner.status === 'sandbox'
     if (action === 'suspend') {
       const ok = await confirmAction({
         title: `Suspend ${partnerId}`,
@@ -50,10 +78,28 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
         typedPhrase: partnerId,
       })
       if (!ok) return
+    } else if (fromSandbox) {
+      const ok = await confirmAction({
+        title: `Approve ${partnerId} to production`,
+        body: `${detail?.partner.venueName} self-provisioned via hippo register. Approving makes it a production partner — real sessions mint against its embed key immediately.`,
+        confirmLabel: 'Approve to production',
+        danger: false,
+      })
+      if (!ok) return
     }
-    await post(`/v1/partners/${encodeURIComponent(partnerId)}/${action}`)
-    toast(action === 'suspend' ? 'Partner suspended' : 'Partner activated')
-    state.retry()
+    try {
+      await post(`/v1/partners/${encodeURIComponent(partnerId)}/${action}`)
+      toast(
+        action === 'suspend'
+          ? 'Partner suspended'
+          : fromSandbox
+            ? 'Partner approved to production'
+            : 'Partner activated',
+      )
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : `${action} failed`, 'err')
+    }
   }
 
   async function purgeAllMemory() {
@@ -64,11 +110,56 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
       typedPhrase: partnerId,
     })
     if (!ok) return
-    const res = await del<{ deleted: number }>(
-      `/v1/memory?partnerId=${encodeURIComponent(partnerId)}`,
+    try {
+      const res = await del<{ deleted: number }>(
+        `/v1/memory?partnerId=${encodeURIComponent(partnerId)}`,
+      )
+      toast(`Purged ${res.deleted} persona record${res.deleted === 1 ? '' : 's'}`)
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'purge failed', 'err')
+    }
+  }
+
+  async function sendInvite(e: Event) {
+    e.preventDefault()
+    if (!invite) return
+    try {
+      const res = await post<MintedInvite>(
+        `/v1/partners/${encodeURIComponent(partnerId)}/admins`,
+        invite,
+      )
+      setInvite(null)
+      // The plaintext token exists only in this response — show it once.
+      setMinted(res)
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'invite failed', 'err')
+    }
+  }
+
+  async function revokeSeat(email: string) {
+    const ok = await confirmAction({
+      title: 'Revoke portal seat',
+      body: `${email} loses portal access immediately; an unclaimed invite token is burned.`,
+      confirmLabel: 'Revoke seat',
+      typedPhrase: email,
+    })
+    if (!ok) return
+    try {
+      await del(`/v1/partners/${encodeURIComponent(partnerId)}/admins/${encodeURIComponent(email)}`)
+      toast('Portal seat revoked')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'revoke failed', 'err')
+    }
+  }
+
+  function copyToken(token: string) {
+    navigator.clipboard.writeText(token).then(
+      () => toast('Invite token copied'),
+      () => toast('copy failed — select the token manually', 'err'),
     )
-    toast(`Purged ${res.deleted} persona record${res.deleted === 1 ? '' : 's'}`)
-    state.retry()
   }
 
   if (state.error) return <ErrorBanner message={state.error} retry={state.retry} />
@@ -88,6 +179,10 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
           {partner.status === 'active' ? (
             <button class="btn danger sm" type="button" onClick={() => setStatus('suspend')}>
               Suspend
+            </button>
+          ) : partner.status === 'sandbox' ? (
+            <button class="btn sm" type="button" onClick={() => setStatus('activate')}>
+              Approve to production
             </button>
           ) : (
             <button class="btn ghost sm" type="button" onClick={() => setStatus('activate')}>
@@ -210,6 +305,75 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
         </tbody>
       </table>
 
+      <div class="page-head" style="margin-top:22px; margin-bottom:0">
+        <h2>Portal admins</h2>
+        <button
+          class="btn ghost sm"
+          type="button"
+          onClick={() => setInvite({ email: '', role: 'admin' })}
+        >
+          Invite admin
+        </button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Invite expires</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {admins === null && (
+            <tr>
+              <td colSpan={5}>
+                <Empty
+                  title="Portal seats unavailable"
+                  hint="The admin service could not list them — reload to retry."
+                />
+              </td>
+            </tr>
+          )}
+          {admins?.length === 0 && (
+            <tr>
+              <td colSpan={5}>
+                <Empty
+                  title="No portal seats yet"
+                  hint="Invite the partner’s first admin — the one-time claim token is shown right after."
+                />
+              </td>
+            </tr>
+          )}
+          {(admins ?? []).map((a) => {
+            const expired =
+              !a.claimed && a.inviteExpiresAt != null && a.inviteExpiresAt < Date.now()
+            return (
+              <tr key={a.email}>
+                <td class="mono">{a.email}</td>
+                <td>
+                  <span class="badge plan">{a.role}</span>
+                </td>
+                <td>
+                  <span class={`badge ${a.claimed ? 'active' : expired ? 'suspended' : 'none'}`}>
+                    {a.claimed ? 'claimed' : expired ? 'invite expired' : 'invited'}
+                  </span>
+                </td>
+                <td class="dim">
+                  {a.claimed || a.inviteExpiresAt == null ? '—' : fmt(a.inviteExpiresAt)}
+                </td>
+                <td style="text-align:right">
+                  <button class="btn danger sm" type="button" onClick={() => revokeSeat(a.email)}>
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
       {plan && (
         <>
           <h2>Plan entitlements</h2>
@@ -228,6 +392,89 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
       <button class="btn danger sm" type="button" onClick={purgeAllMemory}>
         Purge ALL memory for this partner
       </button>
+
+      {invite && (
+        <>
+          <button
+            type="button"
+            class="drawer-veil"
+            aria-label="Close"
+            onClick={() => setInvite(null)}
+          />
+          <div class="drawer">
+            <h1>Invite portal admin</h1>
+            <form class="stack" onSubmit={sendInvite}>
+              <label class="field">
+                Email
+                <input
+                  type="email"
+                  value={invite.email}
+                  onInput={(e) =>
+                    setInvite((d) =>
+                      d ? { ...d, email: (e.target as HTMLInputElement).value } : d,
+                    )
+                  }
+                  required
+                />
+              </label>
+              <label class="field">
+                Role
+                <select
+                  value={invite.role}
+                  onChange={(e) =>
+                    setInvite((d) =>
+                      d
+                        ? {
+                            ...d,
+                            role: (e.target as HTMLSelectElement).value as 'admin' | 'viewer',
+                          }
+                        : d,
+                    )
+                  }
+                >
+                  <option value="admin">admin</option>
+                  <option value="viewer">viewer</option>
+                </select>
+              </label>
+              <div class="actions">
+                <button class="btn" type="submit">
+                  Mint invite
+                </button>
+                <button class="btn ghost" type="button" onClick={() => setInvite(null)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {minted && (
+        <>
+          <button
+            type="button"
+            class="drawer-veil"
+            aria-label="Close"
+            onClick={() => setMinted(null)}
+          />
+          <div class="modal" role="dialog" aria-modal="true">
+            <h1>Invite minted for {minted.email}</h1>
+            <p class="modal-body">
+              Hand this token to the partner out-of-band. It is shown ONCE and is not retrievable
+              again — only its hash is stored. The invite expires {fmt(minted.inviteExpiresAt)}.
+            </p>
+            <div class="token-box">{minted.inviteToken}</div>
+            <div class="actions">
+              <button class="btn" type="button" onClick={() => copyToken(minted.inviteToken)}>
+                Copy token
+              </button>
+              <button class="btn ghost" type="button" onClick={() => setMinted(null)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   )
 }

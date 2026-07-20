@@ -13,6 +13,11 @@
 const INTELLIGENCE_URL = process.env.INTELLIGENCE_URL ?? 'http://localhost:8791'
 const INTENT_TIMEOUT_MS = 3_000
 const RESPOND_TIMEOUT_MS = 30_000
+/** After a failed call, fail fast into the degraded path for this long
+ * instead of paying the full intent/respond timeouts on every turn; the
+ * first call after the window is the probe (mirrors the intelligence
+ * service's own LLM breaker). */
+const BREAKER_MS = 15_000
 
 export type IntentKind = 'research' | 'concept' | 'action' | 'advice' | 'portfolio' | 'smalltalk'
 
@@ -140,15 +145,53 @@ async function* readSse(
 }
 
 export function createIntelligenceClient(baseUrl = INTELLIGENCE_URL): IntelligenceClient {
+  let downUntil = 0
+
+  function gate(): void {
+    if (Date.now() < downUntil) {
+      throw new Error('intelligence breaker open — routing degraded')
+    }
+  }
+
+  async function guarded<T>(call: () => Promise<T>): Promise<T> {
+    gate()
+    try {
+      const result = await call()
+      downUntil = 0
+      return result
+    } catch (err) {
+      downUntil = Date.now() + BREAKER_MS
+      throw err
+    }
+  }
+
+  async function* guardedStream(
+    open: () => AsyncGenerator<RespondStreamEvent>,
+  ): AsyncGenerator<RespondStreamEvent> {
+    gate()
+    try {
+      yield* open()
+      downUntil = 0
+    } catch (err) {
+      downUntil = Date.now() + BREAKER_MS
+      throw err
+    }
+  }
+
   return {
-    intent: (req) => postJson<IntentResult>(`${baseUrl}/v1/intent`, req, INTENT_TIMEOUT_MS),
-    respond: (req) => postJson<RespondResult>(`${baseUrl}/v1/respond`, req, RESPOND_TIMEOUT_MS),
+    intent: (req) =>
+      guarded(() => postJson<IntentResult>(`${baseUrl}/v1/intent`, req, INTENT_TIMEOUT_MS)),
+    respond: (req) =>
+      guarded(() => postJson<RespondResult>(`${baseUrl}/v1/respond`, req, RESPOND_TIMEOUT_MS)),
     respondStream: (req) =>
-      readSse(
-        `${baseUrl}/v1/respond/stream`,
-        req,
-        RESPOND_TIMEOUT_MS,
-      ) as AsyncGenerator<RespondStreamEvent>,
+      guardedStream(
+        () =>
+          readSse(
+            `${baseUrl}/v1/respond/stream`,
+            req,
+            RESPOND_TIMEOUT_MS,
+          ) as AsyncGenerator<RespondStreamEvent>,
+      ),
   }
 }
 

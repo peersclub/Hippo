@@ -26,6 +26,9 @@ type AuditEntry = {
   detail?: string
 }
 
+/** In-memory audit tail cap; the logger (below) retains the full trail. */
+const MAX_AUDIT_ENTRIES = 5_000
+
 const SIDES = new Set(['buy', 'sell'])
 const TYPES = new Set(['market', 'limit'])
 
@@ -111,13 +114,31 @@ export function buildService(
   audit: AuditEntry[]
 } {
   const app = Fastify({
-    logger: process.env.NODE_ENV !== 'test' && { level: 'info' },
+    logger: process.env.NODE_ENV !== 'test' && { level: process.env.LOG_LEVEL ?? 'info' },
   }) as unknown as FastifyInstance & { audit: AuditEntry[] }
 
+  // Adapters absorb venue-API failures to keep lifecycles resilient; the
+  // logger is how those failures stay visible to operators.
+  adapter.setLogger?.(app.log)
+
+  // In-memory tail of the audit trail (bounded — a steady-state pod must not
+  // grow with order flow). Every entry is ALSO written through the logger, so
+  // the log pipeline retains the full compliance record across restarts; the
+  // durable telemetry_events store (BE doc §7) is the production home.
   const audit: AuditEntry[] = []
+  let auditedTotal = 0
   app.audit = audit
-  const record = (entry: Omit<AuditEntry, 'ts' | 'idempotencyKey'>) =>
-    audit.push({ ...entry, ts: Date.now(), idempotencyKey: `idem_${randomUUID().slice(0, 12)}` })
+  const record = (entry: Omit<AuditEntry, 'ts' | 'idempotencyKey'>) => {
+    const full: AuditEntry = {
+      ...entry,
+      ts: Date.now(),
+      idempotencyKey: `idem_${randomUUID().slice(0, 12)}`,
+    }
+    audit.push(full)
+    auditedTotal += 1
+    if (audit.length > MAX_AUDIT_ENTRIES) audit.shift()
+    app.log.info({ audit: full }, 'seam audit')
+  }
 
   // ── trust boundary: every trading + /internal route requires the shared
   // INTERNAL_API_TOKEN (timing-safe, fail-closed). This surface places and
@@ -163,6 +184,12 @@ export function buildService(
       record({ kind: 'event_delivered', ticketId: event.ticketId, detail: event.phase })
     } catch (err) {
       if (attempt < 2) return deliver(url, event, attempt + 1) // one retry
+      // The gateway missed a lifecycle event (e.g. the trader never sees
+      // FILLED) — that must be loud, not just a row in the in-memory audit.
+      app.log.error(
+        { err, ticketId: event.ticketId, phase: event.phase, url },
+        'venue event delivery failed after retry',
+      )
       record({
         kind: 'event_delivery_failed',
         ticketId: event.ticketId,
@@ -234,7 +261,7 @@ export function buildService(
     return audit
   })
 
-  app.get('/health', async () => ({ ok: true, service: 'seam', audited: audit.length }))
+  app.get('/health', async () => ({ ok: true, service: 'seam', audited: auditedTotal }))
 
   return app
 }

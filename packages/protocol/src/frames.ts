@@ -59,6 +59,10 @@ export const ResearchBriefFrame = z.object({
   // prose, or "mock" when the LLM was unreachable/unset. Absent on frames
   // that never call a model (degraded-mode, nudges, stopped streams).
   model: z.string().optional(),
+  // Frame id of an earlier research_brief this one supersedes (additive,
+  // July 2026 — the REFRESH re-run). SDKs that know the field update the
+  // referenced card in place; older SDKs simply append, which stays correct.
+  replaces: z.string().optional(),
 })
 
 export const OrderTicketFrame = z.object({
@@ -143,6 +147,13 @@ export const BannerFrame = z.object({
   text: z.string(),
 })
 
+/**
+ * Ambient market pulse (pill glow + mono event tag). Currently produced only
+ * by the mock gateway and tests — the production gateway has no market
+ * watcher yet, so no prod trader sees this frame. Documented decision, not
+ * drift: the SDK surface stays wired so a gateway producer can ship without
+ * an SDK release.
+ */
 export const PulseFrame = z.object({
   ...base,
   type: z.literal('pulse'),
@@ -182,6 +193,10 @@ export const BriefDeltaFrame = z.object({
   ...base,
   type: z.literal('brief_delta'),
   text: z.string(),
+  // Same provenance contract as research_brief.model (additive, July 2026):
+  // the id of the model generating THIS stream, or "mock". Carried on every
+  // delta so the streaming card can show provenance before the final brief.
+  model: z.string().optional(),
 })
 
 export const Frame = z.discriminatedUnion('type', [

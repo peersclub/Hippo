@@ -536,12 +536,19 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
   }
 
   // ── user-wise memory management (proxied; memory service owns the data) ──
+  // Every route names its failed dependency: a memory-service outage is a 502
+  // "memory service unreachable", never a generic 500 (same discipline as the
+  // gateway sessions proxy below).
   app.get<{ Querystring: Record<string, string> }>('/v1/memory', async (req, reply) => {
     const op = operator(req, reply)
     if (!op) return reply
-    const qs = new URLSearchParams(req.query).toString()
-    const res = await memoryFetch(`/admin/personas${qs ? `?${qs}` : ''}`)
-    return reply.code(res.status).send(await res.json())
+    try {
+      const qs = new URLSearchParams(req.query).toString()
+      const res = await memoryFetch(`/admin/personas${qs ? `?${qs}` : ''}`)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'memory service unreachable' })
+    }
   })
 
   app.put<{ Params: UserParams }>('/v1/memory/:partnerId/:userId', async (req, reply) => {
@@ -550,33 +557,47 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     const parsed = PersonaAdminUpdate.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'invalid persona update' })
     const { partnerId, userId } = req.params
-    const res = await memoryFetch(`/v1/persona/${partnerId}/${userId}`, {
-      method: 'PUT',
-      body: JSON.stringify(parsed.data),
-    })
-    void record(op, 'memory.update', `${partnerId}/${userId}`, { fields: Object.keys(parsed.data) })
-    return reply.code(res.status).send(await res.json())
+    try {
+      const res = await memoryFetch(`/v1/persona/${partnerId}/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(parsed.data),
+      })
+      void record(op, 'memory.update', `${partnerId}/${userId}`, {
+        fields: Object.keys(parsed.data),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'memory service unreachable' })
+    }
   })
 
   app.post<{ Params: UserParams }>('/v1/memory/:partnerId/:userId/clear', async (req, reply) => {
     const op = operator(req, reply)
     if (!op) return reply
     const { partnerId, userId } = req.params
-    const res = await memoryFetch(`/v1/persona/${partnerId}/${userId}/clear`, {
-      method: 'POST',
-      body: '{}',
-    })
-    void record(op, 'memory.clear', `${partnerId}/${userId}`)
-    return reply.code(res.status).send(await res.json())
+    try {
+      const res = await memoryFetch(`/v1/persona/${partnerId}/${userId}/clear`, {
+        method: 'POST',
+        body: '{}',
+      })
+      void record(op, 'memory.clear', `${partnerId}/${userId}`)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'memory service unreachable' })
+    }
   })
 
   app.delete<{ Params: UserParams }>('/v1/memory/:partnerId/:userId', async (req, reply) => {
     const op = operator(req, reply)
     if (!op) return reply
     const { partnerId, userId } = req.params
-    const res = await memoryFetch(`/admin/personas/${partnerId}/${userId}`, { method: 'DELETE' })
-    void record(op, 'memory.purge', `${partnerId}/${userId}`)
-    return reply.code(res.status).send(await res.json())
+    try {
+      const res = await memoryFetch(`/admin/personas/${partnerId}/${userId}`, { method: 'DELETE' })
+      void record(op, 'memory.purge', `${partnerId}/${userId}`)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'memory service unreachable' })
+    }
   })
 
   // Bulk purge (partner offboarding) — audited with the row count.
@@ -585,12 +606,16 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     if (!op) return reply
     const { partnerId } = req.query
     if (!partnerId) return reply.code(400).send({ error: 'partnerId required' })
-    const res = await memoryFetch(`/admin/personas?partnerId=${encodeURIComponent(partnerId)}`, {
-      method: 'DELETE',
-    })
-    const body = (await res.json()) as { deleted?: number }
-    void record(op, 'memory.purge_partner', partnerId, { deleted: body.deleted ?? 0 })
-    return reply.code(res.status).send(body)
+    try {
+      const res = await memoryFetch(`/admin/personas?partnerId=${encodeURIComponent(partnerId)}`, {
+        method: 'DELETE',
+      })
+      const body = (await res.json()) as { deleted?: number }
+      void record(op, 'memory.purge_partner', partnerId, { deleted: body.deleted ?? 0 })
+      return reply.code(res.status).send(body)
+    } catch {
+      return reply.code(502).send({ error: 'memory service unreachable' })
+    }
   })
 
   // ── operators (owner-only) ───────────────────────────────────────────────
@@ -721,14 +746,31 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       /* gateway down — counts still render */
     }
 
-    let intelligence: { mode: string; model: string } | null = null
+    // The intelligence-side answer-cache stats are authoritative (Redis-backed
+    // when configured); the gateway's cache counter is an in-process
+    // passthrough that resets on restart.
+    let intelligence: {
+      mode: string
+      model: string
+      cache?: { entries: number; hitRate: number }
+    } | null = null
     try {
       const res = await fetchImpl(`${intelligenceUrl}/health`, {
         signal: AbortSignal.timeout(3_000),
       })
       if (res.ok) {
-        const body = (await res.json()) as { mode?: string; model?: string }
-        intelligence = { mode: body.mode ?? 'mock', model: body.model ?? 'mock' }
+        const body = (await res.json()) as {
+          mode?: string
+          model?: string
+          cache?: { entries?: number; hitRate?: number }
+        }
+        intelligence = {
+          mode: body.mode ?? 'mock',
+          model: body.model ?? 'mock',
+          ...(body.cache
+            ? { cache: { entries: body.cache.entries ?? 0, hitRate: body.cache.hitRate ?? 0 } }
+            : {}),
+        }
       }
     } catch {
       /* intelligence down — rest of the dashboard still renders */
@@ -753,7 +795,8 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       quota: number
       pct: number
     }> = []
-    for (const p of await partners.list()) {
+    const partnerRows = await partners.list()
+    for (const p of partnerRows) {
       if (!p.planId || p.status !== 'active') continue
       const plan = await plans.get(p.planId)
       if (plan?.mauQuota == null) continue
@@ -775,7 +818,9 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       intelligence,
       alerts,
       counts: {
-        partners: (await partners.list()).length,
+        partners: partnerRows.length,
+        // Self-serve `hippo register` signups waiting on operator approval.
+        sandboxPartners: partnerRows.filter((p) => p.status === 'sandbox').length,
         plans: (await plans.list()).length,
         users: (await users.list({ limit: 1 })).total,
       },

@@ -18,11 +18,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 from typing import Any, AsyncIterator
 
 import httpx
+
+log = logging.getLogger("intelligence.providers")
 
 Message = dict[str, str]
 
@@ -115,9 +118,12 @@ class OpenAICompatProvider:
         # servers (vLLM supports it via guided decoding), format:"json" on
         # native Ollama.
         json_mode: bool = False,
+        # Per-call override of LLM_TIMEOUT — latency-budgeted paths (intent)
+        # must fail into the mock inside their caller's deadline.
+        timeout: float | None = None,
     ) -> str:
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout or self.timeout) as client:
                 if await self._detect_flavor(client) == "ollama":
                     content = await self._chat_ollama_native(
                         client, messages, temperature, max_tokens, json_mode
@@ -518,6 +524,21 @@ class ProviderRouter:
     async def startup_probe(self) -> None:
         self.mode = "llm" if await self.llm.probe() else "mock"
 
+    def _open_breaker(self, err: ProviderError) -> None:
+        self._down_until = time.monotonic() + _BREAKER_SECONDS
+        if self.mode != "mock":
+            # The one log line that says real briefs stopped: /health shows
+            # mode=mock, but an operator watching logs needs the transition.
+            log.warning(
+                "llm provider failed — mock mode for %.0fs: %s", _BREAKER_SECONDS, err
+            )
+        self.mode = "mock"
+
+    def _mark_llm_up(self) -> None:
+        if self.mode != "llm":
+            log.info("llm provider recovered — mode=llm model=%s", self.llm.model)
+        self.mode = "llm"
+
     async def chat(
         self,
         messages: list[Message],
@@ -525,6 +546,7 @@ class ProviderRouter:
         temperature: float = 0.2,
         max_tokens: int = 2000,
         json_mode: bool = False,
+        timeout: float | None = None,
     ) -> str:
         if time.monotonic() >= self._down_until:
             try:
@@ -533,12 +555,12 @@ class ProviderRouter:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     json_mode=json_mode,
+                    timeout=timeout,
                 )
-                self.mode = "llm"
+                self._mark_llm_up()
                 return content
-            except ProviderError:
-                self._down_until = time.monotonic() + _BREAKER_SECONDS
-                self.mode = "mock"
+            except ProviderError as err:
+                self._open_breaker(err)
         return await self.mock.chat(
             messages, temperature=temperature, max_tokens=max_tokens
         )
@@ -567,11 +589,12 @@ class ProviderRouter:
             )
             try:
                 first = await anext(stream)
-            except (ProviderError, StopAsyncIteration):
-                self._down_until = time.monotonic() + _BREAKER_SECONDS
-                self.mode = "mock"
+            except ProviderError as err:
+                self._open_breaker(err)
+            except StopAsyncIteration:
+                self._open_breaker(ProviderError("llm stream produced no deltas"))
             else:
-                self.mode = "llm"
+                self._mark_llm_up()
                 yield first
                 async for delta in stream:
                     yield delta

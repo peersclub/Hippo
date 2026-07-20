@@ -10,12 +10,21 @@ import { getSnapshot } from './service.js'
 const PORT = Number(process.env.PORT ?? 8790)
 const FIXTURES = process.env.FIXTURES === '1'
 
-const app = Fastify({ logger: { level: 'info' } })
+/** Spot "BTC/USDT" or perp "BTC/USDT:USDT" — everything callers send.
+ * Rejecting the rest keeps arbitrary strings out of the snapshot cache and
+ * off the CCXT rate-limit queue. */
+const SYMBOL_RE = /^[A-Z0-9]{2,10}\/[A-Z0-9]{2,10}(:[A-Z0-9]{2,10})?$/
+
+const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } })
 
 app.get('/v1/snapshot', async (req, reply) => {
   const { symbol = 'BTC/USDT' } = req.query as { symbol?: string }
+  if (!SYMBOL_RE.test(symbol)) {
+    reply.code(400)
+    return { error: 'invalid symbol', symbol }
+  }
   try {
-    return await getSnapshot(symbol, { fixtures: FIXTURES })
+    return await getSnapshot(symbol, { fixtures: FIXTURES, log: req.log })
   } catch (err) {
     req.log.error({ err, symbol }, 'snapshot unavailable')
     reply.code(502)

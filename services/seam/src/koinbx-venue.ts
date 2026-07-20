@@ -35,6 +35,7 @@
  */
 import { createHmac, randomUUID } from 'node:crypto'
 import type {
+  AdapterLog,
   LifecycleEvent,
   LifecyclePhase,
   Portfolio,
@@ -74,6 +75,10 @@ export type KoinbxOptions = {
 
 const MARKET_DATA_URL = process.env.MARKET_DATA_URL ?? 'http://localhost:8790'
 const KOINBX_TIMEOUT_MS = 5_000
+/** Poll-tick failures are absorbed (transient by design) but warned about at
+ * most this often, so a KoinBX outage that eats a whole poll window leaves
+ * log evidence without one line per 2s tick. */
+const POLL_WARN_INTERVAL_MS = 30_000
 
 /** Canonical "BTC/USDT" → KoinBX "BTC-USDT" (dash-form, upper). */
 const toPairName = (instrument: string): string => instrument.replace('/', '-').toUpperCase()
@@ -126,6 +131,8 @@ type BalanceResponse = {
 export class KoinbxVenueAdapter implements VenueAdapter {
   private readonly tickets = new Map<string, StoredTicket>()
   private handler: (event: LifecycleEvent) => void = () => {}
+  private log: AdapterLog = { info: () => {}, warn: () => {}, error: () => {} }
+  private lastPollWarnAt = 0
   private readonly opts: Required<Omit<KoinbxOptions, 'apiKey' | 'secret' | 'baseUrl'>> &
     Pick<KoinbxOptions, 'apiKey' | 'secret' | 'baseUrl'>
 
@@ -144,6 +151,10 @@ export class KoinbxVenueAdapter implements VenueAdapter {
 
   onEvent(handler: (event: LifecycleEvent) => void): void {
     this.handler = handler
+  }
+
+  setLogger(log: AdapterLog): void {
+    this.log = log
   }
 
   /** Signed POST to the KoinBX private trade API. */
@@ -287,8 +298,17 @@ export class KoinbxVenueAdapter implements VenueAdapter {
           this.emitFilled(ticketId, ticket)
           return this.stopReconciler(ticket)
         }
-      } catch {
-        // Transient poll failure — keep trying until the timeout ceiling.
+      } catch (err) {
+        // Transient poll failure — keep trying until the timeout ceiling,
+        // but leave rate-limited log evidence (a venue outage that eats the
+        // whole window otherwise ends in an "expired" card with zero trace).
+        if (Date.now() - this.lastPollWarnAt >= POLL_WARN_INTERVAL_MS) {
+          this.lastPollWarnAt = Date.now()
+          this.log.warn(
+            { err, ticketId, venueOrderId: ticket.venueOrderId },
+            'koinbx poll tick failed — retrying until the ceiling',
+          )
+        }
       }
       if (Date.now() - startedAt > this.opts.pollTimeoutMs) this.emitUnresolved(ticketId, ticket)
     }
@@ -324,6 +344,10 @@ export class KoinbxVenueAdapter implements VenueAdapter {
   private emitUnresolved(ticketId: string, ticket: StoredTicket): void {
     this.stopReconciler(ticket)
     if (!this.tickets.has(ticketId)) return
+    this.log.warn(
+      { ticketId, venueOrderId: ticket.venueOrderId },
+      'poll ceiling reached without a terminal state — emitting expired',
+    )
     this.handler({
       ticketId,
       phase: 'expired',
@@ -350,7 +374,13 @@ export class KoinbxVenueAdapter implements VenueAdapter {
         orderId: ticket.venueOrderId,
       })
       return res.status !== false
-    } catch {
+    } catch (err) {
+      // false also means "ticket not found" to the caller, so a REAL resting
+      // order that failed to cancel venue-side must be loud here.
+      this.log.error(
+        { err, ticketId, venueOrderId: ticket.venueOrderId },
+        'koinbx cancel failed — the order may still be resting on the venue',
+      )
       return false
     }
   }

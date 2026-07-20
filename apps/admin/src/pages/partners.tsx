@@ -1,7 +1,7 @@
 import type { PartnerRecord, PlanRecord } from '@hippo/stores'
 import { useState } from 'preact/hooks'
 import { ApiError, get, patch, post } from '../api.js'
-import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
+import { Busy, confirmAction, Empty, ErrorBanner, toast, useLoad } from '../ui.js'
 
 /** List view never receives jwtSecret (the service strips it). */
 type PartnerRow = Omit<PartnerRecord, 'jwtSecret'>
@@ -30,6 +30,7 @@ export function PartnersPage() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
 
   const load = () =>
     Promise.all([get<PartnerRow[]>('/v1/partners'), get<PlanRecord[]>('/v1/plans')]).then(
@@ -80,26 +81,53 @@ export function PartnersPage() {
     }
   }
 
-  async function setStatus(partnerId: string, action: 'suspend' | 'activate') {
+  async function setStatus(p: PartnerRow, action: 'suspend' | 'activate') {
     if (action === 'suspend') {
       const ok = await confirmAction({
-        title: `Suspend ${partnerId}`,
+        title: `Suspend ${p.partnerId}`,
         body: 'ALL new sessions for this partner are rejected with 401 until reactivated.',
         confirmLabel: 'Suspend partner',
-        typedPhrase: partnerId,
+        typedPhrase: p.partnerId,
+      })
+      if (!ok) return
+    } else if (p.status === 'sandbox') {
+      // Approving a self-serve sandbox to production is a different decision
+      // from un-suspending — it flips a public signup live.
+      const ok = await confirmAction({
+        title: `Approve ${p.partnerId} to production`,
+        body: `${p.venueName} self-provisioned via hippo register. Approving makes it a production partner — real sessions mint against its embed key immediately.`,
+        confirmLabel: 'Approve to production',
+        danger: false,
       })
       if (!ok) return
     }
-    await post(`/v1/partners/${partnerId}/${action}`)
-    toast(action === 'suspend' ? `${partnerId} suspended` : `${partnerId} activated`)
-    state.retry()
+    try {
+      await post(`/v1/partners/${p.partnerId}/${action}`)
+      toast(
+        action === 'suspend'
+          ? `${p.partnerId} suspended`
+          : p.status === 'sandbox'
+            ? `${p.partnerId} approved to production`
+            : `${p.partnerId} activated`,
+      )
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : `${action} failed`, 'err')
+    }
   }
 
   async function assignPlan(partnerId: string, planId: string) {
-    await post(`/v1/partners/${partnerId}/plan`, { planId: planId || null })
-    toast(planId ? `Plan ${planId} assigned to ${partnerId}` : `Plan removed from ${partnerId}`)
-    state.retry()
+    try {
+      await post(`/v1/partners/${partnerId}/plan`, { planId: planId || null })
+      toast(planId ? `Plan ${planId} assigned to ${partnerId}` : `Plan removed from ${partnerId}`)
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'plan assignment failed', 'err')
+    }
   }
+
+  const sandboxCount = partners.filter((p) => p.status === 'sandbox').length
+  const visible = statusFilter ? partners.filter((p) => p.status === statusFilter) : partners
 
   return (
     <>
@@ -119,6 +147,29 @@ export function PartnersPage() {
 
       {state.error && <ErrorBanner message={state.error} retry={state.retry} />}
       {state.loading && <Busy rows={3} />}
+      {!state.loading && !state.error && sandboxCount > 0 && statusFilter !== 'sandbox' && (
+        <div class="alerts">
+          <button type="button" class="alert warn" onClick={() => setStatusFilter('sandbox')}>
+            <strong>
+              {sandboxCount} sandbox partner{sandboxCount === 1 ? '' : 's'}
+            </strong>{' '}
+            awaiting production approval — click to review.
+          </button>
+        </div>
+      )}
+      {!state.loading && !state.error && (
+        <div class="toolbar">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter((e.target as HTMLSelectElement).value)}
+          >
+            <option value="">All statuses</option>
+            <option value="active">active</option>
+            <option value="sandbox">sandbox</option>
+            <option value="suspended">suspended</option>
+          </select>
+        </div>
+      )}
       {!state.loading && !state.error && (
         <table>
           <thead>
@@ -131,7 +182,21 @@ export function PartnersPage() {
             </tr>
           </thead>
           <tbody>
-            {partners.map((p) => (
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={5}>
+                  {statusFilter ? (
+                    <Empty title={`No ${statusFilter} partners.`} />
+                  ) : (
+                    <Empty
+                      title="No partners yet"
+                      hint="Create one with “New partner” above, or wait for self-serve hippo register sandboxes to appear."
+                    />
+                  )}
+                </td>
+              </tr>
+            )}
+            {visible.map((p) => (
               <tr key={p.partnerId}>
                 <td>
                   <strong>{p.venueName}</strong> <span class="mono dim">{p.partnerId}</span>
@@ -182,15 +247,19 @@ export function PartnersPage() {
                     <button
                       class="btn danger sm"
                       type="button"
-                      onClick={() => setStatus(p.partnerId, 'suspend')}
+                      onClick={() => setStatus(p, 'suspend')}
                     >
                       Suspend
+                    </button>
+                  ) : p.status === 'sandbox' ? (
+                    <button class="btn sm" type="button" onClick={() => setStatus(p, 'activate')}>
+                      Approve
                     </button>
                   ) : (
                     <button
                       class="btn ghost sm"
                       type="button"
-                      onClick={() => setStatus(p.partnerId, 'activate')}
+                      onClick={() => setStatus(p, 'activate')}
                     >
                       Activate
                     </button>

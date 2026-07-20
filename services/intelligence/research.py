@@ -420,10 +420,12 @@ async def respond_stream(
     Event order makes the retrieval/generation split visible on the wire:
       meta    — stats/spark/sources/asOfIso straight from the snapshot,
                 emitted BEFORE the model produces a single token
-      delta   — readable prose chunks ({"text": ...}). The model streams
-                constrained JSON (json_mode); JsonProseExtractor passes
-                through only the headline/paragraph string contents so the
-                SDK renders clean text while the wire stays strict JSON.
+      delta   — readable prose chunks ({"text": ..., "model": ...}). The
+                model streams constrained JSON (json_mode); JsonProseExtractor
+                passes through only the headline/paragraph string contents so
+                the SDK renders clean text while the wire stays strict JSON.
+                Every delta carries the router's model id (or "mock") — same
+                provenance contract as the final brief, available mid-stream.
       done    — the full validated brief (authoritative; supersedes deltas)
       replace — decline card when the output guardrail trips: streamed tokens
                 cannot be silently regenerated the way the blocking path does,
@@ -473,7 +475,12 @@ async def respond_stream(
             raw += chunk
             visible = extractor.feed(chunk)
             if visible:
-                yield {"event": "delta", "data": {"text": visible}}
+                # router.model is resolved per chunk, not hoisted: the router
+                # can demote llm→mock mid-episode and the tag must stay honest.
+                yield {
+                    "event": "delta",
+                    "data": {"text": visible, "model": router.model},
+                }
     except ProviderError:
         pass  # finalize with what we have; the floor below fills any gap
 

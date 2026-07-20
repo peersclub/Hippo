@@ -8,9 +8,13 @@ type Metrics = {
     cache?: { hitRate: number | null }
     degraded?: { active: boolean; seconds: number }
   } | null
-  intelligence: { mode: string; model: string } | null
+  intelligence: {
+    mode: string
+    model: string
+    cache?: { entries: number; hitRate: number }
+  } | null
   alerts: Array<{ partnerId: string; venueName: string; mau: number; quota: number; pct: number }>
-  counts: { partners: number; plans: number; users: number }
+  counts: { partners: number; sandboxPartners: number; plans: number; users: number }
 }
 
 const REFRESH_MS = 30_000
@@ -35,8 +39,12 @@ export function DashboardPage() {
   if (!metrics) return null
 
   const gw = metrics.gateway
-  const hitRate = gw?.cache?.hitRate
   const intel = metrics.intelligence
+  // The intelligence-side cache stats are authoritative (Redis-backed, live
+  // entry occupancy); the gateway's in-process counter is only the fallback.
+  const hitRate = intel?.cache ? intel.cache.hitRate : gw?.cache?.hitRate
+  const hitRateFromGateway = !intel?.cache && gw?.cache?.hitRate != null
+  const sandbox = metrics.counts.sandboxPartners
 
   return (
     <>
@@ -48,8 +56,16 @@ export function DashboardPage() {
         </span>
       </div>
 
-      {metrics.alerts.length > 0 && (
+      {(metrics.alerts.length > 0 || sandbox > 0) && (
         <div class="alerts">
+          {sandbox > 0 && (
+            <a class="alert warn" href="#/partners">
+              <strong>
+                {sandbox} sandbox partner{sandbox === 1 ? '' : 's'}
+              </strong>{' '}
+              awaiting production approval
+            </a>
+          )}
           {metrics.alerts.map((a) => (
             <a
               key={a.partnerId}
@@ -86,7 +102,11 @@ export function DashboardPage() {
         </div>
         <div class="stat">
           <div class="n">{hitRate == null ? '—' : `${Math.round(hitRate * 100)}%`}</div>
-          <div class="l">Answer-cache hit rate</div>
+          <div class="l">Answer-cache hit rate{hitRateFromGateway ? ' (gateway)' : ''}</div>
+        </div>
+        <div class="stat">
+          <div class="n">{intel?.cache ? intel.cache.entries : '—'}</div>
+          <div class="l">Answer-cache entries</div>
         </div>
         <div class="stat">
           <div class="n">{gw ? (gw.degraded?.seconds ?? 0) : '—'}</div>

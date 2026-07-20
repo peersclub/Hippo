@@ -15,6 +15,7 @@ bucket makes "as of" honest: two users in the same window share a moment.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -23,8 +24,16 @@ from typing import Any, Protocol, Sequence
 from observability import record_cache
 from textutil import canonical_text
 
+log = logging.getLogger("intelligence.cache")
+
 DEFAULT_TTL_S = 120.0
 WINDOW_S = 300  # 5-minute market window bucket
+
+# After a Redis command fails, treat the cache as all-miss for this long
+# (mirrors providers._BREAKER_SECONDS): the cache is a best-effort
+# optimization, so a dead Redis must cost one failed command per window —
+# never a decline, and never a timeout paid on every request.
+_REDIS_BREAKER_SECONDS = 30.0
 
 # --- volatility-scaled TTL ----------------------------------------------------
 # TTL tied to market volatility (Build Plan 03): a calm market can serve the
@@ -182,22 +191,51 @@ class RedisAnswerCache:
         self.ttl_s = ttl_s
         self.hits = 0
         self.misses = 0
+        self._down_until = 0.0  # monotonic; > now → skip Redis, serve misses
 
     def _key(self, text: str, symbol: str, now: float) -> str:
         return f"{self.PREFIX}{canonicalize(text, symbol)}:{window_bucket(now)}"
+
+    def _trip_breaker(self, op: str, err: Exception) -> None:
+        self._down_until = time.monotonic() + _REDIS_BREAKER_SECONDS
+        log.warning(
+            "answer-cache redis %s failed — serving misses for %.0fs: %s",
+            op,
+            _REDIS_BREAKER_SECONDS,
+            err,
+        )
+
+    def _miss(self) -> None:
+        self.misses += 1
+        record_cache(False)
 
     def get(
         self, text: str, symbol: str, now: float | None = None
     ) -> dict[str, Any] | None:
         now = now if now is not None else time.time()
-        raw = self.client.get(self._key(text, symbol, now))
+        if time.monotonic() < self._down_until:
+            self._miss()
+            return None
+        # Best-effort: a Redis failure is a miss, never an error — the answer
+        # pipeline must keep working with the cache gone.
+        try:
+            raw = self.client.get(self._key(text, symbol, now))
+        except Exception as err:
+            self._trip_breaker("get", err)
+            self._miss()
+            return None
         if raw is None:
-            self.misses += 1
-            record_cache(False)
+            self._miss()
+            return None
+        try:
+            answer = json.loads(raw)
+        except (TypeError, ValueError):
+            # Corrupt entry: a miss (regenerated + overwritten), not an error.
+            self._miss()
             return None
         self.hits += 1
         record_cache(True)
-        return json.loads(raw)
+        return answer
 
     def set(
         self,
@@ -208,10 +246,16 @@ class RedisAnswerCache:
         ttl_s: float | None = None,
     ) -> None:
         now = now if now is not None else time.time()
+        if time.monotonic() < self._down_until:
+            return
         ttl = self.ttl_s if ttl_s is None else ttl_s
-        self.client.set(
-            self._key(text, symbol, now), json.dumps(answer), px=int(ttl * 1000)
-        )
+        try:
+            self.client.set(
+                self._key(text, symbol, now), json.dumps(answer), px=int(ttl * 1000)
+            )
+        except Exception as err:
+            # Dropped write — the next asker regenerates; nothing to rethrow.
+            self._trip_breaker("set", err)
 
     def stats(self) -> dict[str, Any]:
         total = self.hits + self.misses
@@ -239,7 +283,16 @@ def make_answer_cache(
     if url:
         import redis  # lazy: only when Redis is actually configured
 
+        # Tight socket timeouts: this sync client runs inside async handlers,
+        # so a black-holed Redis must fail fast (into the breaker above), not
+        # block the event loop.
         return RedisAnswerCache(
-            redis.Redis.from_url(url, decode_responses=True), ttl_s=ttl_s
+            redis.Redis.from_url(
+                url,
+                decode_responses=True,
+                socket_connect_timeout=1.0,
+                socket_timeout=1.0,
+            ),
+            ttl_s=ttl_s,
         )
     return AnswerCache(ttl_s=ttl_s)

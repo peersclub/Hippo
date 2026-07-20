@@ -121,6 +121,10 @@ class RespondStreamFlow(unittest.IsolatedAsyncioTestCase):
         streamed = "".join(e["data"]["text"] for e in events if e["event"] == "delta")
         self.assertIn(CLEAN_BRIEF["headline"], streamed)
         self.assertNotIn("{", streamed)  # readable prose, not raw JSON
+        # Provenance is available mid-stream: every delta carries the model id.
+        deltas = [e["data"] for e in events if e["event"] == "delta"]
+        self.assertTrue(all(d["model"] == "scripted" for d in deltas))
+        self.assertEqual(done["model"], "scripted")  # final brief agrees
 
     async def test_second_call_streams_from_cache(self) -> None:
         router = ScriptedStreamRouter(chunked(json.dumps(CLEAN_BRIEF)))
@@ -185,6 +189,9 @@ class RespondStreamFlow(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(kinds.count("delta"), 1)  # mock streams chunks
         streamed = "".join(e["data"]["text"] for e in events if e["event"] == "delta")
         self.assertNotIn('"headline"', streamed)  # extractor hides JSON keys
+        # Mock streams tag honestly as "mock" — never a fabricated model id.
+        deltas = [e["data"] for e in events if e["event"] == "delta"]
+        self.assertTrue(all(d["model"] == "mock" for d in deltas))
 
 
 class MockStreaming(unittest.IsolatedAsyncioTestCase):

@@ -29,9 +29,14 @@ export interface RedisClient {
 export function createRedisClient(url: string): RedisClient {
   return new Redis(url, {
     maxRetriesPerRequest: 3,
-    // A dead Redis must never take the gateway down at boot — reads/writes are
-    // best-effort behind the in-memory hot path, and errors are logged + dropped.
-    enableOfflineQueue: true,
+    // A dead Redis must never take the gateway down — reads/writes are
+    // best-effort behind the in-memory hot path, and errors are logged +
+    // dropped. Fail FAST, not eventually: commands time out in 2s (a
+    // black-holed Redis can't hang resume()), and the offline queue is off so
+    // a sustained outage rejects writes into the logged .catch paths instead
+    // of buffering them unbounded in memory. Reconnection stays automatic.
+    commandTimeout: 2_000,
+    enableOfflineQueue: false,
     lazyConnect: false,
   }) as unknown as RedisClient
 }

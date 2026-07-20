@@ -45,6 +45,14 @@ const DELTA_FLUSH_MS = 150
 /** Race winner when the trader stops an in-flight stream (stream_stop). */
 const STOPPED = Symbol('stream-stopped')
 
+/** brief frameId → originating turn, kept for REFRESH re-runs (FIFO cap). */
+const BRIEF_TURNS_CAP = 500
+
+/** Card actions ride the chip_tap uplink with reserved prefixes (v1 keeps
+ * the uplink surface frozen). They are commands, not conversation: never
+ * echoed, never classified, never written to persona memory. */
+const CARD_ACTION_RE = /^(refresh|share|manage):(.+)$/
+
 type Uplink = import('@hippo/protocol').Uplink
 
 type Log = {
@@ -251,10 +259,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   }
 
-  async function emitMarketOnlyBrief(session: Session, text: string): Promise<void> {
+  async function emitMarketOnlyBrief(
+    session: Session,
+    text: string,
+    replaces?: string,
+  ): Promise<void> {
     try {
       const snap = await market.snapshot(symbolFromText(text))
-      emit(session, marketOnlyBriefFrame(snap))
+      const frame = emit(session, {
+        ...marketOnlyBriefFrame(snap),
+        ...(replaces ? { replaces } : {}),
+      })
+      rememberBrief(frame, text, 'research')
       telemetry.recordResearchAnswered(userKey(session))
     } catch (err) {
       // Both intelligence AND market-data are down: say so, truthfully.
@@ -280,13 +296,113 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * ticketId) can be routed back into the right thread. */
   const ticketSessions = new Map<string, Session>()
 
+  /** Tickets whose confirm was handed to the venue — from that moment the
+   * order may exist venue-side, so cancel copy and routing must stay honest
+   * about it (never "nothing was sent"). */
+  const confirmedTickets = new Set<string>()
+
+  /** Post-confirm venue-event backstop: if the seam's callback delivery fails
+   * (it retries exactly once, then only audits) the trader must never sit on
+   * "WAITING FOR YOUR CONFIRM" forever. Env-tunable so tests can shrink it;
+   * read per orchestrator so tests set it before buildApp. */
+  const ticketTimeoutMs = Number(process.env.TICKET_EVENT_TIMEOUT_MS ?? 10 * 60_000)
+
+  /** Per-ticket backstop timers (see ticketTimeoutMs). */
+  const ticketTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function clearTicketTimeout(ticketId: string): void {
+    const timer = ticketTimers.get(ticketId)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      ticketTimers.delete(ticketId)
+    }
+  }
+
+  /** (Re)arm the no-venue-event backstop: past the window, close the card
+   * with an honest terminal frame instead of leaving it waiting forever. */
+  function armTicketTimeout(session: Session, ticketId: string): void {
+    clearTicketTimeout(ticketId)
+    const timer = setTimeout(() => {
+      ticketTimers.delete(ticketId)
+      if (!ticketSessions.has(ticketId)) return // already resolved by an event
+      ticketSessions.delete(ticketId)
+      session.tickets.delete(ticketId)
+      confirmedTickets.delete(ticketId)
+      log.warn({ ticketId }, 'no venue event within the backstop window')
+      emit(session, {
+        type: 'lifecycle',
+        ticketId,
+        phase: 'expired',
+        statusLine: `NO UPDATE FROM ${session.partner.venueName.toUpperCase()} — CHECK THE VENUE FOR FINAL STATUS`,
+      })
+    }, ticketTimeoutMs)
+    timer.unref?.()
+    ticketTimers.set(ticketId, timer)
+  }
+
   // ── stop-streaming (stream_stop uplink) ─────────────────────────────────
 
-  /** In-flight research stream per session. The value stops it: the
-   * consuming loop below races every stream event against the stop signal,
-   * aborts consumption, and emits the stopped brief. stream_stop with no
-   * entry here is a silent no-op. */
-  const activeStreams = new Map<string, () => void>()
+  /** In-flight research stream per session. `stop` aborts it: the consuming
+   * loop below races every stream event against the stop signal, aborts
+   * consumption, and emits the stopped brief; `settled` resolves once that
+   * loop has fully wound down. stream_stop with no entry here is a silent
+   * no-op. One stream per session — a new research turn stops the previous
+   * stream and awaits `settled`, so two streams can never interleave deltas
+   * or steal each other's stop handle. */
+  const activeStreams = new Map<string, { stop: () => void; settled: Promise<void> }>()
+
+  // ── REFRESH re-runs (card_action refresh:<frameId>) ─────────────────────
+
+  /** Emitted brief frameId → the turn that produced it. REFRESH re-runs the
+   * ORIGINAL question and the new brief replaces the old card in place —
+   * never a re-classification of the raw "refresh:f_…" string. */
+  const briefTurns = new Map<string, { text: string; intent: string }>()
+
+  function rememberBrief(
+    frame: ReturnType<EmitFrame>,
+    text: string,
+    intent: string,
+  ): void {
+    if (!frame) return
+    briefTurns.set(frame.id, { text, intent })
+    if (briefTurns.size > BRIEF_TURNS_CAP) {
+      const oldest = briefTurns.keys().next().value
+      if (oldest !== undefined) briefTurns.delete(oldest)
+    }
+  }
+
+  async function refreshBrief(session: Session, frameId: string): Promise<void> {
+    const origin = briefTurns.get(frameId)
+    if (!origin) {
+      // Gateway restarted or the mapping aged out: an in-place re-run would
+      // be a guess at what the trader asked. Say so instead of guessing.
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Refresh unavailable',
+        reason:
+          'This brief is too old to refresh in place — ask the question again for a fresh answer.',
+      })
+      return
+    }
+    try {
+      const res = await intel.respond({
+        text: origin.text,
+        intent: origin.intent,
+        symbol: symbolFromText(origin.text),
+      })
+      if (res.kind === 'decline') {
+        emit(session, declineFrame(res))
+        return
+      }
+      telemetry.recordCache(res.cached)
+      const frame = emit(session, { ...briefFrame(res, origin.intent), replaces: frameId })
+      rememberBrief(frame, origin.text, origin.intent)
+      telemetry.recordResearchAnswered(userKey(session))
+    } catch (err) {
+      enterDegraded(session, err)
+      await emitMarketOnlyBrief(session, origin.text, frameId)
+    }
+  }
 
   async function prepareTicket(session: Session, order: OrderIntent, text: string) {
     // The seam owns quoting, fees and validation (per-venue adapter). The
@@ -345,11 +461,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     })
     // Venue events (fill, partial, reject) flow back asynchronously through
     // POST /internal/venue-events → onVenueEvent below. If the confirm call
-    // itself fails, say so — silence is the one unacceptable outcome.
+    // itself fails, say so — silence is the one unacceptable outcome. And if
+    // NO event ever arrives (lost callback), the armed backstop closes the
+    // card honestly instead of waiting forever.
+    confirmedTickets.add(ticketId)
+    armTicketTimeout(session, ticketId)
     seam.confirm(ticketId).catch((err) => {
       log.error({ err, ticketId }, 'seam confirm failed')
       ticketSessions.delete(ticketId)
       session.tickets.delete(ticketId)
+      confirmedTickets.delete(ticketId)
+      clearTicketTimeout(ticketId)
       emit(session, {
         type: 'lifecycle',
         ticketId,
@@ -361,18 +483,49 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   }
 
   function cancelTicket(session: Session, ticketId: string): void {
-    ticketSessions.delete(ticketId)
-    session.tickets.delete(ticketId)
-    // Fire-and-forget: locally the ticket is gone either way; the seam call
-    // stops the venue-side lifecycle.
-    seam.cancel(ticketId).catch((err) => log.warn({ err, ticketId }, 'seam cancel failed'))
+    telemetry.recordUplink('ticket_cancel')
+    if (!confirmedTickets.has(ticketId)) {
+      // Pre-confirm: nothing ever reached the venue — dismiss locally.
+      ticketSessions.delete(ticketId)
+      session.tickets.delete(ticketId)
+      clearTicketTimeout(ticketId)
+      // Fire-and-forget: locally the ticket is gone either way; the seam call
+      // stops the venue-side lifecycle.
+      seam.cancel(ticketId).catch((err) => log.warn({ err, ticketId }, 'seam cancel failed'))
+      emit(session, {
+        type: 'lifecycle',
+        ticketId,
+        phase: 'cancelled',
+        statusLine: 'CANCELLED — NOTHING WAS SENT TO THE VENUE',
+      })
+      return
+    }
+    // Post-confirm: the order IS on the venue, so "nothing was sent" would be
+    // a lie and a racing fill must still reach the trader. Keep the routing
+    // entry alive; the venue's own lifecycle event (cancelled — or filled, if
+    // the fill won the race) decides the outcome, with the backstop behind it.
+    const venue = session.partner.venueName.toUpperCase()
     emit(session, {
       type: 'lifecycle',
       ticketId,
-      phase: 'cancelled',
-      statusLine: 'CANCELLED — NOTHING WAS SENT TO THE VENUE',
+      phase: 'awaiting_confirm',
+      statusLine: `CANCEL REQUESTED — CONFIRMING WITH ${venue}`,
+      cancellable: false,
     })
-    telemetry.recordUplink('ticket_cancel')
+    seam.cancel(ticketId).then(
+      () => armTicketTimeout(session, ticketId),
+      (err) => {
+        log.warn({ err, ticketId }, 'seam cancel failed post-confirm')
+        emit(session, {
+          type: 'lifecycle',
+          ticketId,
+          phase: 'awaiting_confirm',
+          statusLine: `${venue} COULDN'T CANCEL — THE ORDER MAY STILL EXECUTE`,
+          cancellable: true,
+        })
+        armTicketTimeout(session, ticketId)
+      },
+    )
   }
 
   /** Venue lifecycle event (from the seam's callback webhook) → frame.
@@ -395,6 +548,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (event.phase !== 'partial') {
       ticketSessions.delete(event.ticketId)
       session.tickets.delete(event.ticketId)
+      confirmedTickets.delete(event.ticketId)
+      clearTicketTimeout(event.ticketId)
+    } else {
+      // Still in flight — push the no-event backstop out another window.
+      armTicketTimeout(session, event.ticketId)
     }
     return true
   }
@@ -433,6 +591,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     switch (intentRes.intent) {
       case 'research':
       case 'concept': {
+        // Serialize research streams per session: stop any in-flight stream
+        // and wait for its stopped brief to land BEFORE this turn's skeleton,
+        // so the thread never interleaves two streams' prose.
+        const prior = activeStreams.get(session.id)
+        if (prior) {
+          prior.stop()
+          await prior.settled
+        }
         emit(session, { type: 'skeleton', shape: 'brief' })
         if (degraded) {
           await emitMarketOnlyBrief(session, text)
@@ -466,6 +632,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // assembled server-side from exactly this.
           let accumulated = ''
           let metaAsOfIso: string | null = null
+          // Model id from the intelligence deltas — forwarded on every
+          // brief_delta so provenance shows mid-stream, not just at the end.
+          let streamModel: string | undefined
           // First readable token → the first-token-p95 rate-card number.
           const markFirstToken = () => {
             if (firstTokenSent) return
@@ -479,7 +648,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           const stopSignal = new Promise<typeof STOPPED>((resolve) => {
             requestStop = () => resolve(STOPPED)
           })
-          activeStreams.set(session.id, requestStop)
+          let settle: () => void = () => {}
+          const handle = {
+            stop: requestStop,
+            settled: new Promise<void>((resolve) => {
+              settle = resolve
+            }),
+          }
+          activeStreams.set(session.id, handle)
           const stream = intel.respondStream({
             text,
             intent: intentRes.intent,
@@ -500,20 +676,39 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                 stream.return(undefined).catch(() => {})
                 // Flush the coalescing buffer, then emit the authoritative
                 // stopped brief — honest, truncated, server-assembled.
-                if (pending.trim()) emit(session, { type: 'brief_delta', text: pending })
-                emit(session, stoppedBriefFrame(accumulated, intentRes.intent, metaAsOfIso))
+                if (pending.trim()) {
+                  emit(session, {
+                    type: 'brief_delta',
+                    text: pending,
+                    ...(streamModel ? { model: streamModel } : {}),
+                  })
+                }
+                const stopped = emit(
+                  session,
+                  stoppedBriefFrame(accumulated, intentRes.intent, metaAsOfIso),
+                )
+                rememberBrief(stopped, text, intentRes.intent)
                 telemetry.recordResearchAnswered(userKey(session))
                 return
               }
               if (step.done) break
               const ev = step.value
               if (ev.event === 'delta') {
+                // The delta's model tag is additive on the pinned wire
+                // contract — read defensively so an older intelligence
+                // service (no tag) still streams fine.
+                const model = (ev.data as { model?: unknown }).model
+                if (typeof model === 'string') streamModel = model
                 accumulated += ev.data.text
                 pending += ev.data.text
                 const now = Date.now()
                 if (pending.trim() && now - lastFlush >= DELTA_FLUSH_MS) {
                   markFirstToken()
-                  emit(session, { type: 'brief_delta', text: pending })
+                  emit(session, {
+                    type: 'brief_delta',
+                    text: pending,
+                    ...(streamModel ? { model: streamModel } : {}),
+                  })
                   pending = ''
                   lastFlush = now
                 }
@@ -522,7 +717,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                 // first token the trader sees.
                 markFirstToken()
                 telemetry.recordCache(ev.data.cached)
-                emit(session, briefFrame(ev.data, intentRes.intent))
+                const brief = emit(session, briefFrame(ev.data, intentRes.intent))
+                rememberBrief(brief, text, intentRes.intent)
                 telemetry.recordResearchAnswered(userKey(session))
                 finished = true
               } else if (ev.event === 'replace' || ev.event === 'decline') {
@@ -540,7 +736,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             }
             if (!finished) throw new Error('respond stream ended without done/decline')
           } finally {
-            activeStreams.delete(session.id)
+            settle()
+            // Guarded delete: a newer turn may have replaced our handle.
+            if (activeStreams.get(session.id) === handle) activeStreams.delete(session.id)
           }
         } catch (err) {
           enterDegraded(session, err)
@@ -563,7 +761,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           })
           const declined = res.kind === 'decline'
           telemetry.recordAdvice(declined)
-          emit(session, declined ? declineFrame(res) : briefFrame(res, 'research'))
+          if (declined) {
+            emit(session, declineFrame(res))
+          } else {
+            rememberBrief(emit(session, briefFrame(res, 'research')), text, 'research')
+          }
         } catch (err) {
           enterDegraded(session, err)
           telemetry.recordAdvice(true)
@@ -637,6 +839,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       switch (uplink.kind) {
         case 'user_text':
         case 'chip_tap': {
+          if (uplink.kind === 'chip_tap') {
+            // Reserved card-action prefixes are commands, not conversation:
+            // no echo bubble, no thinking card, no intent classification —
+            // "refresh:f_…" must never run as a research turn.
+            const action = uplink.text.match(CARD_ACTION_RE)
+            if (action) {
+              telemetry.recordUplink(`card_${action[1]}`)
+              if (action[1] === 'refresh' && action[2]) {
+                refreshBrief(session, action[2]).catch((err) => {
+                  log.error({ err }, 'brief refresh failed')
+                })
+              }
+              // share:/manage: are telemetry-only acks — the SDK already did
+              // the visible work (share overlay / venue deep-link).
+              return
+            }
+          }
           // Echo + thinking go out synchronously — before any network call —
           // to hold the <150ms first-frame budget.
           emit(session, { type: 'user_echo', text: uplink.text })
@@ -689,7 +908,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // Stop the session's in-flight research stream: the consuming loop
           // aborts and emits the stopped brief. No active stream (the brief
           // already landed, or none was running) → silent no-op.
-          activeStreams.get(session.id)?.()
+          activeStreams.get(session.id)?.stop()
           return
         }
       }

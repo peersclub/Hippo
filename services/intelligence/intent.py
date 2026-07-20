@@ -8,6 +8,7 @@ once, and finally falling back to the deterministic rules.
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -18,6 +19,12 @@ from textutil import canonical_text, extract_json_object
 
 INTENTS = {"research", "concept", "action", "advice", "portfolio", "smalltalk"}
 LANGUAGES = {"en", "hi", "hinglish"}
+
+# Intent-path LLM deadline, well inside the gateway's 3s /v1/intent abort.
+# A merely SLOW (not dead) model must trip ProviderError → mock fallback here;
+# inheriting the generic 30s LLM_TIMEOUT would leave the gateway permanently
+# degraded while this service's breaker never opens and /health stays green.
+LLM_INTENT_TIMEOUT = float(os.environ.get("LLM_INTENT_TIMEOUT", "2"))
 
 # --- language detection (deterministic; the LLM path can refine) -------------
 _DEVANAGARI_RE = re.compile(r"[ऀ-ॿ]")
@@ -223,7 +230,11 @@ async def classify(
             {"role": "user", "content": f"{text} /no_think"},
         ]
         raw = await router.chat(
-            messages, temperature=0.0, max_tokens=500, json_mode=True
+            messages,
+            temperature=0.0,
+            max_tokens=500,
+            json_mode=True,
+            timeout=LLM_INTENT_TIMEOUT,
         )
         result = _validate_classification(extract_json_object(raw), text)
         if result is None:  # one retry with a sterner JSON-only instruction
@@ -232,7 +243,11 @@ async def classify(
                 {"role": "user", "content": f"{text} /no_think"},
             ]
             raw = await router.chat(
-                retry, temperature=0.0, max_tokens=500, json_mode=True
+                retry,
+                temperature=0.0,
+                max_tokens=500,
+                json_mode=True,
+                timeout=LLM_INTENT_TIMEOUT,
             )
             result = _validate_classification(extract_json_object(raw), text)
         if result is None:

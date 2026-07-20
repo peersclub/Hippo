@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Literal
@@ -21,6 +22,16 @@ import research
 from cache import make_answer_cache
 from observability import first_token_duration, intent_duration, setup_otel, tracer
 from providers import ProviderRouter
+
+# App loggers ("intelligence*") are otherwise unconfigured — uvicorn only
+# configures its own "uvicorn.*" tree — so without this every log.info/
+# log.exception in the service is dropped or lands unformatted on stderr.
+# LOG_LEVEL follows the fleet-wide convention (see .env.example).
+_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
+logging.basicConfig(
+    level=_LEVEL if _LEVEL in logging.getLevelNamesMapping() else logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 log = logging.getLogger("intelligence")
 

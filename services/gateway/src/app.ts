@@ -71,7 +71,9 @@ export async function buildApp(opts: GatewayOptions = {}) {
   // env var is safe by default. Previously it defaulted ON (HIPPO_DEV !== '0').
   const devMode = opts.devMode ?? process.env.HIPPO_DEV === '1'
 
-  const app = Fastify({ logger: { level: isTest ? 'silent' : 'info' } })
+  const app = Fastify({
+    logger: { level: isTest ? 'silent' : (process.env.LOG_LEVEL ?? 'info') },
+  })
   if (devMode && !isTest) {
     app.log.warn(
       'HIPPO_DEV mode ON — anonymous {partnerKey} sessions are allowed. Never enable this in production.',
@@ -160,18 +162,30 @@ export async function buildApp(opts: GatewayOptions = {}) {
     }
 
     // Blocked end-users never get a session (admin panel primitive).
+    // Store reads on the mint path degrade OPEN: sessions live in memory/
+    // Redis, so a Postgres outage must not stop every new user from booting
+    // the SDK. The block/quota checks are skipped (logged) until it recovers.
     if (auth.venueUserId) {
-      const user = await users.get(auth.partner.partnerId, auth.venueUserId)
-      if (user?.status === 'blocked') {
-        reply.code(401)
-        return { error: 'user blocked' }
+      try {
+        const user = await users.get(auth.partner.partnerId, auth.venueUserId)
+        if (user?.status === 'blocked') {
+          reply.code(401)
+          return { error: 'user blocked' }
+        }
+      } catch (err) {
+        app.log.warn({ err }, 'user store read failed — skipping blocked-user check')
       }
     }
 
     // Plan MAU quota: a NEW distinct user this month past the ceiling → 429.
     // Returning users (already counted) keep working — the quota bounds
     // billable distinct users, it never cuts off someone mid-month.
-    const plan = auth.partner.planId ? await plans.get(auth.partner.planId) : undefined
+    let plan: Awaited<ReturnType<typeof plans.get>>
+    try {
+      plan = auth.partner.planId ? await plans.get(auth.partner.planId) : undefined
+    } catch (err) {
+      app.log.warn({ err }, 'plan store read failed — skipping MAU quota check')
+    }
     if (plan?.mauQuota != null) {
       const alreadyCounted = auth.venueUserId
         ? telemetry.hasPartnerUser(auth.partner.partnerId, auth.venueUserId)
@@ -216,7 +230,15 @@ export async function buildApp(opts: GatewayOptions = {}) {
     // resume (rebuild + replay the frame journal) so a reconnect survives a
     // pod restart. In-memory stores have no `resume` — a miss stays a miss.
     let session = sessionId ? sessions.get(sessionId) : null
-    if (!session && sessionId && sessions.resume) session = await sessions.resume(sessionId)
+    if (!session && sessionId && sessions.resume) {
+      // Redis being down must read as a plain miss (404 — the SDK's retry
+      // path re-mints), never a 500 the reconnect logic can't handle.
+      try {
+        session = await sessions.resume(sessionId)
+      } catch (err) {
+        req.log.warn({ err, sessionId }, 'session resume failed — treating as unknown session')
+      }
+    }
     if (!session) {
       reply.code(404)
       return { error: 'unknown session' }
@@ -285,5 +307,16 @@ export async function buildApp(opts: GatewayOptions = {}) {
 if (process.env.NODE_ENV !== 'test') {
   const { app } = await buildApp()
   await app.listen({ port: PORT, host: '::' })
-  console.log(`gateway on :${PORT} — sessions, SSE journal, orchestrator live`)
+  // Boot line carries the mode/backing facts an operator needs first: auth
+  // mode, session durability and registry backing (every other service
+  // prints its equivalent).
+  app.log.info(
+    {
+      port: PORT,
+      devMode: process.env.HIPPO_DEV === '1',
+      sessions: process.env.REDIS_URL ? 'redis' : 'in-memory',
+      stores: process.env.DATABASE_URL ? 'postgres' : 'in-memory',
+    },
+    'gateway up — sessions, SSE journal, orchestrator live',
+  )
 }

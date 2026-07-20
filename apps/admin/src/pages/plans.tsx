@@ -1,7 +1,7 @@
 import type { PlanRecord } from '@hippo/stores'
 import { useState } from 'preact/hooks'
 import { ApiError, del, get, patch, post } from '../api.js'
-import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
+import { Busy, confirmAction, Empty, ErrorBanner, toast, useLoad } from '../ui.js'
 
 type PlanDraft = {
   planId: string
@@ -112,8 +112,11 @@ export function PlansPage() {
           <tbody>
             {plans.length === 0 && (
               <tr>
-                <td colSpan={6} class="empty">
-                  No plans yet — create the first tier.
+                <td colSpan={6}>
+                  <Empty
+                    title="No plans yet"
+                    hint="Create the first tier with “New plan” above — partners get assigned to it from the Partners page."
+                  />
                 </td>
               </tr>
             )}

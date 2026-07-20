@@ -197,6 +197,99 @@ describe('orchestrator: streaming research (brief_delta)', () => {
     await app.close()
   })
 
+  it('forwards the model id from intelligence deltas onto brief_delta frames', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* () {
+          yield { event: 'meta', data: {} }
+          yield { event: 'delta', data: { text: 'BTC is down ', model: 'anthropic/claude-test' } }
+          await delay(170)
+          yield { event: 'delta', data: { text: 'sharply.', model: 'anthropic/claude-test' } }
+          await delay(170)
+          yield { event: 'done', data: briefFixture }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    const deltas = session.journal
+      .after(0)
+      .filter((e) => e.frame.type === 'brief_delta')
+      .map((e) => e.frame as { model?: string })
+    expect(deltas.length).toBeGreaterThanOrEqual(2)
+    for (const d of deltas) expect(d.model).toBe('anthropic/claude-test')
+    // The final brief still carries its own provenance.
+    const brief = frameOfType<{ model?: string }>(session, 'research_brief')
+    expect(brief.model).toBe(briefFixture.model)
+    await app.close()
+  })
+
+  it('an intelligence service without delta model tags still streams (no model field)', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* () {
+          yield { event: 'meta', data: {} }
+          yield { event: 'delta', data: { text: 'BTC is down sharply today.' } }
+          await delay(170)
+          yield { event: 'done', data: briefFixture }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    const delta = frameOfType<{ model?: string }>(session, 'brief_delta')
+    expect(delta.model).toBeUndefined()
+    await app.close()
+  })
+
+  it('a second research turn mid-stream stops the first stream, then streams cleanly', async () => {
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respondStream: async function* (req) {
+          if (req.text === 'first question') {
+            yield { event: 'meta', data: {} }
+            yield { event: 'delta', data: { text: 'FIRST-STREAM ' } }
+            await delay(1_500) // long tail turn B interrupts
+            yield { event: 'delta', data: { text: 'NEVER-DELIVERED' } }
+            yield { event: 'done', data: briefFixture }
+          } else {
+            yield { event: 'meta', data: {} }
+            yield { event: 'delta', data: { text: 'SECOND-STREAM ' } }
+            await delay(170)
+            yield { event: 'done', data: { ...briefFixture, headline: 'Second answer' } }
+          }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'first question' })
+    await waitForJournal(session, (t) => t.includes('brief_delta'))
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'second question' })
+    await waitForJournal(
+      session,
+      (t) => t.filter((x) => x === 'research_brief').length >= 2,
+      4_000,
+    )
+    const frames = session.journal.after(0).map((e) => e.frame)
+    // Turn A ends in its stopped brief BEFORE turn B's skeleton — no interleave.
+    const stoppedIdx = frames.findIndex(
+      (f) => f.type === 'research_brief' && (f as { eyebrow?: string }).eyebrow?.includes('STOPPED'),
+    )
+    const secondSkeletonIdx = frames.findIndex(
+      (f, i) => f.type === 'skeleton' && i > frames.findIndex((x) => x.type === 'skeleton'),
+    )
+    expect(stoppedIdx).toBeGreaterThan(-1)
+    expect(secondSkeletonIdx).toBeGreaterThan(stoppedIdx)
+    // Turn A's tail never lands; turn B finishes authoritatively.
+    const allText = JSON.stringify(frames)
+    expect(allText).not.toContain('NEVER-DELIVERED')
+    const briefs = frames.filter((f) => f.type === 'research_brief')
+    expect((briefs[briefs.length - 1] as { headline: string }).headline).toBe('Second answer')
+    await app.close()
+  })
+
   it('a stream ending without done also degrades truthfully', async () => {
     const { app, sessions } = await testApp({
       intel: stubIntel({
@@ -582,6 +675,185 @@ describe('turns endpoint hygiene', () => {
     const metrics = telemetry.snapshot() as { uplinks: Record<string, number> }
     expect(metrics.uplinks.feedback).toBe(1)
     expect(metrics.uplinks.consent).toBe(1)
+    await app.close()
+  })
+})
+
+describe('orchestrator: card actions (reserved chip_tap prefixes)', () => {
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  it('refresh:<frameId> re-runs the original turn in place — no echo, no thinking, no new turn', async () => {
+    const { app, sessions } = await testApp()
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is sol down?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    const first = frameOfType<{ id: string }>(session, 'research_brief')
+    const seqBefore = session.journal.lastSeq()
+
+    expect(await sendTurn(app, session.id, { kind: 'chip_tap', text: `refresh:${first.id}` })).toBe(
+      200,
+    )
+    await waitForJournal(session, (t) => t.filter((x) => x === 'research_brief').length >= 2)
+    const after = session.journal.after(seqBefore).map((e) => e.frame)
+    // A refresh is a command, not conversation: nothing conversational lands.
+    expect(after.map((f) => f.type)).toEqual(['research_brief'])
+    // The re-run supersedes the original card in place.
+    expect((after[0] as { replaces?: string }).replaces).toBe(first.id)
+    await app.close()
+  })
+
+  it('share:/manage: are telemetry-only acks — no frames at all', async () => {
+    const { app, sessions, telemetry } = await testApp()
+    const session = await createSession(app, sessions)
+    const before = session.journal.lastSeq()
+    expect(await sendTurn(app, session.id, { kind: 'chip_tap', text: 'share:f_abc_1' })).toBe(200)
+    expect(await sendTurn(app, session.id, { kind: 'chip_tap', text: 'manage:o_btc' })).toBe(200)
+    await delay(50)
+    expect(session.journal.lastSeq()).toBe(before)
+    const metrics = telemetry.snapshot() as { uplinks: Record<string, number> }
+    expect(metrics.uplinks.card_share).toBe(1)
+    expect(metrics.uplinks.card_manage).toBe(1)
+    await app.close()
+  })
+
+  it('refresh with an unknown frame id says so honestly instead of guessing', async () => {
+    const { app, sessions } = await testApp()
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'chip_tap', text: 'refresh:f_gone_1' })
+    const types = await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    expect(types).not.toContain('user_echo')
+    expect(types).not.toContain('research_brief')
+    const rej = frameOfType<{ title: string }>(session, 'rejection_ticket')
+    expect(rej.title).toBe('Refresh unavailable')
+    await app.close()
+  })
+
+  it('degraded refresh falls back to the market-only brief, still in place', async () => {
+    // The stream works (first brief lands) but blocking respond — the refresh
+    // path — is down: refresh must degrade to the market-only brief honestly.
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        respond: () => {
+          throw new Error('intelligence unreachable')
+        },
+        respondStream: async function* () {
+          yield { event: 'meta', data: {} }
+          yield { event: 'done', data: briefFixture }
+        },
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is sol down?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    const first = frameOfType<{ id: string }>(session, 'research_brief')
+    await sendTurn(app, session.id, { kind: 'chip_tap', text: `refresh:${first.id}` })
+    await waitForJournal(session, (t) => t.filter((x) => x === 'research_brief').length >= 2)
+    const briefs = session.journal
+      .after(0)
+      .filter((e) => e.frame.type === 'research_brief')
+      .map((e) => e.frame as { replaces?: string; sources: string[] })
+    expect(briefs[1]?.replaces).toBe(first.id)
+    expect(briefs[1]?.sources).toEqual(['PRICE FEED'])
+    await app.close()
+  })
+})
+
+describe('orchestrator: venue-event backstop + post-confirm cancel truth', () => {
+  const buyIntent = () =>
+    stubIntel({
+      intent: () => ({
+        intent: 'action',
+        confidence: 0.9,
+        language: 'en',
+        order: { side: 'buy', size: '0.05', instrument: 'BTC/USDT', orderType: 'market' },
+      }),
+    })
+
+  async function preparedAndConfirmed(seam = stubSeam()) {
+    const gw = await testApp({ intel: buyIntent(), seam })
+    const session = await createSession(gw.app, gw.sessions)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    await waitForJournal(session, (t) => t.includes('order_ticket'))
+    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    await sendTurn(gw.app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'confirm_handoff',
+    })
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+    return { ...gw, session, ticket }
+  }
+
+  it('no venue event within the window → honest terminal expired frame, never eternal waiting', async () => {
+    process.env.TICKET_EVENT_TIMEOUT_MS = '80'
+    try {
+      const { app, session } = await preparedAndConfirmed()
+      await waitForJournal(session, (t) =>
+        t.filter((x) => x === 'lifecycle').length >= 2,
+      )
+      const lifecycles = session.journal
+        .after(0)
+        .filter((e) => e.frame.type === 'lifecycle')
+        .map((e) => e.frame as { phase: string; statusLine: string })
+      expect(lifecycles[0]?.phase).toBe('awaiting_confirm')
+      expect(lifecycles[1]?.phase).toBe('expired')
+      expect(lifecycles[1]?.statusLine).toContain('CHECK THE VENUE')
+      await app.close()
+    } finally {
+      delete process.env.TICKET_EVENT_TIMEOUT_MS
+    }
+  })
+
+  it('a venue event inside the window defuses the backstop', async () => {
+    process.env.TICKET_EVENT_TIMEOUT_MS = '120'
+    try {
+      const { app, session, ticket } = await preparedAndConfirmed()
+      await app.inject({
+        method: 'POST',
+        url: '/internal/venue-events',
+        headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+        payload: { ticketId: ticket.ticketId, phase: 'filled', statusLine: 'FILLED' },
+      })
+      await new Promise((r) => setTimeout(r, 200)) // past the window
+      const phases = session.journal
+        .after(0)
+        .filter((e) => e.frame.type === 'lifecycle')
+        .map((e) => (e.frame as { phase: string }).phase)
+      expect(phases).toEqual(['awaiting_confirm', 'filled']) // no late 'expired'
+      await app.close()
+    } finally {
+      delete process.env.TICKET_EVENT_TIMEOUT_MS
+    }
+  })
+
+  it('cancel AFTER confirm never claims "nothing was sent", and a racing fill still reaches the trader', async () => {
+    const { app, session, ticket } = await preparedAndConfirmed()
+    await sendTurn(app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'cancel',
+    })
+    await waitForJournal(session, (t) => t.filter((x) => x === 'lifecycle').length >= 2)
+    const lifecycles = session.journal
+      .after(0)
+      .filter((e) => e.frame.type === 'lifecycle')
+      .map((e) => e.frame as { phase: string; statusLine: string })
+    expect(lifecycles[1]?.statusLine).toContain('CANCEL REQUESTED')
+    expect(lifecycles[1]?.statusLine).not.toContain('NOTHING WAS SENT')
+
+    // The venue's fill won the race — it must still be routed and shown.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+      payload: { ticketId: ticket.ticketId, phase: 'filled', statusLine: 'FILLED' },
+    })
+    expect(res.json()).toEqual({ ok: true, routed: true })
+    const phases = session.journal
+      .after(0)
+      .filter((e) => e.frame.type === 'lifecycle')
+      .map((e) => (e.frame as { phase: string }).phase)
+    expect(phases[phases.length - 1]).toBe('filled')
     await app.close()
   })
 })

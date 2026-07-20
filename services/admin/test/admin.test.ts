@@ -298,6 +298,32 @@ describe('users + memory proxy', () => {
     await app.close()
   })
 
+  it('returns 502 "memory service unreachable" when the memory proxy fetch rejects', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('memory down')
+    }) as typeof fetch
+    const { app } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+
+    for (const [method, url, payload] of [
+      ['GET', '/v1/memory', undefined],
+      ['PUT', '/v1/memory/koinbx-dev/u1', { experienceLevel: 'pro' }],
+      ['POST', '/v1/memory/koinbx-dev/u1/clear', undefined],
+      ['DELETE', '/v1/memory/koinbx-dev/u1', undefined],
+      ['DELETE', '/v1/memory?partnerId=koinbx-dev', undefined],
+    ] as const) {
+      const res = await app.inject({
+        method,
+        url,
+        headers: { cookie },
+        ...(payload !== undefined ? { payload } : {}),
+      })
+      expect(res.statusCode, `${method} ${url}`).toBe(502)
+      expect(res.json().error, `${method} ${url}`).toBe('memory service unreachable')
+    }
+    await app.close()
+  })
+
   it('rejects malformed persona updates before proxying', async () => {
     let called = false
     const fetchImpl = (async () => {
@@ -328,6 +354,57 @@ describe('metrics + audit', () => {
     const res = await app.inject({ method: 'GET', url: '/v1/metrics', headers: { cookie } })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ gateway: null, counts: { partners: 1, plans: 0 } })
+    await app.close()
+  })
+
+  it('passes intelligence answer-cache stats through and counts sandbox partners', async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).includes('/health'))
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            mode: 'llm',
+            model: 'claude-haiku',
+            cache: { entries: 7, hitRate: 0.42 },
+          }),
+          { status: 200 },
+        )
+      return new Response('{}', { status: 200 })
+    }) as typeof fetch
+    const { app } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+
+    // A self-serve sandbox signup shows up in the pending-approval count.
+    const prov = await app.inject({
+      method: 'POST',
+      url: '/v1/provision/sandbox',
+      payload: { email: 'eng@newvenue.io', venueName: 'New Venue' },
+    })
+    expect(prov.statusCode).toBe(200)
+
+    const res = await app.inject({ method: 'GET', url: '/v1/metrics', headers: { cookie } })
+    const body = res.json()
+    expect(body.intelligence).toEqual({
+      mode: 'llm',
+      model: 'claude-haiku',
+      cache: { entries: 7, hitRate: 0.42 },
+    })
+    expect(body.counts).toMatchObject({ partners: 2, sandboxPartners: 1 })
+    await app.close()
+  })
+
+  it('omits the cache block when the intelligence /health has none (older build)', async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).includes('/health'))
+        return new Response(JSON.stringify({ ok: true, mode: 'mock', model: 'mock' }), {
+          status: 200,
+        })
+      return new Response('{}', { status: 200 })
+    }) as typeof fetch
+    const { app } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+    const res = await app.inject({ method: 'GET', url: '/v1/metrics', headers: { cookie } })
+    expect(res.json().intelligence).toEqual({ mode: 'mock', model: 'mock' })
     await app.close()
   })
 

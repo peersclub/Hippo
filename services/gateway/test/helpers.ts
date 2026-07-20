@@ -41,6 +41,7 @@ export const briefFixture: BriefResponse = {
   followups: ["What's driving SOL volume?"],
   asOfIso: '2026-07-14T09:02:05.000Z',
   cached: false,
+  model: 'anthropic/claude-haiku-4.5',
 }
 
 export function stubIntel(overrides: {

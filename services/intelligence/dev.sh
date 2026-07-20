@@ -15,4 +15,9 @@ if ! cmp -s requirements.txt .venv/.requirements-stamp; then
   cp requirements.txt .venv/.requirements-stamp
 fi
 
-exec .venv/bin/uvicorn main:app --reload --host :: --port "${PORT:-8791}"
+# LOG_LEVEL drives both uvicorn's loggers and the app's (see main.py).
+# uvicorn spells it "warning"; the fleet-wide convention (pino) is "warn".
+UVICORN_LEVEL="$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')"
+[ "$UVICORN_LEVEL" = "warn" ] && UVICORN_LEVEL=warning
+exec .venv/bin/uvicorn main:app --reload --host :: --port "${PORT:-8791}" \
+  --log-level "$UVICORN_LEVEL"

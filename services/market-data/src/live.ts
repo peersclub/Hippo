@@ -8,7 +8,10 @@ import type { SnapshotInputs } from './snapshot.js'
 /** 13 hourly candles = the 12h window (first close is "12 hours ago"). */
 const SPARK_CANDLES = 13
 
-const exchange = new binance({ enableRateLimit: true })
+// timeout: CCXT's default is 10s, but our slowest caller aborts at 2.5s
+// (gateway) / 3s (intelligence) — a slower Binance answer would burn sockets
+// for a response nobody is still waiting for.
+const exchange = new binance({ enableRateLimit: true, timeout: 2_000 })
 
 /** "BTC/USDT" → "BTC/USDT:USDT" — funding only exists on the perp market. */
 function futuresSymbol(spot: string): string {

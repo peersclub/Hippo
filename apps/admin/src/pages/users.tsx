@@ -2,7 +2,7 @@ import type { PartnerRecord, UserRecord } from '@hippo/stores'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ApiError, del, get, post, put } from '../api.js'
 import { navigate } from '../router.js'
-import { Busy, confirmAction, ErrorBanner, toast, useLoad } from '../ui.js'
+import { Busy, confirmAction, Empty, ErrorBanner, toast, useLoad } from '../ui.js'
 
 type Persona = {
   optIn: boolean
@@ -116,10 +116,15 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
           <tbody>
             {users.rows.length === 0 && (
               <tr>
-                <td colSpan={5} class="empty">
-                  {debouncedQ
-                    ? `No users match “${debouncedQ}”.`
-                    : 'No registered users yet — rows appear when partners mint JWT-bound sessions.'}
+                <td colSpan={5}>
+                  {debouncedQ ? (
+                    <Empty title={`No users match “${debouncedQ}”.`} />
+                  ) : (
+                    <Empty
+                      title="No registered users yet"
+                      hint="Rows appear when partners mint JWT-bound sessions."
+                    />
+                  )}
                 </td>
               </tr>
             )}
@@ -161,8 +166,11 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
           <tbody>
             {personas.rows.length === 0 && (
               <tr>
-                <td colSpan={6} class="empty">
-                  No personas held.
+                <td colSpan={6}>
+                  <Empty
+                    title="No personas held."
+                    hint="Personas appear when embedded users opt in to memory."
+                  />
                 </td>
               </tr>
             )}
@@ -253,11 +261,15 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
   }, [partnerId, userId])
 
   async function setLevel(level: string) {
-    await put(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`, {
-      experienceLevel: level === '' ? null : level,
-    })
-    toast('Experience level updated')
-    state.retry()
+    try {
+      await put(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`, {
+        experienceLevel: level === '' ? null : level,
+      })
+      toast('Experience level updated')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'update failed', 'err')
+    }
   }
 
   async function clearMemory() {
@@ -267,9 +279,13 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
       confirmLabel: 'Clear memory',
     })
     if (!ok) return
-    await post(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/clear`)
-    toast('Memory cleared')
-    state.retry()
+    try {
+      await post(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/clear`)
+      toast('Memory cleared')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'clear failed', 'err')
+    }
   }
 
   async function purgeMemory() {
@@ -280,9 +296,13 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
       typedPhrase: userId,
     })
     if (!ok) return
-    await del(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`)
-    toast('Memory record purged')
-    state.retry()
+    try {
+      await del(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`)
+      toast('Memory record purged')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'purge failed', 'err')
+    }
   }
 
   async function setBlocked(action: 'block' | 'unblock') {
@@ -295,9 +315,15 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
       })
       if (!ok) return
     }
-    await post(`/v1/users/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/${action}`)
-    toast(action === 'block' ? 'User blocked' : 'User unblocked')
-    state.retry()
+    try {
+      await post(
+        `/v1/users/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/${action}`,
+      )
+      toast(action === 'block' ? 'User blocked' : 'User unblocked')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : `${action} failed`, 'err')
+    }
   }
 
   if (state.error) return <ErrorBanner message={state.error} retry={state.retry} />

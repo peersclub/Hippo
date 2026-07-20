@@ -419,7 +419,10 @@ function StreamingBriefCard({ frame }: { frame: BriefDelta }) {
     <div class="bubble">
       <div class="eyebrow">
         <span>MARKET BRIEF</span>
-        <span class="live">● LIVE</span>
+        <span class="eyebrow-right">
+          <span class="live">● LIVE</span>
+          {frame.model && <span class="model-tag">{frame.model}</span>}
+        </span>
       </div>
       <p class="stream-text">
         {frame.text}

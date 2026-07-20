@@ -1,7 +1,7 @@
 import type { AuditEntry } from '@hippo/stores'
 import { useState } from 'preact/hooks'
 import { get } from '../api.js'
-import { Busy, ErrorBanner, useLoad } from '../ui.js'
+import { Busy, Empty, ErrorBanner, useLoad } from '../ui.js'
 
 export function AuditPage() {
   const [page, setPage] = useState<{ rows: AuditEntry[]; total: number }>({ rows: [], total: 0 })
@@ -35,8 +35,11 @@ export function AuditPage() {
           <tbody>
             {page.rows.length === 0 && (
               <tr>
-                <td colSpan={5} class="empty">
-                  No operator actions recorded yet.
+                <td colSpan={5}>
+                  <Empty
+                    title="No operator actions recorded yet."
+                    hint="Every mutation in this panel writes one row here."
+                  />
                 </td>
               </tr>
             )}

@@ -7,6 +7,10 @@
 
 const MEMORY_URL = process.env.MEMORY_URL ?? 'http://localhost:8792'
 const MEMORY_TIMEOUT_MS = 1_500
+/** After a network failure, skip memory entirely for this long — a down
+ * memory service must not add its timeout to every research turn. The first
+ * call after the window probes again. */
+const BREAKER_MS = 15_000
 
 export type ExperienceLevel = 'new' | 'intermediate' | 'pro'
 
@@ -49,18 +53,32 @@ async function request(url: string, init: RequestInit): Promise<Response> {
 export function createMemoryClient(baseUrl = MEMORY_URL): MemoryClient {
   const personaUrl = (partnerId: string, userId: string) =>
     `${baseUrl}/v1/persona/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`
+  // Network-level failures (timeout, refused) open the breaker; a non-2xx is
+  // the service answering and doesn't. Reads degrade to null either way.
+  let downUntil = 0
+  async function guarded(url: string, init: RequestInit): Promise<Response | null> {
+    if (Date.now() < downUntil) return null
+    try {
+      const res = await request(url, init)
+      downUntil = 0
+      return res
+    } catch (err) {
+      downUntil = Date.now() + BREAKER_MS
+      throw err
+    }
+  }
   return {
     async get(partnerId, userId) {
       try {
-        const res = await request(personaUrl(partnerId, userId), { method: 'GET' })
-        if (!res.ok) return null
+        const res = await guarded(personaUrl(partnerId, userId), { method: 'GET' })
+        if (!res?.ok) return null
         return (await res.json()) as Persona
       } catch {
         return null
       }
     },
     async update(partnerId, userId, patch) {
-      await request(personaUrl(partnerId, userId), {
+      await guarded(personaUrl(partnerId, userId), {
         method: 'PUT',
         body: JSON.stringify(patch),
       })
@@ -68,7 +86,7 @@ export function createMemoryClient(baseUrl = MEMORY_URL): MemoryClient {
     async clear(partnerId, userId) {
       // Explicit empty JSON body: fastify 400s a bodyless POST that carries
       // a JSON content-type (found live — the fire-and-forget hid the 400).
-      await request(`${personaUrl(partnerId, userId)}/clear`, { method: 'POST', body: '{}' })
+      await guarded(`${personaUrl(partnerId, userId)}/clear`, { method: 'POST', body: '{}' })
     },
   }
 }

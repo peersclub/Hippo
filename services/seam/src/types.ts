@@ -67,6 +67,13 @@ export type Portfolio = {
   openOrders: OpenOrder[]
 }
 
+/** Structured logger surface adapters report through (a fastify logger fits). */
+export type AdapterLog = {
+  info: (obj: object, msg?: string) => void
+  warn: (obj: object, msg?: string) => void
+  error: (obj: object, msg?: string) => void
+}
+
 /**
  * Per-venue adapter contract. One implementation per venue, loaded by
  * partner config; `SimVenueAdapter` is the dev implementation and the
@@ -83,4 +90,7 @@ export interface VenueAdapter {
   cancel(ticketId: string): Promise<boolean>
   portfolio(partnerId: string, userId: string): Promise<Portfolio>
   onEvent(handler: (event: LifecycleEvent) => void): void
+  /** Optional: receive the service's logger (wired by buildService) so
+   * venue-API failures the adapter absorbs are still visible to operators. */
+  setLogger?(log: AdapterLog): void
 }
