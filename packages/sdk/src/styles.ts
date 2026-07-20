@@ -190,6 +190,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .cta{display:block;width:calc(100% - 26px);margin:9px 13px 11px;font-family:var(--hippo-font-display);font-weight:600;
   font-size:12.5px;padding:12px;border-radius:11px;background:var(--hippo-amber);color:var(--hippo-amber-ink);text-align:center}
 .tfoot{font-size:9.5px;text-align:center;padding:0 13px 11px;line-height:1.5;color:var(--hippo-text-faint)}
+.action-failed{font-family:var(--hippo-font-mono);font-size:10px;text-align:center;padding:0 13px 9px;color:var(--hippo-down)}
 /* lifecycle */
 .await{display:flex;align-items:center;gap:8px;padding:10px 13px;border-top:1px dashed rgba(var(--hippo-white-rgb),.09);
   font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-amber)}
@@ -226,6 +227,12 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .stream-text{white-space:pre-wrap}
 .stream-cursor{display:inline-block;width:7px;height:12px;margin-left:2px;vertical-align:-1px;
   background:var(--hippo-amber);animation:hpulse 1.1s ease infinite}
+/* stalled stream, finalized by the watchdog — honest, never a dead cursor */
+.stream-cut{margin-top:9px;padding-top:9px;border-top:1px dashed rgba(var(--hippo-white-rgb),.08);
+  font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.06em;line-height:1.5;color:var(--hippo-text-faint)}
+/* REFRESH held pending until the replacing brief lands (never a fixed flash) */
+.livebar .rf.pending{opacity:.6;cursor:default}
+.livebar.stale .rf.pending{opacity:.75}
 /* positions */
 .pos-row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;font-family:var(--hippo-font-mono);font-size:11px}
 .pos-row+.pos-row{border-top:1px dashed rgba(var(--hippo-white-rgb),.09)}

@@ -30,6 +30,7 @@ import { t } from './i18n.js'
 import { dispatch } from './outbox.js'
 import { briefClipboardText, COPIED_FLASH_MS } from './share.js'
 import { connection, feedbackMap, locale, shareFrame } from './state.js'
+import { interruptedStreamIds } from './streaming.js'
 import { send } from './transport.js'
 
 /** Exported for the share overlay — the co-branded card reuses the exact spark. */
@@ -56,7 +57,12 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   // gave feedback" survives minimize/reopen; the reducer's terminal states
   // guarantee replays can't double-send.
   const fb = feedbackMap.value[frame.id] ?? { phase: 'idle' as const }
-  const [flash, setFlash] = useState(false)
+  // REFRESH is held pending (disabled) until the replacing brief lands. The
+  // server answers a refresh with a research_brief carrying `replaces:<this
+  // id>`, which swaps this card out in place (state.ts) — unmounting this row
+  // and clearing the pending state for free. No optimistic fixed-time flash:
+  // the button reflects the real in-flight re-run, not a guess at its length.
+  const [pending, setPending] = useState(false)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef(0)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
@@ -72,8 +78,8 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   }, [lb])
   if (!lb) return null
   const refresh = () => {
-    setFlash(true)
-    setTimeout(() => setFlash(false), 900)
+    if (pending) return
+    setPending(true)
     void dispatch({ kind: 'chip_tap', text: `refresh:${frame.id}` })
   }
   // 👍 stays instant; 👎 asks one follow-up. The three reason chips map 1:1
@@ -100,10 +106,16 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   return (
     <>
       <div class={`livebar${stale ? ' stale' : ''}`}>
-        <span class={`asof${flash ? ' flash' : ''}`}>{lb.asOf}</span>
+        <span class={`asof${pending ? ' flash' : ''}`}>{lb.asOf}</span>
         {lb.refreshable && (
-          <button type="button" class="rf" onClick={refresh}>
-            ↻ REFRESH
+          <button
+            type="button"
+            class={`rf${pending ? ' pending' : ''}`}
+            disabled={pending}
+            aria-busy={pending}
+            onClick={refresh}
+          >
+            {pending ? '↻ REFRESHING…' : '↻ REFRESH'}
           </button>
         )}
         <button type="button" onClick={copy} aria-label={t(locale.value, 'copy_brief')}>
@@ -214,6 +226,19 @@ function ResearchBriefCard({ frame }: { frame: ResearchBrief }) {
 }
 
 function OrderTicketCard({ frame }: { frame: OrderTicket }) {
+  // A trading action that fails silently is the worst kind: the trader can't
+  // tell if the order registered. ticket_action is never queued (a confirm
+  // fired minutes later is unacceptable) — so a live failure must surface here.
+  const [failed, setFailed] = useState(false)
+  const confirm = async () => {
+    setFailed(false)
+    const ok = await send({
+      kind: 'ticket_action',
+      ticketId: frame.ticketId,
+      action: 'confirm_handoff',
+    })
+    if (!ok) setFailed(true)
+  }
   return (
     <div class="ticket">
       <div class="th">
@@ -235,19 +260,24 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
         class="cta"
         disabled={connection.value !== 'live'}
         title={connection.value !== 'live' ? t(locale.value, 'ticket_offline_hint') : undefined}
-        onClick={() =>
-          send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'confirm_handoff' })
-        }
+        onClick={confirm}
       >
         {frame.cta}
       </button>
+      {failed && <div class="action-failed">{t(locale.value, 'action_failed')}</div>}
       <div class="tfoot">{frame.footnote}</div>
     </div>
   )
 }
 
 function LifecycleCard({ frame }: { frame: Lifecycle }) {
+  const [cancelFailed, setCancelFailed] = useState(false)
   if (frame.phase === 'awaiting_confirm') {
+    const cancel = async () => {
+      setCancelFailed(false)
+      const ok = await send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'cancel' })
+      if (!ok) setCancelFailed(true)
+    }
     return (
       <div class="ticket">
         <div class="await">
@@ -261,14 +291,13 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
               title={
                 connection.value !== 'live' ? t(locale.value, 'ticket_offline_hint') : undefined
               }
-              onClick={() =>
-                send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'cancel' })
-              }
+              onClick={cancel}
             >
               CANCEL
             </button>
           )}
         </div>
+        {cancelFailed && <div class="action-failed">{t(locale.value, 'action_failed')}</div>}
       </div>
     )
   }
@@ -415,19 +444,30 @@ function SkeletonCard({ frame }: { frame: Skeleton }) {
  * the research engine generates. state.ts accumulates consecutive
  * brief_delta frames into one; the final research_brief replaces this card. */
 function StreamingBriefCard({ frame }: { frame: BriefDelta }) {
+  // The watchdog (state.ts) marks a delta interrupted when its stream stalls
+  // — deltas stopped and the authoritative brief never came. Finalize
+  // honestly: drop the ● LIVE + blinking cursor and say the brief was cut
+  // off, rather than blinking forever on a dead stream.
+  const interrupted = interruptedStreamIds.value.has(frame.id)
   return (
     <div class="bubble">
       <div class="eyebrow">
         <span>MARKET BRIEF</span>
         <span class="eyebrow-right">
-          <span class="live">● LIVE</span>
+          {!interrupted && <span class="live">● LIVE</span>}
           {frame.model && <span class="model-tag">{frame.model}</span>}
         </span>
       </div>
       <p class="stream-text">
         {frame.text}
-        <span class="stream-cursor" aria-hidden="true" />
+        {!interrupted && <span class="stream-cursor" aria-hidden="true" />}
       </p>
+      {interrupted && (
+        <div class="stream-cut" role="status">
+          ⚠ BRIEF INTERRUPTED — the connection dropped before it finished. Ask again for a complete
+          answer.
+        </div>
+      )}
     </div>
   )
 }

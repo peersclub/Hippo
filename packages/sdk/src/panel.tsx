@@ -60,6 +60,22 @@ const reducedMotion = () =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
 /**
+ * Fire a non-queueable action (stop, and anything else routed straight through
+ * the panel) and report failure to the caller. These never touch the outbox —
+ * they're time-sensitive — so a send that fails while the connection still
+ * reads 'live' (gateway 500 / timeout / dead session) would otherwise vanish
+ * silently. `onFail` lets the composer surface it, mirroring SEND FAILED.
+ */
+export async function runActionSend(
+  partial: Parameters<typeof send>[0],
+  onFail: () => void,
+  sender: (p: Parameters<typeof send>[0]) => Promise<boolean> = send,
+): Promise<void> {
+  const ok = await sender(partial).catch(() => false)
+  if (!ok) onFail()
+}
+
+/**
  * One suggestion chip. Tap sends; holding LONG_PRESS_MS (or Shift+click)
  * drops the text into the composer to edit instead — same fill-never-send
  * path as the "+ New order" hint. Pointer travel past the slop cancels the
@@ -231,7 +247,7 @@ function Composer() {
             disabled={blocked}
             title={t(L, 'stop_streaming')}
             aria-label={t(L, 'stop_streaming')}
-            onClick={() => void send({ kind: 'stream_stop' })}
+            onClick={() => void runActionSend({ kind: 'stream_stop' }, () => setFailed(true))}
           >
             ⏹
           </button>

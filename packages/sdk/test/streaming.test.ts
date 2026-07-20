@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import type { ThreadItem } from '../src/state.js'
-import { isStreaming } from '../src/streaming.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { pushFrame, type ThreadItem, thread } from '../src/state.js'
+import {
+  clearStreamWatchdog,
+  interruptedStreamIds,
+  isStreaming,
+  STREAM_WATCHDOG_MS,
+} from '../src/streaming.js'
 
 const base = { v: 1 as const, ts: 1 }
 
@@ -53,5 +58,75 @@ describe('isStreaming', () => {
       frame: { ...base, id: 'f1', type: 'watchlist_card' },
     }
     expect(isStreaming([unknown])).toBe(false)
+  })
+
+  it('is false once the trailing delta has been marked interrupted', () => {
+    interruptedStreamIds.value = new Set(['f2'])
+    expect(isStreaming([echo('f1'), delta('f2', 'partial…')])).toBe(false)
+    interruptedStreamIds.value = new Set()
+  })
+})
+
+describe('stalled-stream watchdog', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    thread.value = []
+    interruptedStreamIds.value = new Set()
+    clearStreamWatchdog()
+  })
+  afterEach(() => {
+    clearStreamWatchdog()
+    vi.useRealTimers()
+  })
+
+  const pushDelta = (id: string, text: string) =>
+    pushFrame({ kind: 'frame', frame: { ...base, id, type: 'brief_delta', text } })
+
+  it('finalizes a stalled stream after the deadline — cursor stops, isStreaming flips false', () => {
+    pushDelta('d1', 'BTC is moving ')
+    expect(isStreaming(thread.value)).toBe(true)
+    // Just short of the deadline: still streaming.
+    vi.advanceTimersByTime(STREAM_WATCHDOG_MS - 1)
+    expect(isStreaming(thread.value)).toBe(true)
+    // Deadline lapses with no further delta / authoritative brief.
+    vi.advanceTimersByTime(1)
+    expect(interruptedStreamIds.value.has('d1')).toBe(true)
+    expect(isStreaming(thread.value)).toBe(false)
+  })
+
+  it('resets the deadline on every delta (measured from the LAST delta)', () => {
+    pushDelta('d1', 'first ')
+    vi.advanceTimersByTime(STREAM_WATCHDOG_MS - 100)
+    // A fresh delta arrives before the deadline — the merged card keeps the
+    // newest delta id, and the watchdog restarts from here.
+    pushDelta('d2', 'second ')
+    vi.advanceTimersByTime(STREAM_WATCHDOG_MS - 100)
+    expect(isStreaming(thread.value)).toBe(true)
+    expect(interruptedStreamIds.value.size).toBe(0)
+    vi.advanceTimersByTime(100)
+    expect(interruptedStreamIds.value.has('d2')).toBe(true)
+    expect(isStreaming(thread.value)).toBe(false)
+  })
+
+  it('never fires once the authoritative research_brief lands', () => {
+    pushDelta('d1', 'BTC is down ')
+    pushFrame({
+      kind: 'frame',
+      frame: {
+        ...base,
+        id: 'b1',
+        type: 'research_brief',
+        eyebrow: 'MARKET BRIEF',
+        live: true,
+        headline: 'BTC is down',
+        paragraphs: [],
+        stats: [],
+        sources: [],
+        followups: [],
+      },
+    })
+    vi.advanceTimersByTime(STREAM_WATCHDOG_MS * 2)
+    expect(interruptedStreamIds.value.size).toBe(0)
+    expect(isStreaming(thread.value)).toBe(false)
   })
 })

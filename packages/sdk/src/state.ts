@@ -4,6 +4,12 @@ import { resolveChips } from './chips.js'
 import type { FeedbackState } from './feedback.js'
 import { isRtl, type Locale } from './i18n.js'
 import type { Posture } from './posture.js'
+import {
+  armStreamWatchdog,
+  clearStreamWatchdog,
+  interruptedStreamIds,
+  isStreaming,
+} from './streaming.js'
 
 /** A thread entry: a known frame, or an unknown one destined for FallbackCard. */
 export type ThreadItem = { kind: 'frame'; frame: Frame } | { kind: 'unknown'; frame: UnknownFrame }
@@ -90,9 +96,50 @@ export const openOrderCount = computed(() => orders.value?.open.length ?? 0)
 
 const EPHEMERAL = new Set(['thinking', 'skeleton', 'brief_delta'])
 
+/** Commit a new thread array AND reconcile the stalled-stream watchdog: arm
+ * (reset) it whenever the thread is mid-stream, clear it the instant it isn't
+ * (the authoritative brief landed, or content replaced the stream). Routing
+ * frames (orders/pulse/banner) never reach here, so ambient traffic can't
+ * disarm a genuinely stalled stream. */
+function commitThread(next: ThreadItem[]) {
+  thread.value = next
+  if (isStreaming(next)) armStreamWatchdog(finalizeStalledStream)
+  else clearStreamWatchdog()
+}
+
+/** Watchdog fired: the deltas stopped and no authoritative brief arrived.
+ * Mark the trailing streaming card interrupted — stops its cursor and flips
+ * isStreaming false — instead of leaving it blinking forever. */
+function finalizeStalledStream() {
+  const items = thread.value
+  const last = items[items.length - 1]
+  if (last?.kind === 'frame' && last.frame.type === 'brief_delta') {
+    interruptedStreamIds.value = new Set(interruptedStreamIds.value).add(last.frame.id)
+  }
+}
+
 /** Append a frame to the thread. Thinking/skeleton frames replace their predecessor. */
 export function pushFrame(item: ThreadItem) {
   const t = item.kind === 'frame' ? item.frame.type : null
+
+  // Refresh-in-place: a research_brief may carry `replaces` (the id of an
+  // earlier brief it supersedes — the REFRESH re-run). Swap that card where
+  // it sits so the refreshed answer updates in place instead of stacking
+  // below the stale one (and a same-id re-send can't collide keys). Fall
+  // through to normal handling if the referenced card isn't present —
+  // older-SDK-safe by construction.
+  const replaces =
+    item.kind === 'frame' && item.frame.type === 'research_brief' ? item.frame.replaces : undefined
+  if (replaces) {
+    const prev = thread.value
+    const idx = prev.findIndex((x) => x.frame.id === replaces)
+    if (idx !== -1) {
+      const next = [...prev]
+      next[idx] = item
+      commitThread(next)
+      return
+    }
+  }
 
   // Streaming prose: consecutive brief_delta frames accumulate into ONE
   // growing card (replacing the skeleton they fill). The eventual
@@ -106,14 +153,14 @@ export function pushFrame(item: ThreadItem) {
         kind: 'frame',
         frame: { ...item.frame, text: last.frame.text + item.frame.text },
       }
-      thread.value = [...prev.slice(0, -1), merged]
+      commitThread([...prev.slice(0, -1), merged])
       return
     }
     if (last?.kind === 'frame' && EPHEMERAL.has(last.frame.type)) {
-      thread.value = [...prev.slice(0, -1), item]
+      commitThread([...prev.slice(0, -1), item])
       return
     }
-    thread.value = [...prev, item]
+    commitThread([...prev, item])
     return
   }
 
@@ -136,16 +183,20 @@ export function pushFrame(item: ThreadItem) {
   const lastType = last?.kind === 'frame' ? last.frame.type : null
 
   // Content arriving replaces the transient thinking/skeleton card before it.
-  if (lastType && EPHEMERAL.has(lastType) && t !== null && !EPHEMERAL.has(t)) {
-    thread.value = [...prev.slice(0, -1), item]
+  // Unknown future frames are content too — they render a FallbackCard, so
+  // they must clear the thinking/skeleton card above them the same way known
+  // content does (otherwise the spinner pulses forever above the fallback).
+  const isContent = item.kind === 'unknown' || (t !== null && !EPHEMERAL.has(t))
+  if (lastType && EPHEMERAL.has(lastType) && isContent) {
+    commitThread([...prev.slice(0, -1), item])
     return
   }
   // A skeleton replaces a thinking card.
   if (lastType === 'thinking' && t === 'skeleton') {
-    thread.value = [...prev.slice(0, -1), item]
+    commitThread([...prev.slice(0, -1), item])
     return
   }
-  thread.value = [...prev, item]
+  commitThread([...prev, item])
 }
 
 export function clearPulse() {

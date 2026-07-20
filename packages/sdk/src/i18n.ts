@@ -52,6 +52,7 @@ export type MessageKey =
   | 'jump_latest'
   | 'queued_note' // interpolates {n}
   | 'ticket_offline_hint'
+  | 'action_failed'
   | 'thread_label'
   | 'intro_dialog'
   | 'share_card'
@@ -105,6 +106,7 @@ const en: Catalog = {
   jump_latest: 'LATEST',
   queued_note: '{n} QUEUED — will send when reconnected',
   ticket_offline_hint: 'Reconnect to confirm orders',
+  action_failed: "Couldn't reach the venue — nothing was sent. Tap to retry.",
   thread_label: 'Conversation',
   intro_dialog: 'Introduction',
   share_card: 'Share card',
@@ -159,6 +161,7 @@ const hi: Catalog = {
   jump_latest: 'नवीनतम',
   queued_note: '{n} कतार में — दोबारा जुड़ते ही भेज दिए जाएँगे',
   ticket_offline_hint: 'ऑर्डर कन्फर्म करने के लिए दोबारा जुड़ें',
+  action_failed: 'वेन्यू तक नहीं पहुँच सके — कुछ नहीं भेजा गया। दोबारा कोशिश करें।',
   thread_label: 'बातचीत',
   intro_dialog: 'परिचय',
   share_card: 'शेयर कार्ड',
@@ -214,6 +217,7 @@ const hiLatn: Catalog = {
   jump_latest: 'LATEST',
   queued_note: '{n} QUEUE mein — reconnect hote hi bhej denge',
   ticket_offline_hint: 'Order confirm karne ke liye reconnect karo',
+  action_failed: 'Venue tak nahi pahunch sake — kuch nahi bheja gaya. Retry karo.',
   thread_label: 'Baat-cheet',
   intro_dialog: 'Intro',
   share_card: 'Share card',
@@ -270,6 +274,7 @@ const ar: Catalog = {
   jump_latest: 'الأحدث',
   queued_note: '{n} في قائمة الانتظار — سيتم الإرسال عند إعادة الاتصال',
   ticket_offline_hint: 'أعد الاتصال لتأكيد الأوامر',
+  action_failed: 'تعذّر الوصول إلى المنصّة — لم يُرسَل شيء. اضغط لإعادة المحاولة.',
   thread_label: 'المحادثة',
   intro_dialog: 'المقدمة',
   share_card: 'مشاركة البطاقة',

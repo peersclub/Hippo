@@ -1,7 +1,29 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { banners, orders, pushFrame, thread } from '../src/state.js'
+import { clearStreamWatchdog, interruptedStreamIds } from '../src/streaming.js'
 
 const base = { v: 1 as const, ts: 1 }
+
+// pushFrame arms a real-timer stall watchdog whenever the thread is mid-stream;
+// clear it between tests so a brief_delta tail can't leak a 20s timer.
+afterEach(() => {
+  clearStreamWatchdog()
+  interruptedStreamIds.value = new Set()
+})
+
+const briefFrame = (id: string, extra: Record<string, unknown> = {}) => ({
+  ...base,
+  id,
+  type: 'research_brief' as const,
+  eyebrow: 'MARKET BRIEF',
+  live: true,
+  headline: `brief ${id}`,
+  paragraphs: [],
+  stats: [],
+  sources: [],
+  followups: [],
+  ...extra,
+})
 
 describe('thread store', () => {
   it('replaces thinking → skeleton → content instead of stacking them', () => {
@@ -72,6 +94,72 @@ describe('thread store', () => {
     expect(thread.value).toHaveLength(1)
     const last = thread.value[0]
     expect(last?.kind === 'frame' && last.frame.type).toBe('research_brief')
+  })
+
+  it('replaces a superseded brief in place (REFRESH re-run carries `replaces`)', () => {
+    thread.value = []
+    pushFrame({
+      kind: 'frame',
+      frame: { ...base, id: 'echo', type: 'user_echo', text: 'why is btc down?' },
+    })
+    pushFrame({ kind: 'frame', frame: briefFrame('f1', { headline: 'stale brief' }) })
+    pushFrame({
+      kind: 'frame',
+      frame: { ...base, id: 'echo2', type: 'user_echo', text: 'and eth?' },
+    })
+    expect(thread.value).toHaveLength(3)
+    // Refreshed brief supersedes f1; it must land where f1 sat (index 1),
+    // NOT stack at the end below the newer echo.
+    pushFrame({
+      kind: 'frame',
+      frame: briefFrame('f2', { headline: 'fresh brief', replaces: 'f1' }),
+    })
+    expect(thread.value).toHaveLength(3)
+    const at1 = thread.value[1]
+    expect(at1?.kind === 'frame' && at1.frame.type === 'research_brief' && at1.frame.id).toBe('f2')
+    expect(at1?.kind === 'frame' && at1.frame.type === 'research_brief' && at1.frame.headline).toBe(
+      'fresh brief',
+    )
+    // Order preserved: the trailing echo is still last.
+    const last = thread.value[2]
+    expect(last?.kind === 'frame' && last.frame.id).toBe('echo2')
+  })
+
+  it('appends a `replaces` brief when the referenced card is absent (older-SDK-safe)', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: briefFrame('f1') })
+    // The referenced id was never in this thread (aged out / different client):
+    // fall back to append, never drop the frame.
+    pushFrame({ kind: 'frame', frame: briefFrame('f2', { replaces: 'missing' }) })
+    expect(thread.value).toHaveLength(2)
+    expect(thread.value.map((x) => x.frame.id)).toEqual(['f1', 'f2'])
+  })
+
+  it('lets an unknown future frame clear the thinking card above it', () => {
+    thread.value = []
+    pushFrame({
+      kind: 'frame',
+      frame: { ...base, id: 'echo', type: 'user_echo', text: 'show my watchlist' },
+    })
+    pushFrame({
+      kind: 'frame',
+      frame: { ...base, id: 't1', type: 'thinking', lines: ['Working…'] },
+    })
+    // A frame type this SDK build doesn't know — rendered as a FallbackCard.
+    // It's content, so it must replace the thinking spinner, not sit below it.
+    pushFrame({
+      kind: 'unknown',
+      frame: {
+        ...base,
+        id: 'u1',
+        type: 'watchlist_card',
+        fallback: { text: 'Your watchlist is ready in the app.' },
+      },
+    })
+    expect(thread.value).toHaveLength(2) // echo + fallback; thinking replaced
+    const last = thread.value[1]
+    expect(last?.kind).toBe('unknown')
+    expect(last?.frame.id).toBe('u1')
   })
 
   it('routes orders_snapshot to the orders store, not the thread', () => {

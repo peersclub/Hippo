@@ -64,12 +64,22 @@ export async function dispatch(partial: UplinkPartial): Promise<'sent' | 'queued
   const kind = (partial as { kind: string }).kind
   if (connection.value !== 'live' && isQueueable(kind)) {
     outbox.value = enqueue(outbox.value, { id: nextId++, partial, queuedAt: Date.now() })
+    armDrainRetry()
     return 'queued'
   }
   const ok = await send(partial)
-  if (ok) return 'sent'
+  if (ok) {
+    // A send that lands proves the stream is actually healthy — flush anything
+    // that queued while it merely looked down (gateway 500 / dead session that
+    // never flipped connection off 'live').
+    void drainOutbox()
+    return 'sent'
+  }
   if (isQueueable(kind)) {
     outbox.value = enqueue(outbox.value, { id: nextId++, partial, queuedAt: Date.now() })
+    // Failed though still 'live' → the 'live' subscription won't fire again, so
+    // nothing would ever drain this. Arm the bounded retry ourselves.
+    armDrainRetry()
     return 'queued'
   }
   return 'failed'
@@ -87,6 +97,47 @@ export async function drainOutbox(): Promise<void> {
   }
 }
 
+/** Retry cadence and the ceiling on consecutive no-progress attempts before we
+ * stop spinning (a fresh enqueue or a 'live' transition rearms from zero). */
+export const DRAIN_RETRY_MS = 4000
+export const DRAIN_MAX_ATTEMPTS = 8
+
+let drainTimer: ReturnType<typeof setTimeout> | null = null
+let drainAttempts = 0
+
+/** Cancel the retry loop and reset its budget (outbox drained, or offline). */
+export function cancelDrainRetry(): void {
+  if (drainTimer) clearTimeout(drainTimer)
+  drainTimer = null
+  drainAttempts = 0
+}
+
+/**
+ * Arm the bounded, self-cancelling retry loop. While the connection reads
+ * 'live' and items linger, retry the drain every DRAIN_RETRY_MS; give up after
+ * DRAIN_MAX_ATTEMPTS consecutive attempts that make no progress. Cancels the
+ * moment the outbox empties. Callers rearm on enqueue / reconnect so a stuck
+ * item can't sit forever behind a misleading '{n} QUEUED' row.
+ */
+export function armDrainRetry(): void {
+  if (drainTimer) return // already ticking
+  if (connection.value !== 'live' || outbox.value.length === 0) return
+  if (drainAttempts >= DRAIN_MAX_ATTEMPTS) return
+  drainTimer = setTimeout(async () => {
+    drainTimer = null
+    const before = outbox.value.length
+    await drainOutbox()
+    // Progress (item(s) sent) earns a fresh budget; a no-op counts against it.
+    drainAttempts = outbox.value.length < before ? 0 : drainAttempts + 1
+    armDrainRetry()
+  }, DRAIN_RETRY_MS)
+}
+
 connection.subscribe((v) => {
-  if (v === 'live') void drainOutbox()
+  if (v === 'live') {
+    drainAttempts = 0
+    void drainOutbox().then(armDrainRetry)
+  } else {
+    cancelDrainRetry()
+  }
 })
