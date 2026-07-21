@@ -31,6 +31,11 @@ export type VenueEvent = {
   ticketId: string
   phase: 'awaiting_confirm' | 'filled' | 'partial' | 'cancelled' | 'expired'
   statusLine: string
+  /** Progress stage inside the phase — open string vocabulary (mirrors the
+   * seam's LifecycleEvent and the protocol's additive LifecycleFrame.stage). */
+  stage?: string
+  /** Whether the trader can still cancel — venue placement acks say so. */
+  cancellable?: boolean
   venueOrderId?: string
   fillPct?: number
   rows?: Array<{ label: string; value: string }>

@@ -150,19 +150,23 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .srcs{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
 .src{font-family:var(--hippo-font-mono);font-size:9px;padding:3px 8px;border-radius:var(--hippo-radius-pill);background:rgba(var(--hippo-white-rgb),.06);color:var(--hippo-text-dim-2)}
 /* live bar */
-.livebar{display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:9px;
+.livebar{display:flex;align-items:center;gap:10px;row-gap:4px;flex-wrap:wrap;margin-top:10px;padding-top:9px;
   border-top:1px dashed rgba(var(--hippo-white-rgb),.08);font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em}
-.livebar .asof{color:var(--hippo-text-faint);margin-inline-end:auto;transition:color .3s}
+.livebar .asof{color:var(--hippo-text-faint);margin-inline-end:auto;transition:color .3s;white-space:nowrap}
 .livebar .asof.flash{color:var(--hippo-amber)}
-.livebar button{color:var(--hippo-text-dim-2);font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em;padding:2px 0}
+/* refresh-land flash — the brand's "flash" verb, cleared after LANDED_FLASH_MS */
+.livebar .asof.landed{color:var(--hippo-amber)}
+.livebar button{display:inline-flex;align-items:center;gap:3px;min-height:24px;padding:2px 4px;
+  color:var(--hippo-text-dim-2);font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em}
 .livebar button:hover{color:var(--hippo-amber)}
 /* stale data — declared, never silent: as-of turns amber, REFRESH gets loud */
 .livebar.stale .asof{color:var(--hippo-amber)}
 .livebar.stale .rf{background:var(--hippo-amber);color:var(--hippo-amber-ink);font-weight:600;padding:4px 9px;border-radius:var(--hippo-radius-pill)}
 .livebar.stale .rf:hover{color:var(--hippo-amber-ink)}
-.fb{display:flex;gap:7px;align-items:center}
-.fb button{font-size:12px;filter:grayscale(1);opacity:.5}
-.fb button:hover{opacity:.95}
+.fb{display:flex;gap:4px;align-items:center}
+.fb button{color:var(--hippo-text-faint);transition:color .15s}
+.fb button:hover{color:var(--hippo-amber)}
+.fb svg{display:block}
 .fb .done{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em;color:var(--hippo-amber)}
 /* 👎 follow-up — one line in the live-bar area; reasons map 1:1 to eval criteria */
 .fbask{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;
@@ -199,6 +203,29 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .await .cxl{margin-inline-start:auto;color:var(--hippo-text-faint);font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em}
 .await .cxl:hover{color:var(--hippo-down)}
 .ticket.ok{border-color:rgba(var(--hippo-up-rgb),.45)}
+/* per-state modifiers — prototype contract: partial/expired = amber attention,
+   cancelled = neutral grey (no judgment, never red), err = rejections only */
+.ticket.part{border-color:rgba(var(--hippo-amber-rgb),.45)}
+.ticket .side.dim{background:rgba(var(--hippo-white-rgb),.08);color:var(--hippo-text-dim)}
+.ticket.cxl{border-color:rgba(var(--hippo-white-rgb),.16)}
+.ticket.err{border-color:rgba(var(--hippo-down-rgb),.45)}
+.errbody{font-size:12px;line-height:1.5;color:var(--hippo-down);opacity:.85;padding:8px 0}
+/* order journey — mono step line; transitions ONLY on real server frames */
+.journey{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:10px 13px 0;
+  font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em}
+.journey .stp{display:inline-flex;align-items:center;gap:4px;color:var(--hippo-text-faint)}
+.journey .stp+.stp::before{content:'›';margin-inline-end:5px;color:var(--hippo-text-faint);opacity:.6}
+.journey .stp.done{color:var(--hippo-text-dim-2)}
+.journey .stp.done .tick{color:var(--hippo-amber)}
+.journey .stp.active{color:var(--hippo-amber)}
+.journey .pulse{width:6px;height:6px;border-radius:50%;background:var(--hippo-amber);animation:hpulse 1.2s ease infinite}
+/* fill bar — width IS the server's fillPct; motion stays in the pulse dot */
+.fillwrap{padding:4px 13px 10px}
+.fillmeta{display:flex;justify-content:space-between;font-family:var(--hippo-font-mono);font-size:9px;
+  letter-spacing:.1em;color:var(--hippo-text-dim);margin-bottom:5px}
+.fillmeta .pct{color:var(--hippo-amber);font-weight:500}
+.fillbar{height:5px;border-radius:3px;background:rgba(var(--hippo-white-rgb),.08);overflow:hidden}
+.fillbar span{display:block;height:100%;border-radius:3px;background:var(--hippo-amber);transition:width .4s ease}
 .oid{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.1em;color:var(--hippo-text-faint);text-align:center;padding-bottom:11px}
 /* decline */
 .decline{align-self:flex-start;max-width:94%;border-radius:15px;overflow:hidden;background:var(--hippo-card);
@@ -223,6 +250,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .sk-line.short{width:55%}
 .sk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px}
 .sk-cell{height:38px;border-radius:9px}
+.sk-cta{height:34px;border-radius:11px;margin-top:10px}
 /* streaming brief prose (brief_delta) */
 .stream-text{white-space:pre-wrap}
 .stream-cursor{display:inline-block;width:7px;height:12px;margin-left:2px;vertical-align:-1px;
@@ -233,6 +261,13 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 /* REFRESH held pending until the replacing brief lands (never a fixed flash) */
 .livebar .rf.pending{opacity:.6;cursor:default}
 .livebar.stale .rf.pending{opacity:.75}
+/* reduced motion: kill every pulse/shimmer/width-slide — a hard brand rule */
+@media (prefers-reduced-motion:reduce){
+  .await .pulse,.think .dot,.stream-cursor,.journey .pulse{animation:none}
+  .sk{animation:none}
+  .fillbar span{transition:none}
+  .livebar .asof{transition:none}
+}
 /* positions */
 .pos-row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;font-family:var(--hippo-font-mono);font-size:11px}
 .pos-row+.pos-row{border-top:1px dashed rgba(var(--hippo-white-rgb),.09)}

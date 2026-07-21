@@ -56,7 +56,7 @@ describe('sim venue adapter', () => {
     expect(ticket.rows[2]).toEqual({ label: 'Limit price', value: '60,000' })
   })
 
-  it('confirm emits a filled event with fill actuals; cancel prevents it', async () => {
+  it('confirm emits placement (working) then a filled event with fill actuals; cancel prevents the fill', async () => {
     const adapter = new SimVenueAdapter({ fillDelayMs: 10 })
     const events: LifecycleEvent[] = []
     adapter.onEvent((e) => events.push(e))
@@ -64,16 +64,20 @@ describe('sim venue adapter', () => {
     const t1 = await adapter.prepare(prepareBody as unknown as PrepareRequest)
     await adapter.confirm(t1.ticketId)
     await new Promise((r) => setTimeout(r, 40))
-    expect(events).toHaveLength(1)
-    expect(events[0]?.phase).toBe('filled')
-    expect(events[0]?.venueOrderId).toMatch(/^SIM-/)
-    expect(events[0]?.rows?.map((r) => r.label)).toContain('Fees (actual)')
+    expect(events.map((e) => e.phase)).toEqual(['awaiting_confirm', 'filled'])
+    // The placement ack: the order IS on the venue before any fill news.
+    expect(events[0]?.stage).toBe('working')
+    expect(events[0]?.cancellable).toBe(true)
+    expect(events[1]?.venueOrderId).toMatch(/^SIM-/)
+    expect(events[1]?.rows?.map((r) => r.label)).toContain('Fees (actual)')
 
     const t2 = await adapter.prepare(prepareBody as unknown as PrepareRequest)
     await adapter.confirm(t2.ticketId)
     expect(await adapter.cancel(t2.ticketId)).toBe(true)
     await new Promise((r) => setTimeout(r, 40))
-    expect(events).toHaveLength(1) // no fill for the cancelled ticket
+    // The second ticket got its working ack but never a fill.
+    expect(events.filter((e) => e.phase === 'filled')).toHaveLength(1)
+    expect(events).toHaveLength(3)
   })
 
   it('rejects nonsense sizes', async () => {
@@ -113,11 +117,17 @@ describe('seam service HTTP surface', () => {
     expect(confirm.statusCode).toBe(202)
 
     await new Promise((r) => setTimeout(r, 60))
-    expect(deliveries).toHaveLength(1)
-    expect(deliveries[0]).toMatchObject({ ticketId, phase: 'filled' })
+    // Two honest deliveries now: placement ack (working), then the fill.
+    expect(deliveries).toHaveLength(2)
+    expect(deliveries[0]).toMatchObject({ ticketId, phase: 'awaiting_confirm', stage: 'working' })
+    expect(deliveries[1]).toMatchObject({ ticketId, phase: 'filled' })
 
+    // The working ack's delivery races the confirm audit row on the microtask
+    // queue — assert content, not interleaving.
     const kinds = app.audit.map((a) => a.kind)
-    expect(kinds).toEqual(['prepare', 'confirm', 'event_delivered'])
+    expect(kinds[0]).toBe('prepare')
+    expect(kinds.filter((k) => k === 'confirm')).toHaveLength(1)
+    expect(kinds.filter((k) => k === 'event_delivered')).toHaveLength(2)
     expect(app.audit.every((a) => a.idempotencyKey.startsWith('idem_'))).toBe(true)
     await app.close()
   })
@@ -178,7 +188,9 @@ describe('seam service HTTP surface', () => {
     })
     expect(res.json()).toEqual({ cancelled: true })
     await new Promise((r) => setTimeout(r, 40))
-    expect(deliveries).toHaveLength(0)
+    // Only the placement ack was delivered — the cancel prevented the fill.
+    expect(deliveries.map((d) => d.phase)).toEqual(['awaiting_confirm'])
+    expect(deliveries[0]?.stage).toBe('working')
     await app.close()
   })
 

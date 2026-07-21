@@ -244,6 +244,16 @@ export class SimVenueAdapter implements VenueAdapter {
     if (!ticket) throw new Error(`unknown ticket ${ticketId}`)
     ticket.confirmed = true
 
+    // The order IS on the (simulated) venue from this moment — say so before
+    // the fill lands, exactly like a real venue's placement ack.
+    this.handler({
+      ticketId,
+      phase: 'awaiting_confirm',
+      stage: 'working',
+      statusLine: 'PLACED — WORKING',
+      cancellable: true,
+    })
+
     // SIMULATION — a real venue confirms with the trader, then its webhooks
     // land here. The fill uses the actuals captured at prepare time.
     ticket.fillTimer = setTimeout(() => {

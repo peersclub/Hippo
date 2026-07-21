@@ -443,7 +443,15 @@ function Thread() {
         {items.length === 0 && <EmptyHero />}
         {items.map((item) =>
           item.kind === 'frame' ? (
-            <FrameWrap key={item.frame.id}>{renderFrame(item.frame)}</FrameWrap>
+            // Lifecycle cards key by TICKET, not frame id: the store collapses
+            // the journey in place, and a stable key means the update doesn't
+            // remount (no re-run of the card-in animation, no strobing on
+            // partial ticks, cancel-failed state survives).
+            <FrameWrap
+              key={item.frame.type === 'lifecycle' ? `lc:${item.frame.ticketId}` : item.frame.id}
+            >
+              {renderFrame(item.frame)}
+            </FrameWrap>
           ) : (
             <FallbackCard key={item.frame.id} frame={item.frame} />
           ),

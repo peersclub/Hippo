@@ -135,7 +135,7 @@ pnpm dev</pre>
     <tr><th>Do this</th><th>Expected</th></tr>
     <tr><td>Kill the AI service: <code>pkill -f uvicorn</code>, then ask a research question</td><td>Never-500: you still get a truthful market-data-only brief + an amber “HIGH MARKET LOAD” banner (once per episode). Orders and prices keep working. Restart with <code>pnpm dev</code>.</td></tr>
     <tr><td>Restart the gateway while the panel is open</td><td>The SSE stream drops; the SDK re-mints a fresh session (backoff 1s→30s) instead of hanging on “Reconnecting”. On the in-memory dev stack thread history is lost on that restart (durable cold-resume needs Redis).</td></tr>
-    <tr><td>Leave an order in “WAITING FOR YOUR CONFIRM” with no venue event</td><td>After <code>TICKET_EVENT_TIMEOUT_MS</code> (10 min) a backstop closes the card with a terminal “expired” frame — it can't hang forever.</td></tr>
+    <tr><td>Leave an order in “PLACED — WORKING” with no venue event</td><td>After <code>TICKET_EVENT_TIMEOUT_MS</code> (10 min) a backstop closes the card with a terminal “expired” frame — it can't hang forever.</td></tr>
     <tr><td>Stop the server mid-stream</td><td>20s after the last delta a client watchdog finalizes the card (cursor stops) instead of blinking forever.</td></tr>
     <tr><td>Queue actions offline (chip tap / feedback / settings), then reconnect</td><td>Queueable uplinks buffer (FIFO, cap 20) with an “{n} QUEUED” row and drain in order on reconnect. Trading actions are never queued — they fail loud.</td></tr>
   </table>

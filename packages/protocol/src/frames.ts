@@ -86,7 +86,17 @@ export const LifecycleFrame = z.object({
   type: z.literal('lifecycle'),
   ticketId: z.string(),
   phase: z.enum(['awaiting_confirm', 'filled', 'partial', 'cancelled', 'expired']),
-  statusLine: z.string(), // e.g. "WAITING FOR YOUR CONFIRM ON KOINBX"
+  statusLine: z.string(), // e.g. "SENDING ORDER TO ASSETWORKS…"
+  /** Progress stage riding INSIDE the phase — an open string vocabulary, not
+   * an enum: a new phase value would fail old-SDK parse, and a new stage enum
+   * member would fail NEW-SDK parse the same way one level down. Servers may
+   * grow this set freely; clients map the values they know ('placing',
+   * 'working', 'cancel_pending') and MUST render unknown stages as the bare
+   * phase — ignore, never fail. */
+  stage: z.string().optional(),
+  /** Side of the underlying ticket so receipts can read "BUY · FILLED".
+   * Mirrors OrderTicketFrame.side — a stable closed set. */
+  side: z.enum(['buy', 'sell']).optional(),
   venueOrderId: z.string().optional(),
   fillPct: z.number().min(0).max(100).optional(),
   rows: z.array(z.object({ label: z.string(), value: z.string() })).default([]),

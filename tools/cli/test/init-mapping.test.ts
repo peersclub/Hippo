@@ -120,7 +120,10 @@ describe('renderMappingTs — generated module', () => {
     )
   })
 
-  it('TYPECHECKS as a standalone strict TypeScript module', () => {
+  // A full ts.createProgram run takes >5s on loaded CI runners — the default
+  // vitest timeout made this the repo's standing flake. Generous budget: the
+  // assertion is about diagnostics, not speed.
+  it('TYPECHECKS as a standalone strict TypeScript module', { timeout: 30_000 }, () => {
     const diagnostics = typecheck(source)
     const messages = diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'))
     expect(messages, messages.join('\n')).toHaveLength(0)
