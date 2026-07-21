@@ -1,7 +1,7 @@
 # Hippo — Development Documentation (as-built)
 
 **Snapshot:** July 20, 2026 · `hippo-app@main` @ `19e79f5` · Phases 0–3 core merged; execution seam, partner admin portal, and the Assetworks test host all live.
-**What this is:** a technical reference to what's *actually running*, verified against the current code, the port map, and a full test run this session — not the plan. For the forward spec see [[00 Build Plan Overview]]; for phase-by-phase ✅/🚧/⬜ status see [[Roadmap]] or [[Hippo Dev Progress]] (visual roadmap + kanban). For the current production-hardening handoff see [[Jul 20 Dev]]; for the live cloud footprint see the deployment note.
+**What this is:** a technical reference to what's *actually running*, verified against the current code, the port map, and a full test run this session — not the plan. For the forward spec see [[00 Build Plan Overview]]; for phase-by-phase ✅/🚧/⬜ status see [[Roadmap]] or [[Hippo Dev Progress]] (visual roadmap + kanban). For the current production-hardening handoff see [[🟢 Live Demo Status]]; for the live cloud footprint see the deployment note.
 
 > **Editing surface vs. mirror:** this vault (iCloud Obsidian) is the canonical editing surface. `hippo-app/docs/vault` is a read-only git mirror refreshed by `scripts/sync-vault.sh` — edit here, then sync to version the change in the repo.
 
@@ -180,7 +180,7 @@ Preact, closed Shadow DOM, two-stage loader (~1.1KB gz first stage). Renderer (`
 
 ## The trust boundary (auth hardening)
 
-The July-18 prod-readiness audit found the product loop worked end to end but internal services trusted each other via unimplemented mTLS. That gap is now closed at Tier-1 (see [[Jul 20 Dev]] for the blocker ledger):
+The July-18 prod-readiness audit found the product loop worked end to end but internal services trusted each other via unimplemented mTLS. That gap is now closed at Tier-1 (see [[🟢 Live Demo Status]] for the blocker ledger):
 
 - **Internal API token**, timing-safe and fail-closed, guards the seam trading surface (#2), the gateway `/internal/venue-events` callback (#3), and the memory persona PII routes (#7).
 - **`SEAM_CALLBACK_ALLOWED_ORIGINS`** SSRF allowlist on seam `callbackUrl` (#6).
@@ -208,4 +208,4 @@ Live cloud footprint runs on **Railway** (services, per-service Dockerfiles in `
 4. Real **bake-off** run against a larger baseline once GPU access lands (Phase 2 exit gate).
 5. Deploy `host-venue` + `assetworks-exchange` (Railway/Vercel config) and rotate the live OpenRouter key.
 
-Related: [[00 Build Plan Overview]] · [[04 Execution Seam & Partner Adapter]] · [[10 BE Architecture]] · [[12 Partner Admin Portal]] · [[Jul 20 Dev]] · [[Roadmap]] · [[Open Decisions]] · [[Hippo Dev Progress]]
+Related: [[00 Build Plan Overview]] · [[04 Execution Seam & Partner Adapter]] · [[10 BE Architecture]] · [[12 Partner Admin Portal]] · [[🟢 Live Demo Status]] · [[Roadmap]] · [[Open Decisions]] · [[Hippo Dev Progress]]

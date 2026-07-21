@@ -168,7 +168,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   <div class="wrap">
     <div class="eyebrow dim">THE CARD VOCABULARY</div>
     <h2>The server speaks in cards.</h2>
-    <p class="lede">Protocol frames render into a fixed vocabulary — the SDK draws, it never computes. Money arrives as pre-formatted display strings; a hallucinated figure cannot reach a stat cell because numbers are retrieval, prose is generation.</p>
+    <p class="lede">Protocol frames render into a fixed vocabulary — the SDK draws, it never computes. Money arrives as pre-formatted display strings; a hallucinated figure cannot reach a stat cell because numbers are retrieval, prose is generation. The vocabulary is capability-gated: a futures ticket only renders where the venue declares perp support.</p>
     <div class="grid2" style="align-items:start">
       <div class="voc">
         <div class="voc-label">USER ECHO</div>
@@ -198,6 +198,16 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
           <div class="d-trow" style="border-bottom:none"><span class="k">EST. COST</span><span class="v" style="color:var(--hippo-amber)">₹5,31,904 incl. fees</span></div>
           <button type="button" class="d-cta display" tabindex="-1">Review &amp; confirm in your app →</button>
           <div class="d-note">NOTHING EXECUTES WITHOUT YOUR CONFIRM</div>
+        </div>
+        <div class="voc-label" style="margin-top:10px">FUTURES TICKET · PERP — CAPABILITY-GATED</div>
+        <div class="d-ticket">
+          <div class="d-eyebrow" style="color:var(--hippo-amber)">ORDER TICKET · PERP · PREPARED</div>
+          <div class="d-trow"><span class="k">INSTRUMENT</span><span class="v">BTC-PERP · 10× CROSS</span></div>
+          <div class="d-trow"><span class="k">SIDE / SIZE</span><span class="v" style="color:var(--hippo-up)">LONG · 0.5 BTC</span></div>
+          <div class="d-trow"><span class="k">MARGIN</span><span class="v">₹2,65,952</span></div>
+          <div class="d-trow" style="border-bottom:none"><span class="k">EST. LIQ.</span><span class="v" style="color:var(--hippo-down)">₹4,52,118</span></div>
+          <button type="button" class="d-cta display" tabindex="-1">Review &amp; confirm in your app →</button>
+          <div class="d-note">RENDERS ONLY WHERE THE VENUE DECLARES PERP SUPPORT</div>
         </div>
         <div class="voc-label" style="margin-top:10px">ADVICE DECLINE — THE GUARDRAIL, VISIBLE</div>
         <div class="d-decline">
@@ -266,7 +276,7 @@ document.querySelector('hippo-root').dataset.theme = 'light'</pre>
         <a href="/#trust">Trust</a>
         <a class="on" href="/design">Design</a>
         <a href="/sdk">SDK</a>
-      <a href="/roadmap">Roadmap</a>
+        <a href="/roadmap">Roadmap</a>
       </nav>
     </div>
     <div class="fine">DARK GLASS INSTRUMENT · ONE ACCENT · UP/DOWN ARE SEMANTICS · DARK IS THE LOCKED HERO</div>

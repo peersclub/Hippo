@@ -1,11 +1,12 @@
 # 🦛 Hippo Roadmap — Done vs Pending
 
-**As of:** July 18, 2026 (evening) · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `4abbafc`) · Detail per phase: [[00 Build Plan Overview]]
+**As of:** July 21, 2026 · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `cd2b804`) · Detail per phase: [[00 Build Plan Overview]] · Live links + creds: [[🟢 Live Demo Status]]
 
 > [!summary] Where we are
-> Phase 0 ✅ done · Phase 1 (SDK) ✅ core complete (postures #12, i18n Phase 1 #15, fold release, stop control #18) · Phase 2 (intelligence backend) ✅ core + Redis stores + OTel **merged to main**; bake-off pending (GPU) · Phase 3 (execution seam) 🚧 seam + sim + KoinBX adapter **merged to main**; blocked on Open Decisions #6/#9 · Phase 4 (CLI) 🚧 scan → conform → config codegen → `embed`/`verify` (stages 5–6, #19) all landed; model-driven codegen pending · Phase 5 (pilot) ⬜ · **Ops: admin panel + durable stores + provisioning (`hippo register`) merged to main**.
-> **New workstream (July 16–18): trade capabilities** — canonical order model keystone (#16) and trade-type discovery in `hippo scan` (#20) **both merged July 18**; the seam/intelligence/SDK capability modules are WIP in the `wt-cap-*` worktrees (rebase onto main now that the keystone landed). Arabic chrome copy (#17) also merged — dormant until a partner sets `ar`; native review gates activation. **Partner portal V1 merged ([PR #21](https://github.com/peersclub/Hippo/pull/21))**.
-> The whole conversational loop is **verified end-to-end on main**: protocol turn → gateway orchestrator → intent/research engines (Ollama qwen3:4b) → live market data → research_brief / advice_decline / order_ticket frames — including the degraded-mode banner path when the model is cold.
+> Phase 0 ✅ done · Phase 1 (SDK) ✅ core complete (postures #12, i18n Phase 1 #15, fold release, stop control #18, partner-token session mint #27) · Phase 2 (intelligence backend) ✅ core + Redis stores + OTel **merged to main**; bake-off pending (GPU) · Phase 3 (execution seam) ✅ seam + sim + **Assetworks** adapter + **conversational futures/perps (#28)** merged to main; exit gate blocked on Open Decisions #6/#9 · Phase 4 (CLI) 🚧 scan → conform → config codegen → `embed`/`verify` (stages 5–6, #19) all landed; model-driven codegen pending · Phase 5 (pilot) ⬜ · **Ops: admin panel + durable stores + provisioning (`hippo register`) + partner portal V1 merged to main**.
+> **Trade capabilities — DONE.** Canonical order model keystone (#16) + trade-type discovery (#20) + **the full capability modules across seam/intelligence/SDK landed via [PR #28](https://github.com/peersclub/Hippo/pull/28)** (`6383e0f`): order plans, `capabilities()`, `/v1/prepare-order`, conversational perps ("long 0.5 BTC 10x") end to end. The `wt-cap-*` worktrees are now superseded. Arabic chrome copy (#17) merged — dormant until a partner sets `ar`; native review gates activation.
+> **Venue = Assetworks.** Per Victor "no KoinBX in Hippo for now" — the KoinBX venue adapter was removed (`e6660cb`), the client display name renamed KoinBX → Assetworks everywhere (`2e5e4ab`/`cd2b804`), and the demo partner slug renamed `koinbx-demo` → `assetworks-demo` (`418f7e1`). A self-contained **Assetworks test host** (`services/host-venue` + Next.js host app) is the venue Hippo parasites onto.
+> **Live and shareable.** All 7 services on Railway + 4 frontends on Vercel; the full loop is verified over the public link — token endpoint → Bearer mint → streaming research brief (`anthropic/claude-haiku-4.5`) → prepared order ticket. Links + creds in [[🟢 Live Demo Status]]. The conversational loop is verified end-to-end (protocol turn → orchestrator → intent/research → live market data → research_brief / advice_decline / order_ticket frames, including the degraded-mode banner path).
 
 ---
 
@@ -34,8 +35,17 @@
 
 ## 🔄 In flight (PRs open / WIP)
 
-- [ ] **Capability modules, uncommitted in worktrees** (rebase onto main — keystone #16 is in): `wt-cap-seam` (order-plans across seam: venue adapters, types, service — the biggest WIP) · `wt-cap-intelligence` (`services/intelligence/capabilities/`) · `wt-cap-sdk` (render test scaffolding)
+- [ ] **Model-driven adapter codegen** — deterministic half done (`hippo scan` drafts `adapter.config.yaml`); pending the model-driven `mapping.ts` for divergent shapes + `rejections.yaml`
+- [ ] **Tier-2 durability** — durable ticket routing + durable seam audit store (next migration `009`) so nothing rides only in memory
+- [ ] **Cloud-wire the Assetworks host** — the Next.js host app is parked on branch `assetworks-exchange-app` (its `next` dep crashes Railway's Metal builder); the `host-venue` service still needs Railway wiring. See [[🟢 Live Demo Status]] known issues
 - [ ] `ar` **native-speaker review** (Kartik/MENA) — gates enabling `data-hippo-locale="ar"` for any Arabic-market partner; copy itself is merged (#17)
+
+### Merged July 20–21 — conversational futures, Assetworks, live deploy
+- [x] **Conversational futures / perps — end to end** ([PR #28](https://github.com/peersclub/Hippo/pull/28), `6383e0f`) — finished + integrated the stranded `wt-cap-*` WIP onto main. Seam gains `OrderPlan` (spot/futures_perp/options) + `VenueAdapter.capabilities()` + optional `prepareOrder(plan)` + `GET /v1/capabilities` + `POST /v1/prepare-order` (capability-gated, 422 for unsupported, spot-fallback). `intent.py` parses perps ("long 0.5 BTC 10x" / "short 1 ETH 20x cross" / "close long"); gateway `OrderIntent` perp fields + orchestrator routes `futures_perp` to the plan path. **Spot stays byte-identical.** sim enables all 3 caps; Assetworks reads caps live from the host `/v1/capabilities` and places perps. Verified live + 31 seam / 83 gateway / 33 intent tests
+- [x] **SDK partner-token session mint** ([PR #27](https://github.com/peersclub/Hippo/pull/27)) — a `data-hippo-token-url` attribute fetches a fresh Bearer per mint from the partner's own endpoint; no long-lived secret ever sits in the page. This is the production trust topology (blocker #4-SDK closed)
+- [x] **Assetworks test host + adapter** (`5875aa6`) — self-contained venue `services/host-venue` :8796 on the HMAC-signed trade wire with a spot+perps fill engine; `services/seam/src/assetworks-venue.ts` (`VENUE=assetworks`), both confirm surfaces (`api` + `js_callback`) read live from host admin. `apps/host-demo` rebuilt as the Assetworks Exchange UI
+- [x] **Venue = Assetworks, KoinBX removed** — KoinBX venue adapter deleted (`e6660cb`, "no KoinBX in Hippo for now"); seam venues are now `sim` + `assetworks`. Client display name renamed KoinBX → Assetworks everywhere (`2e5e4ab` / `cd2b804`); demo partner slug `koinbx-demo` → `assetworks-demo` (`418f7e1`). Zero KoinBX left in tracked source
+- [x] **Cloud deploy — Railway + Vercel, live loop verified** — all 7 backend services + Postgres + Redis on Railway (intelligence in `mode=llm model=anthropic/claude-haiku-4.5`), 4 frontends on Vercel; `HIPPO_DEV=0` (no anonymous minting). Full loop verified over the public link. Non-ephemeral JWT secrets + Secure cookies ([PR #25](https://github.com/peersclub/Hippo/pull/25)) closed the redeploy-logout blocker. See [[🟢 Live Demo Status]]
 
 ### Merged July 20 — product-hardening batch (multi-agent audit + fix)
 A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, services, and the protocol use-case matrix, then fixes in disjoint lanes over two batches:
@@ -110,18 +120,20 @@ A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, se
 ### Phase 3 — Execution seam (merged to main; exit gate blocked on partner)
 - [x] Canonical trading interface: `services/seam` — prepare→confirm→cancel→portfolio over the `VenueAdapter` contract, HTTP surface + idempotency audit log, sim venue for dev
 - [x] Approach A handoff wired end to end: prepared ticket → `order_ticket` card → confirm → `awaiting_confirm` lifecycle card → venue event → `filled` card (protocol + gateway orchestrator + SDK renderer, live on the branch)
-- [x] **Hand-built KoinBX pilot adapter** (`koinbx-venue.ts`) — HMAC-signed against the real private-api-trade (`orders`/`cancel`/`open`/`balance`), quote-only prepare, place-on-confirm, poll reconciler as the webhook backstop with a terminal timeout frame. VENUE=koinbx|sim. The CLI codegen target.
-- [ ] Confirm-surface (deep link / JS callback / hosted modal) — [[Open Decisions]] #6, needs pilot-partner eng; only the `api` surface is wired
-- [ ] Order lifecycle feedback from KoinBX — [[Open Decisions]] #9: no status-by-id or webhook exists yet; blocks reliable terminal state
-- [ ] Exit gate: full lifecycle round-trip in partner sandbox (blocked on #6 + #9 + live keys)
+- [x] **Capability-driven order plans** (PR #28) — `OrderPlan` (spot/futures_perp/options) + `VenueAdapter.capabilities()` + `GET /v1/capabilities` + `POST /v1/prepare-order` (capability-gated, 422 for unsupported); sim enables all three, Assetworks places perps live. The trade keystone, fully wired
+- [x] **Assetworks venue adapter** (`assetworks-venue.ts`, `VENUE=assetworks`) — HMAC-signed against the `host-venue` test exchange (`orders`/`cancel`/`open`/`balance`), quote-only prepare, place-on-confirm, poll reconciler as the webhook backstop with a terminal timeout frame; supports both `api` and `js_callback` confirm surfaces (read live from host admin). Replaced the removed KoinBX adapter (`e6660cb`); the CLI codegen target
+- [x] Approach A handoff wired end to end: prepared ticket → `order_ticket` card → confirm → `awaiting_confirm` lifecycle card → venue event → `filled` card
+- [~] Confirm-surface — `api` + `js_callback` wired against the Assetworks host; deep-link / partner-hosted-modal variants still need a real pilot partner ([[Open Decisions]] #6)
+- [ ] Order lifecycle feedback from a real spot pilot venue — [[Open Decisions]] #9: a venue with no status-by-id or webhook blocks reliable terminal state; poll reconciler is the backstop
+- [ ] Exit gate: full lifecycle round-trip in a real partner sandbox (blocked on #6 + #9 + live keys)
 
 ### Phase 4 — Agentic installer remainder
 - [x] **CTI conformance suite — the verifier** (`tools/cli/src/conform`, on `feat/cli-conformance`): behavioural counterpart to `scan/cti.ts`; `runConformance` drives any adapter through the CTI contract (prepare market/limit, display-string tickets, reject bad size, confirm→terminal lifecycle, cancel pre/post-confirm, portfolio shape) → Markdown report + verdict. Pure, own contract types, 7 tests. Built first per BP/05 "verifier before generator."
-- [x] Wire the verifier to real adapters: `@hippo/seam` library export (`src/lib.ts`) + in-process driver + `hippo conform --venue sim|koinbx` command. **Dogfood green:** the suite certifies the real `SimVenueAdapter` as Conformant (KoinBX dogfood needs live keys)
-- [~] Adapter codegen — **deterministic half done**: `draftAdapterConfig(scan)` → `adapter.config.yaml` (CTI capability → discovered endpoint + auth strategy + gap/mapping flags); `hippo scan` now emits it alongside the report. Pending (model-driven stage 4): `mapping.ts` for divergent shapes + `rejections.yaml`, KoinBX adapter as golden reference
+- [x] Wire the verifier to real adapters: `@hippo/seam` library export (`src/lib.ts`) + in-process driver + `hippo conform --venue sim|assetworks` command. **Dogfood green:** the suite certifies the real `SimVenueAdapter` as Conformant (Assetworks dogfood runs against the `host-venue` test exchange)
+- [~] Adapter codegen — **deterministic half done**: `draftAdapterConfig(scan)` → `adapter.config.yaml` (CTI capability → discovered endpoint + auth strategy + gap/mapping flags); `hippo scan` now emits it alongside the report. Pending (model-driven stage 4): `mapping.ts` for divergent shapes + `rejections.yaml`, the Assetworks adapter as golden reference
 - [x] Embed injection — `hippo embed` + `hippo verify` merged ([PR #19](https://github.com/peersclub/Hippo/pull/19), deterministic stages 5–6); provisioning via `hippo register` (`34a30c3`)
 - [ ] Theming extraction (partner accent beyond light/dark)
-- [ ] Dogfood: regenerate KoinBX adapter via CLI, diff vs hand-built = quality score
+- [ ] Dogfood: regenerate the Assetworks adapter via CLI, diff vs hand-built = quality score
 - [ ] Exit gate: second venue integrated end-to-end with < 1 day human review
 
 ### Phase 5 — Pilot launch (not started)
@@ -150,12 +162,12 @@ A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, se
 | 1 | [[01 System Architecture\|Architecture & protocol]] | ✅ | protocol v1, topology locked | protocol additions for lifecycle |
 | 2 | [[02 Thin Client SDK\|Thin client SDK]] | ✅ core | renderer, onboarding, edge states, postures (#12), i18n Phase 1 (#15) + Arabic copy (#17, dormant), fold release, stop control (#18), mobile WebView shell | ar/hi/hi-Latn native review, stop-line review, capability-aware ticket chrome (`wt-cap-sdk`) |
 | 3 | [[03 Intelligence Layer\|Intelligence layer]] | ✅ core on main | intent + research + cache + guardrail + streaming (#8, #9), market-data, gateway wiring (#7), memory v1 (#10), Redis + OTel (#13) | bake-off (GPU), capability awareness (`wt-cap-intelligence` WIP) |
-| 4 | [[04 Execution Seam & Partner Adapter\|Execution seam]] | ✅ on main | canonical interface + sim + KoinBX adapter (merged); conformance-certified sim | confirm-surface (#6), venue lifecycle feedback (#9), sandbox round-trip; order-plans WIP (`wt-cap-seam`) |
-| 5 | [[05 Agentic Installer — Hippo CLI\|Agentic installer]] | 🚧 ~75% | `hippo scan` v0, CTI conformance, config codegen, `register` (WS-1), `embed` + `verify` (#19), trade-type discovery (#20, merged) | model-driven `mapping.ts` codegen, theming extraction, KoinBX dogfood (needs live keys) |
+| 4 | [[04 Execution Seam & Partner Adapter\|Execution seam]] | ✅ on main | canonical interface + sim + **Assetworks** adapter + order-plans/capabilities + conversational perps (#28); conformance-certified sim | confirm-surface variants (#6), real-venue lifecycle feedback (#9), sandbox round-trip |
+| 5 | [[05 Agentic Installer — Hippo CLI\|Agentic installer]] | 🚧 ~75% | `hippo scan` v0, CTI conformance, config codegen, `register` (WS-1), `embed` + `verify` (#19), trade-type discovery (#20, merged) | model-driven `mapping.ts` codegen, theming extraction, Assetworks dogfood |
 | 6 | [[06 Eval Harness & Data\|Eval harness]] | ✅ v1 | 300-query set, runner, gates | run the bake-off, continuous probing |
 | 7 | [[07 Infrastructure & Pods\|Infra & pods]] | ⬜ | local dev only (compose postgres :5433) | GPU quotes, vLLM pods |
 | 8 | Admin panel & durable stores | ✅ merged | `packages/stores` (Postgres-or-memory), memory admin surface, gateway enforcement (suspend/block/MAU quota), `services/admin` + `apps/admin` SPA, audit trail, solidity pass | run against compose Postgres in prod topology; operator SSO later |
-| 9 | Trade capabilities (new) | 🚧 keystone merged | canonical order model (#16) + trade-type discovery (#20) on main | rebase + land the capability modules from `wt-cap-*`: seam order-plans, intelligence capabilities, SDK rendering |
+| 9 | Trade capabilities | ✅ merged | canonical order model (#16) + trade-type discovery (#20) + full capability modules across seam/intelligence/SDK + conversational perps ([PR #28](https://github.com/peersclub/Hippo/pull/28), `6383e0f`) | options venue when a partner offers them; perp UX polish |
 | 10 | [[12 Partner Admin Portal\|Partner admin portal]] | ✅ merged ([PR #21](https://github.com/peersclub/Hippo/pull/21), `8981113`) | full V1 (2026-07-18): stores/migration 008, `services/portal` :8795 (tenancy by construction), operator invite mint, `apps/portal` :5176; cross-service E2E green | run against compose Postgres; memory visibility & invite delivery are [[Open Decisions]] #10/#11; email/SSO later |
 
 Related: [[Home]] · [[00 Build Plan Overview]] · [[Open Decisions]] · [[Hippo Dev Progress]] · [[Ram JSX vs Victor Dev]]

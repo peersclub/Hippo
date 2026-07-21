@@ -101,7 +101,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     <div class="s-prog"><div class="big" data-stat="progress">0</div><div class="lbl">IN PROGRESS</div></div>
     <div class="s-plan"><div class="big" data-stat="planned">0</div><div class="lbl">PLANNED</div></div>
   </div>
-  <div class="asof" id="asof">AS OF JULY 20, 2026 · main @ 19e79f5</div>
+  <div class="asof" id="asof">AS OF JULY 21, 2026 · main @ cd2b804</div>
 </div>
 
 <!-- ═══ Board ═══ -->
@@ -168,7 +168,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   }
   const R = (id) => `https://github.com/peersclub/Hippo/pull/${id}`
 
-  // ── All data till now (from vault Roadmap.md, as-built @ 19e79f5) ──
+  // ── All data till now (from vault Roadmap.md, as-built @ cd2b804) ──
   const FEATURES = [
     // ───── SHIPPED (merged to main) ─────
     { s:'done', cat:'protocol', t:'Card protocol v1', d:'Zod schemas, additive-only frames with a per-frame fallback so an old SDK still renders something. Includes brief_delta streaming.', ref:'protocol', date:'Jul 15' },
@@ -183,6 +183,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { s:'done', cat:'intelligence', t:'Market-data service', d:'CCXT snapshot/live pricing with request coalescing and a bounded LRU cache so a miss-storm never hammers the exchange.', ref:'PR #2', date:'Jul 14' },
     { s:'done', cat:'seam', t:'Execution seam + adapters', d:'The venue-neutral canonical trading interface (prepare→confirm→lifecycle→positions) with sim / Assetworks adapters selected by VENUE=.', ref:'seam', date:'Jul 18' },
     { s:'done', cat:'protocol', t:'Canonical order model', d:'Capability-driven spot / futures_perp / options discriminated union, money as strings, VenueCapabilities where presence means enabled. The trade keystone.', ref:'PR #16', date:'Jul 18' },
+    { s:'done', cat:'seam', t:'Conversational futures / perps', d:'End-to-end capability-driven order plans: seam capabilities() + POST /v1/prepare-order (422 for unsupported), intent parse of “long 0.5 BTC 10x” / “short 1 ETH 20x cross” / “close long”, and the host fill engine opening & closing perp positions. Spot stays byte-identical.', ref:'PR #28', date:'Jul 20' },
     { s:'done', cat:'host', t:'Assetworks test host', d:'A self-contained venue on a standard HMAC-signed wire with a spot+perps fill engine, plus a Next.js 15 host app to parasite Hippo onto.', ref:'5875aa6', date:'Jul 20' },
     { s:'done', cat:'ops', t:'Partner admin portal V1', d:'Tenancy by construction (partnerId only from the session): operator invite → one-time claim → login, MAU vs quota, embed tag, secret rotation, audit.', ref:'PR #21', date:'Jul 18' },
     { s:'done', cat:'ops', t:'Admin panel + durable stores', d:'packages/stores over Postgres — partners, plans, users, memory — with gateway enforcement (suspend/block/MAU quota) and a full audit trail.', ref:'stores', date:'Jul 17' },
@@ -196,10 +197,9 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
 
     // ───── IN PROGRESS ─────
     { s:'progress', cat:'installer', t:'Model-driven adapter codegen', d:'The deterministic half is done — hippo scan drafts adapter.config.yaml. Pending: the model-driven mapping.ts for divergent shapes + rejections.yaml.', ref:'CLI stage 4', date:'active' },
-    { s:'progress', cat:'seam', t:'Conversational perps via parasite', d:'Spot is the wired parasite path. Extending the seam PrepareRequest + intelligence FuturesPerpOrder + gateway pass-through to place perps from the thread.', ref:'seam', date:'next' },
     { s:'progress', cat:'ops', t:'Tier-2 durability', d:'Durable ticket routing and a durable seam audit store so nothing rides only in memory. Next migration 009.', ref:'migration 009', date:'active' },
     { s:'progress', cat:'sdk', t:'Arabic native-speaker review', d:'Kartik / MENA native review gates flipping data-hippo-locale="ar" live for any Arabic-market partner. The copy itself is already merged.', ref:'PR #17', date:'review' },
-    { s:'progress', cat:'infra', t:'Cloud-wire the Assetworks host', d:'The new host-venue service and assetworks-exchange Next.js app aren’t on Railway/Vercel yet, so pushing them to main doesn’t auto-deploy them.', ref:'deploy', date:'active' },
+    { s:'progress', cat:'infra', t:'Cloud-wire the Assetworks host', d:'The Next.js host app is parked on branch assetworks-exchange-app — its next dependency crashes Railway’s Metal builder, so it stays off main until that’s fixed; the host-venue service still needs Railway wiring.', ref:'branch', date:'blocked' },
 
     // ───── PLANNED ─────
     { s:'planned', cat:'intelligence', t:'Model bake-off', d:'Run the eval harness against real candidates (Qwen3-32B / QwQ-32B vs a 70B baseline) to score Phase 2’s exit gate. Blocked on GPU access.', ref:'eval gate', date:'needs GPU' },

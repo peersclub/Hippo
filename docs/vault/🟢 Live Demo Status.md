@@ -82,4 +82,4 @@ vercel build --prod && vercel deploy --prebuilt --prod
 
 Gotcha: project env vars are *sensitive* — `vercel pull` writes `"[SENSITIVE]"`, which breaks build-time `VITE_*` bakes. Patch `.vercel/.env.production.local` with the real value before `vercel build` (runtime-only secrets like `HIPPO_DEMO_JWT_SECRET` are unaffected).
 
-Related: [[Home]] · [[Roadmap]] · [[Jul 20 Dev]] · [[12 Partner Admin Portal]]
+Related: [[Home]] · [[Roadmap]] · [[12 Partner Admin Portal]]
