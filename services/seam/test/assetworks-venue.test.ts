@@ -25,6 +25,9 @@ function makeFetch(opts: {
   surface?: 'api' | 'js_callback'
   openSequence?: Array<Array<Record<string, unknown>>>
   handoffStates?: string[]
+  /** Terminal status returned by /orders/status once the order leaves the book
+   *  (50 = CANCELED, 20 = SETTLED). Default 20 keeps the historical fill path. */
+  terminalStatus?: number
 }) {
   const openSequence = [...(opts.openSequence ?? [])]
   const handoffStates = [...(opts.handoffStates ?? ['placed'])]
@@ -32,6 +35,11 @@ function makeFetch(opts: {
     const u = String(url)
     if (u.includes('/v1/snapshot'))
       return new Response(JSON.stringify({ last: 61_240 }), { status: 200 })
+    if (u.endsWith('/api/v1/trade/orders/status'))
+      return new Response(
+        JSON.stringify({ status: true, data: { orderStatus: opts.terminalStatus ?? 20 } }),
+        { status: 200 },
+      )
     if (u.endsWith('/admin/config'))
       return new Response(JSON.stringify({ confirmSurface: opts.surface ?? 'api' }), {
         status: 200,
@@ -63,10 +71,12 @@ function makeFetch(opts: {
   })
 }
 
-const filled = (adapter: AssetworksVenueAdapter) =>
+const filled = (adapter: AssetworksVenueAdapter) => terminal(adapter, 'filled')
+
+const terminal = (adapter: AssetworksVenueAdapter, phase: string) =>
   new Promise<LifecycleEvent>((resolve, reject) => {
-    adapter.onEvent((e) => e.phase === 'filled' && resolve(e))
-    setTimeout(() => reject(new Error('no fill')), 1_500)
+    adapter.onEvent((e) => e.phase === phase && resolve(e))
+    setTimeout(() => reject(new Error(`no ${phase}`)), 1_500)
   })
 
 const ACTIVE = {
@@ -93,6 +103,21 @@ describe('AssetworksVenueAdapter', () => {
     const ev = await done
     expect(ev.phase).toBe('filled')
     expect(ev.venueOrderId).toBe('999')
+  })
+
+  it('api surface: a host CANCEL (order gone + terminal CANCELED) reconciles as CANCELLED, not filled', async () => {
+    const fetchImpl = makeFetch({
+      surface: 'api',
+      openSequence: [[ACTIVE], []], // seen open, then gone
+      terminalStatus: 50, // CANCELED
+    }) as unknown as typeof fetch
+    const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
+    const ticket = await adapter.prepare(req)
+    const done = terminal(adapter, 'cancelled')
+    await adapter.confirm(ticket.ticketId)
+    const ev = await done
+    expect(ev.phase).toBe('cancelled')
+    expect(ev.statusLine).toMatch(/cancel/i)
   })
 
   it('js_callback surface: hands off (no direct place), then reconciles once host places', async () => {

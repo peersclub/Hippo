@@ -167,6 +167,24 @@ export function buildService(opts: BuildOptions) {
     return { status: true, data: await store.openPositions(userId) }
   })
 
+  // Terminal-aware status-by-id. open-orders only lists ACTIVE+PARTIAL, so when
+  // an order drops out the parasite reconciler can't tell filled from cancelled
+  // — this read disambiguates (SETTLED vs CANCELED). By orderId or clientOrderId.
+  app.post('/api/v1/trade/orders/status', async (req, reply) => {
+    const userId = authed(req, reply)
+    if (!userId) return reply
+    const b = (req.body ?? {}) as { orderId?: unknown; clientOrderId?: unknown }
+    const o =
+      typeof b.clientOrderId === 'string'
+        ? store.orderByClientId(b.clientOrderId)
+        : store.order(num(b.orderId))
+    if (!o || o.userId !== userId) return { status: false, error: 'unknown order' }
+    return {
+      status: true,
+      data: { orderId: o.id, orderStatus: o.status, filledQty: o.filledQty, qty: o.qty },
+    }
+  })
+
   // js_callback: parasite hands off; host UI will approve/reject.
   app.post('/api/v1/trade/handoff', async (req, reply) => {
     const userId = authed(req, reply)
@@ -257,6 +275,39 @@ export function buildService(opts: BuildOptions) {
     if (typeof b.feeRate === 'number') patch.feeRate = b.feeRate
     if (typeof b.partialFills === 'boolean') patch.partialFills = b.partialFills
     return store.setConfig(patch)
+  })
+
+  // AI-model control — a same-origin proxy to the intelligence service so the
+  // host settings page can switch Hippo's model (and see it in chat) without
+  // the browser touching the internal AI service directly. Demo/test control;
+  // the venue itself has no opinion on Hippo's model.
+  const intelligenceUrl = process.env.INTELLIGENCE_URL ?? 'http://localhost:8791'
+  app.get('/admin/ai/model', async (_req, reply) => {
+    try {
+      const res = await fetch(`${intelligenceUrl}/admin/model`, {
+        signal: AbortSignal.timeout(3_000),
+      })
+      return await res.json()
+    } catch (err) {
+      return reply.code(502).send({ error: `intelligence unreachable: ${String(err)}` })
+    }
+  })
+  app.post('/admin/ai/model', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    const model = (req.body as { model?: unknown })?.model
+    if (typeof model !== 'string' || !model)
+      return reply.code(400).send({ error: 'model required' })
+    try {
+      const res = await fetch(`${intelligenceUrl}/admin/model`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model }),
+        signal: AbortSignal.timeout(3_000),
+      })
+      return await res.json()
+    } catch (err) {
+      return reply.code(502).send({ error: `intelligence unreachable: ${String(err)}` })
+    }
   })
 
   // SSE stream powering the live blotter/positions/balances in the host UI.

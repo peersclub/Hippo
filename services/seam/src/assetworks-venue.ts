@@ -463,7 +463,13 @@ export class AssetworksVenueAdapter implements VenueAdapter {
             })
           }
         } else if (sawOpen) {
-          this.emitFilled(ticketId, ticket)
+          // The order left the book. "Gone" is ambiguous on a venue whose
+          // open-orders lists only ACTIVE+PARTIAL, so ask for its terminal
+          // status: a host-side CANCEL must surface as CANCELLED in the thread,
+          // not a phantom FILLED.
+          const phase = await this.fetchTerminalPhase(ticketId, ticket)
+          if (phase === 'cancelled') this.emitCancelled(ticketId, ticket)
+          else this.emitFilled(ticketId, ticket)
           return this.stopReconciler(ticket)
         }
       } catch (err) {
@@ -503,6 +509,40 @@ export class AssetworksVenueAdapter implements VenueAdapter {
         { label: 'Avg fill', value: formatPrice(ticket.price) },
         { label: 'Venue order ID', value: String(ticket.venueOrderId ?? '') },
       ],
+    })
+    this.tickets.delete(ticketId)
+  }
+
+  /** Read the venue's terminal status for a vanished order. Defaults to
+   *  'filled' if the status can't be read — the historical assumption — so a
+   *  transient status-read failure never invents a cancellation. */
+  private async fetchTerminalPhase(
+    ticketId: string,
+    ticket: StoredTicket,
+  ): Promise<LifecyclePhase> {
+    try {
+      const res = await this.signedPost<{ orderStatus: number }>('/api/v1/trade/orders/status', {
+        ...(ticket.venueOrderId !== undefined ? { orderId: ticket.venueOrderId } : {}),
+        clientOrderId: ticketId,
+      })
+      if (res.status && res.data) return mapStatus(res.data.orderStatus)
+    } catch (err) {
+      this.warnThrottled(
+        err,
+        ticketId,
+        ticket.venueOrderId,
+        'assetworks status read failed — assuming filled',
+      )
+    }
+    return 'filled'
+  }
+
+  private emitCancelled(ticketId: string, ticket: StoredTicket): void {
+    this.handler({
+      ticketId,
+      phase: 'cancelled',
+      statusLine: 'CANCELLED ON THE VENUE',
+      venueOrderId: ticket.venueOrderId ? String(ticket.venueOrderId) : undefined,
     })
     this.tickets.delete(ticketId)
   }

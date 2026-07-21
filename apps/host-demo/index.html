@@ -183,6 +183,7 @@
         <label class="fld" style="margin-top:10px">Taker fee<input id="fee" type="number" step="0.0001" value="0.001" /></label>
       </div>
       <div style="font-size:11px;color:var(--light)">The parasite reads this switch live from <code>/admin/config</code> at confirm time — no redeploy needed.</div>
+      <a href="/settings" style="display:block;text-align:center;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:9px;color:var(--accent);text-decoration:none;font-weight:600;font-size:12.5px">Full host settings — AI model &amp; orders ↗</a>
     </div>
   </div>
 
@@ -221,7 +222,7 @@
       badge.textContent=`GW: ${real?'REAL':'MOCK'}`
       badge.style.cssText=`padding:3px 8px;border:1px solid #e5e7eb;border-radius:5px;background:${real?'#d1fae5':'#f1f5f9'};color:${real?'#065f46':'#6b7280'}`
       bar.appendChild(badge)
-      for(const [label,href] of [['HOW TO TEST','/how']]){
+      for(const [label,href] of [['HOST SETTINGS','/settings'],['HOW TO TEST','/how']]){
         const a=document.createElement('a');a.textContent=label;a.href=href;a.target='_blank'
         a.style.cssText='padding:3px 8px;border:1px solid #e5e7eb;border-radius:5px;background:#fff;color:#6b7280;text-decoration:none'
         bar.appendChild(a)

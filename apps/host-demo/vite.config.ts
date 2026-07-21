@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
         how: resolve(import.meta.dirname, 'how.html'),
+        settings: resolve(import.meta.dirname, 'settings.html'),
       },
     },
   },

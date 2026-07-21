@@ -119,6 +119,13 @@ export class VenueStore {
   order(id: number): Order | undefined {
     return this.orders.get(id)
   }
+  /** Look up an order by the parasite-supplied clientOrderId (the seam ticket).
+   *  Terminal orders are retained, so this resolves after fill/cancel too —
+   *  which is exactly what lets the reconciler tell cancelled from filled. */
+  orderByClientId(clientOrderId: string): Order | undefined {
+    for (const o of this.orders.values()) if (o.clientOrderId === clientOrderId) return o
+    return undefined
+  }
 
   async openPositions(userId: string): Promise<Position[]> {
     const out: Position[] = []

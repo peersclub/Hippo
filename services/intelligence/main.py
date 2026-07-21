@@ -21,7 +21,7 @@ import intent as intent_engine
 import research
 from cache import make_answer_cache
 from observability import first_token_duration, intent_duration, setup_otel, tracer
-from providers import ProviderRouter
+from providers import AVAILABLE_MODELS, ProviderRouter
 
 # App loggers ("intelligence*") are otherwise unconfigured — uvicorn only
 # configures its own "uvicorn.*" tree — so without this every log.info/
@@ -171,3 +171,23 @@ async def health() -> dict[str, Any]:
         "model": router.model,
         "cache": answer_cache.stats(),
     }
+
+
+class ModelIn(BaseModel):
+    model: str = Field(min_length=1, max_length=128)
+
+
+@app.get("/admin/model")
+async def get_model() -> dict[str, Any]:
+    """Current LLM model + the switchable shortlist (demo/test control). The
+    configured model is always offered even if it isn't in the shortlist."""
+    available = list(dict.fromkeys([router.configured_model, *AVAILABLE_MODELS]))
+    return {"current": router.configured_model, "mode": router.mode, "available": available}
+
+
+@app.post("/admin/model")
+async def set_model(req: ModelIn) -> dict[str, Any]:
+    """Switch the active LLM model at runtime. The next chat turn uses it and
+    the brief card reports the new model — so the change is visible in-chat."""
+    router.set_model(req.model)
+    return {"ok": True, "current": router.configured_model, "mode": router.mode}

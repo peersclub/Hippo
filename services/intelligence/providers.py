@@ -607,3 +607,34 @@ class ProviderRouter:
     @property
     def model(self) -> str:
         return self.llm.model if self.mode == "llm" else "mock"
+
+    @property
+    def configured_model(self) -> str:
+        """The LLM model id the router will USE on the next call, regardless of
+        the current mock/llm mode (mode only reflects the last call's health)."""
+        return self.llm.model
+
+    def set_model(self, model: str) -> None:
+        """Switch the active LLM model at runtime (test/demo control). Clears
+        the breaker so the very next turn attempts the new model rather than
+        waiting out a mock window from a previous failure."""
+        self.llm.model = model
+        self.llm._flavor = None  # re-detect flavor for the new endpoint/model
+        self._down_until = 0.0
+        log.info("llm model switched at runtime → %s", model)
+
+
+# Curated switchable models for the demo control panel. Env-overridable
+# (LLM_AVAILABLE_MODELS, comma-separated). These are OpenRouter ids; whether a
+# given one resolves depends on the configured provider/key — a miss simply
+# falls back to mock for that turn, which is itself a useful thing to observe.
+AVAILABLE_MODELS = [
+    m.strip()
+    for m in os.environ.get(
+        "LLM_AVAILABLE_MODELS",
+        "anthropic/claude-haiku-4.5,anthropic/claude-sonnet-4.5,"
+        "openai/gpt-4o-mini,google/gemini-2.0-flash-001,"
+        "meta-llama/llama-3.3-70b-instruct",
+    ).split(",")
+    if m.strip()
+]
