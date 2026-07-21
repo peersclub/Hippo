@@ -852,3 +852,164 @@ describe('orchestrator: venue-event backstop + post-confirm cancel truth', () =>
     await app.close()
   })
 })
+
+describe('orchestrator: honest order journey (stage + side + order-shaped waiting)', () => {
+  const buyIntent = () =>
+    stubIntel({
+      intent: () => ({
+        intent: 'action',
+        confidence: 0.9,
+        language: 'en',
+        order: { side: 'buy', size: '0.05', instrument: 'BTC/USDT', orderType: 'market' },
+      }),
+    })
+
+  it('order turns get order-shaped thinking lines + a ticket skeleton; research keeps its own', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: buyIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc at market' })
+    const types = await waitForJournal(session, (t) => t.includes('order_ticket'))
+    expect(types).toEqual(['user_echo', 'thinking', 'skeleton', 'order_ticket'])
+    const thinking = frameOfType<{ lines: string[] }>(session, 'thinking')
+    expect(thinking.lines[0]).toBe('Constructing order…')
+    expect(thinking.lines[1]).toContain('Checking balance on')
+    const skeleton = frameOfType<{ shape: string }>(session, 'skeleton')
+    expect(skeleton.shape).toBe('ticket')
+    await app.close()
+  })
+
+  it('confirm emits stage:placing with neutral SENDING copy and the ticket side', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: buyIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    await waitForJournal(session, (t) => t.includes('order_ticket'))
+    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    await sendTurn(app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'confirm_handoff',
+    })
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+    const lc = frameOfType<{
+      phase: string
+      stage?: string
+      side?: string
+      statusLine: string
+      cancellable: boolean
+    }>(session, 'lifecycle')
+    expect(lc.phase).toBe('awaiting_confirm')
+    expect(lc.stage).toBe('placing')
+    expect(lc.side).toBe('buy')
+    // Neutral copy: the gateway cannot know the venue's confirm surface, so
+    // "sending" is the only honest claim at this moment.
+    expect(lc.statusLine).toContain('SENDING ORDER TO')
+    expect(lc.statusLine).not.toContain('WAITING FOR YOUR CONFIRM')
+    expect(lc.cancellable).toBe(true)
+    await app.close()
+  })
+
+  it('a working placement ack passes through (stage/cancellable/side) WITHOUT tearing down routing', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: buyIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    await waitForJournal(session, (t) => t.includes('order_ticket'))
+    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    await sendTurn(app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'confirm_handoff',
+    })
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+
+    // The venue acks placement (non-terminal awaiting_confirm)…
+    const ack = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+      payload: {
+        ticketId: ticket.ticketId,
+        phase: 'awaiting_confirm',
+        stage: 'working',
+        statusLine: 'PLACED — WORKING',
+        cancellable: true,
+      },
+    })
+    expect(ack.json()).toEqual({ ok: true, routed: true })
+
+    // …and the FILL that follows must still be routed (the ack is not terminal).
+    const fill = await app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+      payload: { ticketId: ticket.ticketId, phase: 'filled', statusLine: 'FILLED' },
+    })
+    expect(fill.json()).toEqual({ ok: true, routed: true })
+
+    const lifecycles = session.journal
+      .after(0)
+      .filter((e) => e.frame.type === 'lifecycle')
+      .map((e) => e.frame as { phase: string; stage?: string; side?: string })
+    expect(lifecycles.map((l) => l.stage)).toEqual(['placing', 'working', undefined])
+    // Side is enriched from the gateway's own ticket map on every frame.
+    expect(lifecycles.every((l) => l.side === 'buy')).toBe(true)
+    await app.close()
+  })
+
+  it('post-confirm cancel is stage:cancel_pending (not cancellable)', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: buyIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    await waitForJournal(session, (t) => t.includes('order_ticket'))
+    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    await sendTurn(app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'confirm_handoff',
+    })
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+    await sendTurn(app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'cancel',
+    })
+    await waitForJournal(session, (t) => t.filter((x) => x === 'lifecycle').length >= 2)
+    const lifecycles = session.journal
+      .after(0)
+      .filter((e) => e.frame.type === 'lifecycle')
+      .map((e) => e.frame as { stage?: string; cancellable: boolean })
+    expect(lifecycles[1]?.stage).toBe('cancel_pending')
+    expect(lifecycles[1]?.cancellable).toBe(false)
+    await app.close()
+  })
+
+  it('backstop expiry carries the side read before ticket teardown', async () => {
+    process.env.TICKET_EVENT_TIMEOUT_MS = '80'
+    try {
+      const seam = stubSeam()
+      const { app, sessions } = await testApp({ intel: buyIntent(), seam })
+      const session = await createSession(app, sessions)
+      await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+      await waitForJournal(session, (t) => t.includes('order_ticket'))
+      const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+      await sendTurn(app, session.id, {
+        kind: 'ticket_action',
+        ticketId: ticket.ticketId,
+        action: 'confirm_handoff',
+      })
+      await waitForJournal(session, (t) => t.filter((x) => x === 'lifecycle').length >= 2)
+      const lifecycles = session.journal
+        .after(0)
+        .filter((e) => e.frame.type === 'lifecycle')
+        .map((e) => e.frame as { phase: string; side?: string })
+      expect(lifecycles[1]?.phase).toBe('expired')
+      expect(lifecycles[1]?.side).toBe('buy')
+      await app.close()
+    } finally {
+      delete process.env.TICKET_EVENT_TIMEOUT_MS
+    }
+  })
+})

@@ -325,6 +325,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const timer = setTimeout(() => {
       ticketTimers.delete(ticketId)
       if (!ticketSessions.has(ticketId)) return // already resolved by an event
+      // Read the side BEFORE the delete below tears the ticket entry down.
+      const side = session.tickets.get(ticketId)?.side
       ticketSessions.delete(ticketId)
       session.tickets.delete(ticketId)
       confirmedTickets.delete(ticketId)
@@ -334,6 +336,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ticketId,
         phase: 'expired',
         statusLine: `NO UPDATE FROM ${session.partner.venueName.toUpperCase()} — CHECK THE VENUE FOR FINAL STATUS`,
+        ...(side ? { side } : {}),
       })
     }, ticketTimeoutMs)
     timer.unref?.()
@@ -466,12 +469,19 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   }
 
   function confirmHandoff(session: Session, ticketId: string): void {
+    const side = session.tickets.get(ticketId)?.side
+    // Neutral copy on purpose: the confirm surface (api vs js_callback) is
+    // resolved inside the venue adapter, so "sending" is the only claim the
+    // gateway can honestly make here. The venue's own event follows with the
+    // surface-true status (PLACED — WORKING, or WAITING FOR YOUR CONFIRM).
     emit(session, {
       type: 'lifecycle',
       ticketId,
       phase: 'awaiting_confirm',
-      statusLine: `WAITING FOR YOUR CONFIRM ON ${session.partner.venueName.toUpperCase()}`,
+      stage: 'placing',
+      statusLine: `SENDING ORDER TO ${session.partner.venueName.toUpperCase()}…`,
       cancellable: true,
+      ...(side ? { side } : {}),
     })
     // Venue events (fill, partial, reject) flow back asynchronously through
     // POST /internal/venue-events → onVenueEvent below. If the confirm call
@@ -491,6 +501,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         ticketId,
         phase: 'expired',
         statusLine: `COULDN'T HAND OFF TO ${session.partner.venueName.toUpperCase()} — NOTHING EXECUTED`,
+        ...(side ? { side } : {}),
       })
     })
     telemetry.recordUplink('ticket_confirm')
@@ -519,12 +530,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // entry alive; the venue's own lifecycle event (cancelled — or filled, if
     // the fill won the race) decides the outcome, with the backstop behind it.
     const venue = session.partner.venueName.toUpperCase()
+    const side = session.tickets.get(ticketId)?.side
     emit(session, {
       type: 'lifecycle',
       ticketId,
       phase: 'awaiting_confirm',
+      stage: 'cancel_pending',
       statusLine: `CANCEL REQUESTED — CONFIRMING WITH ${venue}`,
       cancellable: false,
+      ...(side ? { side } : {}),
     })
     seam.cancel(ticketId).then(
       () => armTicketTimeout(session, ticketId),
@@ -534,8 +548,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           type: 'lifecycle',
           ticketId,
           phase: 'awaiting_confirm',
+          stage: 'working', // the order is still live on the venue
           statusLine: `${venue} COULDN'T CANCEL — THE ORDER MAY STILL EXECUTE`,
           cancellable: true,
+          ...(side ? { side } : {}),
         })
         armTicketTimeout(session, ticketId)
       },
@@ -549,24 +565,31 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   function onVenueEvent(event: import('./seam.js').VenueEvent): boolean {
     const session = ticketSessions.get(event.ticketId)
     if (!session) return false // unknown/expired ticket — audit-only
+    const side = session.tickets.get(event.ticketId)?.side
     emit(session, {
       type: 'lifecycle',
       ticketId: event.ticketId,
       phase: event.phase,
       statusLine: event.statusLine,
+      ...(event.stage ? { stage: event.stage } : {}),
+      ...(event.cancellable !== undefined ? { cancellable: event.cancellable } : {}),
+      ...(side ? { side } : {}),
       ...(event.venueOrderId ? { venueOrderId: event.venueOrderId } : {}),
       ...(event.fillPct !== undefined ? { fillPct: event.fillPct } : {}),
       ...(event.rows ? { rows: event.rows } : {}),
     })
     if (event.phase === 'filled') telemetry.recordOrderExecuted(userKey(session))
-    if (event.phase !== 'partial') {
+    // Non-terminal phases: placement/cancel acks (awaiting_confirm) and
+    // partials both precede more events — treating them as terminal would
+    // delete the routing entry and silently drop the fill that follows.
+    if (event.phase === 'awaiting_confirm' || event.phase === 'partial') {
+      // Still in flight — push the no-event backstop out another window.
+      armTicketTimeout(session, event.ticketId)
+    } else {
       ticketSessions.delete(event.ticketId)
       session.tickets.delete(event.ticketId)
       confirmedTickets.delete(event.ticketId)
       clearTicketTimeout(event.ticketId)
-    } else {
-      // Still in flight — push the no-event backstop out another window.
-      armTicketTimeout(session, event.ticketId)
     }
     return true
   }
@@ -797,6 +820,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           })
           return
         }
+        // Ticket-shaped skeleton while the seam quotes — replaces the thinking
+        // card (pushFrame's ephemeral rule); the ticket or rejection replaces it.
+        emit(session, { type: 'skeleton', shape: 'ticket' })
         await prepareTicket(session, intentRes.order, text)
         return
       }
@@ -871,11 +897,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             }
           }
           // Echo + thinking go out synchronously — before any network call —
-          // to hold the <150ms first-frame budget.
+          // to hold the <150ms first-frame budget. guessIntent is the sync
+          // deterministic classifier, so order turns get order-shaped status
+          // lines in the SAME thinking frame (a second thinking frame would
+          // strand a card on old SDKs — pushFrame only replaces the last
+          // ephemeral item).
           emit(session, { type: 'user_echo', text: uplink.text })
+          const looksLikeOrder = guessIntent(uplink.text).intent === 'action'
           emit(session, {
             type: 'thinking',
-            lines: ['Parsing intent…', 'Fetching live market data…', 'Reading funding & flows…'],
+            lines: looksLikeOrder
+              ? [
+                  'Constructing order…',
+                  `Checking balance on ${session.partner.venueName}…`,
+                  'Preparing your ticket…',
+                ]
+              : ['Parsing intent…', 'Fetching live market data…', 'Reading funding & flows…'],
           })
           processTurn(session, uplink.text).catch((err) => {
             log.error({ err }, 'turn processing failed')

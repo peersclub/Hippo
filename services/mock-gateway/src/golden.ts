@@ -226,7 +226,8 @@ export function replyScriptFor(text: string): ScriptStep[] {
   ]
 }
 
-/** Lifecycle continuation after a ticket confirm handoff. */
+/** Lifecycle continuation after a ticket confirm handoff — mirrors the real
+ * journey: placing → working → partial (with a real fillPct) → filled. */
 export function lifecycleScriptFor(ticketId: string): ScriptStep[] {
   return [
     {
@@ -235,8 +236,39 @@ export function lifecycleScriptFor(ticketId: string): ScriptStep[] {
         type: 'lifecycle',
         ticketId,
         phase: 'awaiting_confirm',
-        statusLine: `WAITING FOR YOUR CONFIRM ON ${VENUE.toUpperCase()}`,
+        stage: 'placing',
+        side: 'buy',
+        statusLine: `SENDING ORDER TO ${VENUE.toUpperCase()}…`,
         cancellable: true,
+      },
+    },
+    {
+      afterMs: 1200,
+      frame: {
+        type: 'lifecycle',
+        ticketId,
+        phase: 'awaiting_confirm',
+        stage: 'working',
+        side: 'buy',
+        statusLine: 'PLACED — WORKING',
+        cancellable: true,
+      },
+    },
+    {
+      afterMs: 2400,
+      frame: {
+        type: 'lifecycle',
+        ticketId,
+        phase: 'partial',
+        stage: 'working',
+        side: 'buy',
+        statusLine: 'PARTIALLY FILLED',
+        fillPct: 40,
+        cancellable: true,
+        rows: [
+          { label: 'Filled', value: '0.02 / 0.05' },
+          { label: 'Rate', value: '61,238.50' },
+        ],
       },
     },
     {
@@ -245,6 +277,7 @@ export function lifecycleScriptFor(ticketId: string): ScriptStep[] {
         type: 'lifecycle',
         ticketId,
         phase: 'filled',
+        side: 'buy',
         statusLine: 'FILLED',
         venueOrderId: 'KBX-88412039',
         rows: [
