@@ -258,7 +258,13 @@ export function buildService(
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        // The gateway's /internal/venue-events guard (Tier-1 hardening)
+        // requires the shared internal token — without this header every
+        // delivery 401s and fills silently never reach the trader.
+        headers: {
+          'content-type': 'application/json',
+          ...(internalToken ? { 'x-hippo-internal-token': internalToken } : {}),
+        },
         body: JSON.stringify(event),
         signal: AbortSignal.timeout(3_000),
       })

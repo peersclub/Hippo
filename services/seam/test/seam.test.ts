@@ -25,6 +25,10 @@ beforeEach(() => {
         return new Response(JSON.stringify({ last: 61_240 }), { status: 200 })
       }
       if (u.includes('/callback')) {
+        // The gateway's internal guard requires the shared token on every
+        // delivery — a missing header 401s and fills silently vanish.
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        expect(headers['x-hippo-internal-token']).toBe(TOKEN)
         deliveries.push(JSON.parse(String(init?.body)) as LifecycleEvent)
         return new Response('{}', { status: 200 })
       }
