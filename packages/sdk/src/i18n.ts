@@ -43,6 +43,14 @@ export type MessageKey =
   | 'feedback_helpful'
   | 'feedback_not_helpful'
   | 'order_filled'
+  | 'journey_prepared'
+  | 'journey_placing'
+  | 'journey_working'
+  | 'journey_filled'
+  | 'journey_cancelling'
+  | 'live_updates'
+  | 'handed_off'
+  | 'confirming'
   | 'ob_not_now'
   | 'ob_agree_start'
   | 'ob_replay'
@@ -97,6 +105,14 @@ const en: Catalog = {
   feedback_helpful: 'Helpful',
   feedback_not_helpful: 'Not helpful',
   order_filled: 'Order filled',
+  journey_prepared: 'PREPARED',
+  journey_placing: 'PLACING',
+  journey_working: 'WORKING',
+  journey_filled: 'FILLED',
+  journey_cancelling: 'CANCELLING',
+  live_updates: 'LIVE · UPDATES AUTOMATICALLY',
+  handed_off: 'HANDED OFF ✓',
+  confirming: 'CONFIRMING…',
   ob_not_now: 'Not now',
   ob_agree_start: 'Agree & start',
   ob_replay: 'Replay the intro',
@@ -152,6 +168,14 @@ const hi: Catalog = {
   feedback_helpful: 'उपयोगी',
   feedback_not_helpful: 'उपयोगी नहीं',
   order_filled: 'ऑर्डर पूरा हुआ',
+  journey_prepared: 'तैयार',
+  journey_placing: 'भेजा जा रहा',
+  journey_working: 'सक्रिय',
+  journey_filled: 'पूरा',
+  journey_cancelling: 'रद्द हो रहा',
+  live_updates: 'लाइव · अपने आप अपडेट होगा',
+  handed_off: 'भेज दिया ✓',
+  confirming: 'कन्फर्म हो रहा है…',
   ob_not_now: 'अभी नहीं',
   ob_agree_start: 'सहमत हूँ, शुरू करें',
   ob_replay: 'परिचय दोबारा देखें',
@@ -208,6 +232,14 @@ const hiLatn: Catalog = {
   feedback_helpful: 'Useful',
   feedback_not_helpful: 'Useful nahi',
   order_filled: 'Order fill ho gaya',
+  journey_prepared: 'READY',
+  journey_placing: 'BHEJ RAHE',
+  journey_working: 'ACTIVE',
+  journey_filled: 'FILL',
+  journey_cancelling: 'CANCEL HO RAHA',
+  live_updates: 'LIVE · APNE AAP UPDATE HOGA',
+  handed_off: 'BHEJ DIYA ✓',
+  confirming: 'CONFIRM HO RAHA…',
   ob_not_now: 'Abhi nahi',
   ob_agree_start: 'Agree karke shuru karo',
   ob_replay: 'Intro dobara dekho',
@@ -265,6 +297,14 @@ const ar: Catalog = {
   feedback_helpful: 'مفيد',
   feedback_not_helpful: 'غير مفيد',
   order_filled: 'تم تنفيذ الأمر',
+  journey_prepared: 'جاهز',
+  journey_placing: 'جارٍ الإرسال',
+  journey_working: 'نشط',
+  journey_filled: 'منفذ',
+  journey_cancelling: 'جارٍ الإلغاء',
+  live_updates: 'مباشر · يتحدث تلقائيًا',
+  handed_off: 'تم الإرسال ✓',
+  confirming: 'جارٍ التأكيد…',
   ob_not_now: 'ليس الآن',
   ob_agree_start: 'أوافق وأبدأ',
   ob_replay: 'إعادة عرض المقدمة',

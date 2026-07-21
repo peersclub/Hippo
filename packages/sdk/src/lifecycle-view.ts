@@ -16,7 +16,13 @@ const KNOWN_STAGES = new Set(['placing', 'working', 'cancel_pending'])
 
 export type JourneyStep = {
   key: 'prepared' | 'placing' | 'working' | 'terminal'
-  label: string
+  /** i18n catalog key — the journey line is SDK chrome, so it localizes. */
+  labelKey:
+    | 'journey_prepared'
+    | 'journey_placing'
+    | 'journey_working'
+    | 'journey_filled'
+    | 'journey_cancelling'
   state: 'done' | 'active' | 'pending'
 }
 
@@ -39,16 +45,24 @@ export function journeySteps(phase: Phase, stage: string | undefined): JourneySt
 function steps(active: 'placing' | 'working' | 'cancel_pending'): JourneyStep[] {
   if (active === 'cancel_pending') {
     return [
-      { key: 'prepared', label: 'PREPARED', state: 'done' },
-      { key: 'working', label: 'WORKING', state: 'done' },
-      { key: 'terminal', label: 'CANCELLING', state: 'active' },
+      { key: 'prepared', labelKey: 'journey_prepared', state: 'done' },
+      { key: 'working', labelKey: 'journey_working', state: 'done' },
+      { key: 'terminal', labelKey: 'journey_cancelling', state: 'active' },
     ]
   }
   return [
-    { key: 'prepared', label: 'PREPARED', state: 'done' },
-    { key: 'placing', label: 'PLACING', state: active === 'placing' ? 'active' : 'done' },
-    { key: 'working', label: 'WORKING', state: active === 'working' ? 'active' : 'pending' },
-    { key: 'terminal', label: 'FILLED', state: 'pending' },
+    { key: 'prepared', labelKey: 'journey_prepared', state: 'done' },
+    {
+      key: 'placing',
+      labelKey: 'journey_placing',
+      state: active === 'placing' ? 'active' : 'done',
+    },
+    {
+      key: 'working',
+      labelKey: 'journey_working',
+      state: active === 'working' ? 'active' : 'pending',
+    },
+    { key: 'terminal', labelKey: 'journey_filled', state: 'pending' },
   ]
 }
 

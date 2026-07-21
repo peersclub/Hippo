@@ -40,7 +40,7 @@ describe('journeySteps — the line only advances on real server frames', () => 
 
   it('cancel_pending swaps the terminal to CANCELLING', () => {
     const s = journeySteps('awaiting_confirm', 'cancel_pending')
-    expect(s?.at(-1)).toEqual({ key: 'terminal', label: 'CANCELLING', state: 'active' })
+    expect(s?.at(-1)).toEqual({ key: 'terminal', labelKey: 'journey_cancelling', state: 'active' })
   })
 
   it('terminal phases show no journey — receipts are facts, not progress', () => {

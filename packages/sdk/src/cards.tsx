@@ -25,11 +25,19 @@ import {
   feedbackDoneLabel,
   feedbackTransition,
 } from './feedback.js'
-import { isStale, STALE_CHECK_INTERVAL_MS } from './freshness.js'
+import { isStale, LANDED_FLASH_MS, STALE_CHECK_INTERVAL_MS, staleAgeLabel } from './freshness.js'
 import { t } from './i18n.js'
+import {
+  cancelAffordance,
+  fillCaption,
+  isInFlight,
+  journeySteps,
+  sideBadge,
+  ticketStateClass,
+} from './lifecycle-view.js'
 import { dispatch } from './outbox.js'
 import { briefClipboardText, COPIED_FLASH_MS } from './share.js'
-import { connection, feedbackMap, locale, shareFrame } from './state.js'
+import { connection, feedbackMap, locale, shareFrame, thread } from './state.js'
 import { interruptedStreamIds } from './streaming.js'
 import { send } from './transport.js'
 
@@ -51,6 +59,24 @@ export function SparklineSvg({ points }: { points: number[] }) {
   )
 }
 
+/** Crisp inline thumb glyphs — emoji rendered differently on every host
+ * platform and fought the mono aesthetic; currentColor lets CSS drive the
+ * neutral→amber state. */
+function ThumbSvg({ down }: { down?: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      style={down ? 'transform:scale(-1)' : undefined}
+    >
+      <path d="M2 10h4v11H2zM22 11c0-1.1-.9-2-2-2h-5.3l.9-4.6c.1-.5-.1-1-.4-1.4L14 2 8.6 8.6c-.4.4-.6 1-.6 1.6V19c0 1.1.9 2 2 2h7c.8 0 1.5-.5 1.8-1.2l3-7c.1-.2.2-.5.2-.8v-1z" />
+    </svg>
+  )
+}
+
 function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   const lb = frame.liveBar
   // Feedback lives in a keyed signal map (not component state) so "already
@@ -66,12 +92,29 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef(0)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
+  // Refresh-land flash (the brand's "flash" verb): a brief that REPLACED an
+  // older one mounts a fresh row — hold the as-of amber for a beat so the
+  // update registers. Coupled to the replaces-swap remount in state.ts; if
+  // that ever preserves component instances, this hook moves.
+  const [landed, setLanded] = useState(() => Boolean(frame.replaces))
+  useEffect(() => {
+    if (!landed) return
+    const timer = setTimeout(() => setLanded(false), LANDED_FLASH_MS)
+    return () => clearTimeout(timer)
+  }, [landed])
   // Stale data is declared, never silent (edge state №5): past the threshold
-  // the as-of turns amber and REFRESH becomes the loudest element.
+  // the as-of turns amber (with an age prefix) and REFRESH becomes the
+  // loudest element.
   const [stale, setStale] = useState(() => (lb ? isStale(lb.asOfIso) : false))
+  const [ageLabel, setAgeLabel] = useState<string | null>(() =>
+    lb ? staleAgeLabel(lb.asOfIso) : null,
+  )
   useEffect(() => {
     if (!lb) return
-    const check = () => setStale(isStale(lb.asOfIso))
+    const check = () => {
+      setStale(isStale(lb.asOfIso))
+      setAgeLabel(staleAgeLabel(lb.asOfIso))
+    }
     check()
     const t = setInterval(check, STALE_CHECK_INTERVAL_MS)
     return () => clearInterval(t)
@@ -106,7 +149,10 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
   return (
     <>
       <div class={`livebar${stale ? ' stale' : ''}`}>
-        <span class={`asof${pending ? ' flash' : ''}`}>{lb.asOf}</span>
+        <span class={`asof${pending ? ' flash' : ''}${landed ? ' landed' : ''}`}>
+          {stale && ageLabel}
+          {lb.asOf}
+        </span>
         {lb.refreshable && (
           <button
             type="button"
@@ -115,7 +161,7 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
             aria-busy={pending}
             onClick={refresh}
           >
-            {pending ? '↻ REFRESHING…' : '↻ REFRESH'}
+            {pending ? '⟳ REFRESHING…' : stale ? '↻ REFRESH NOW' : '↻ REFRESH'}
           </button>
         )}
         <button type="button" onClick={copy} aria-label={t(locale.value, 'copy_brief')}>
@@ -137,14 +183,14 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
                   aria-label={t(locale.value, 'feedback_helpful')}
                   onClick={() => applyFeedback({ type: 'vote', vote: 'up' })}
                 >
-                  👍
+                  <ThumbSvg />
                 </button>
                 <button
                   type="button"
                   aria-label={t(locale.value, 'feedback_not_helpful')}
                   onClick={() => applyFeedback({ type: 'vote', vote: 'down' })}
                 >
-                  👎
+                  <ThumbSvg down />
                 </button>
               </>
             )}
@@ -230,13 +276,22 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
   // tell if the order registered. ticket_action is never queued (a confirm
   // fired minutes later is unacceptable) — so a live failure must surface here.
   const [failed, setFailed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  // Once a lifecycle frame exists for this ticket the order is handed off —
+  // derived from the thread (not component state) so it survives remounts.
+  const handedOff = thread.value.some(
+    (x) =>
+      x.kind === 'frame' && x.frame.type === 'lifecycle' && x.frame.ticketId === frame.ticketId,
+  )
   const confirm = async () => {
     setFailed(false)
+    setBusy(true)
     const ok = await send({
       kind: 'ticket_action',
       ticketId: frame.ticketId,
       action: 'confirm_handoff',
     })
+    setBusy(false)
     if (!ok) setFailed(true)
   }
   return (
@@ -254,15 +309,21 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
         ))}
       </div>
       {/* ticket_action is deliberately NOT queueable — a confirm fired minutes
-          later without the trader present is unacceptable. Offline: fail loud. */}
+          later without the trader present is unacceptable. Offline: fail loud.
+          `busy` reflects the real uplink round-trip; `handedOff` is wire truth. */}
       <button
         type="button"
         class="cta"
-        disabled={connection.value !== 'live'}
+        disabled={busy || handedOff || connection.value !== 'live'}
+        aria-busy={busy}
         title={connection.value !== 'live' ? t(locale.value, 'ticket_offline_hint') : undefined}
         onClick={confirm}
       >
-        {frame.cta}
+        {handedOff
+          ? t(locale.value, 'handed_off')
+          : busy
+            ? t(locale.value, 'confirming')
+            : frame.cta}
       </button>
       {failed && <div class="action-failed">{t(locale.value, 'action_failed')}</div>}
       <div class="tfoot">{frame.footnote}</div>
@@ -270,44 +331,84 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
   )
 }
 
+/**
+ * One card tells the whole order journey (the store collapses lifecycle
+ * frames by ticketId; the panel keys the card by ticket so updates never
+ * remount). Everything drawn here is wire truth: the journey line advances
+ * only on real server frames, the fill bar's width IS the server's fillPct,
+ * and unknown future stages degrade to the bare pulse row.
+ */
 function LifecycleCard({ frame }: { frame: Lifecycle }) {
   const [cancelFailed, setCancelFailed] = useState(false)
-  if (frame.phase === 'awaiting_confirm') {
+  const L = locale.value
+
+  if (isInFlight(frame.phase)) {
+    const steps = journeySteps(frame.phase, frame.stage)
+    const affordance = cancelAffordance(frame.phase, frame.stage, frame.cancellable)
+    const fill = fillCaption(frame.rows, frame.fillPct)
     const cancel = async () => {
       setCancelFailed(false)
       const ok = await send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'cancel' })
       if (!ok) setCancelFailed(true)
     }
     return (
-      <div class="ticket">
-        <div class="await">
-          <span class="pulse" />
+      <div class={`ticket${frame.phase === 'partial' ? ' part' : ''}`}>
+        {steps && (
+          <div class="journey" aria-hidden="true">
+            {steps.map((s) => (
+              <span class={`stp ${s.state}`} key={s.key}>
+                {s.state === 'done' && <span class="tick">✓</span>}
+                {s.state === 'active' && <span class="pulse" />}
+                {t(L, s.labelKey)}
+              </span>
+            ))}
+          </div>
+        )}
+        {/* Screen readers hear every server status change as it lands. */}
+        <div class="await" role="status" aria-live="polite">
+          {!steps && <span class="pulse" />}
+          {affordance === 'pending' && steps && <span class="pulse" />}
           {frame.statusLine}
-          {frame.cancellable && (
+          {affordance === 'button' && (
             <button
               type="button"
               class="cxl"
               disabled={connection.value !== 'live'}
-              title={
-                connection.value !== 'live' ? t(locale.value, 'ticket_offline_hint') : undefined
-              }
+              title={connection.value !== 'live' ? t(L, 'ticket_offline_hint') : undefined}
               onClick={cancel}
             >
               CANCEL
             </button>
           )}
         </div>
-        {cancelFailed && <div class="action-failed">{t(locale.value, 'action_failed')}</div>}
+        {fill && (
+          <div class="fillwrap">
+            <div class="fillmeta">
+              <span>{fill.left}</span>
+              <span class="pct">{fill.right}</span>
+            </div>
+            <div class="fillbar">
+              {/* Width is the server's number — the bar never animates toward a guess. */}
+              <span style={{ width: `${frame.fillPct}%` }} />
+            </div>
+          </div>
+        )}
+        {cancelFailed && <div class="action-failed">{t(L, 'action_failed')}</div>}
+        <div class="oid">{t(L, 'live_updates')}</div>
       </div>
     )
   }
+
+  // Terminal: a receipt of facts. State modifiers follow the prototype —
+  // green only for fills, neutral grey for cancelled (no judgment), amber
+  // attention for expired.
+  const badge = sideBadge(frame.phase, frame.side)
+  const stateCls = ticketStateClass(frame.phase)
   return (
-    <div class={`ticket${frame.phase === 'filled' ? ' ok' : ''}`}>
+    <div class={`ticket${stateCls ? ` ${stateCls}` : ''}`}>
       <div class="th">
-        <span class="tt">
-          {frame.phase === 'filled' ? t(locale.value, 'order_filled') : frame.statusLine}
-        </span>
-        <span class="side buy">{frame.phase.toUpperCase()}</span>
+        <span class="tt">{frame.phase === 'filled' ? t(L, 'order_filled') : frame.statusLine}</span>
+        <span class={badge.cls}>{badge.text}</span>
       </div>
       {frame.rows.length > 0 && (
         <div class="tb">
@@ -387,13 +488,13 @@ function PositionsCard({ frame }: { frame: Positions }) {
 
 function RejectionCard({ frame }: { frame: RejectionTicket }) {
   return (
-    <div class="ticket" style="border-color:rgba(255,133,133,.45)">
+    <div class="ticket err">
       <div class="th">
         <span class="tt">{frame.title}</span>
         <span class="side sell">REJECTED</span>
       </div>
       <div class="tb">
-        <p style="font-size:12px;line-height:1.5;color:#E8B8B8;padding:8px 0">{frame.reason}</p>
+        <p class="errbody">{frame.reason}</p>
       </div>
       {frame.fix && (
         <button
@@ -435,6 +536,12 @@ function SkeletonCard({ frame }: { frame: Skeleton }) {
           <div class="sk sk-cell" />
           <div class="sk sk-cell" />
         </div>
+      )}
+      {frame.shape === 'ticket' && (
+        <>
+          <div class="sk sk-line" />
+          <div class="sk sk-cta" />
+        </>
       )}
     </div>
   )
