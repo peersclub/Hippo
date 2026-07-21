@@ -151,7 +151,12 @@ export function pushFrame(item: ThreadItem) {
     if (last?.kind === 'frame' && last.frame.type === 'brief_delta') {
       const merged: ThreadItem = {
         kind: 'frame',
-        frame: { ...item.frame, text: last.frame.text + item.frame.text },
+        // Keep the FIRST delta's id so the growing card holds ONE identity
+        // across the stream. Spreading item.frame's id (the newest delta)
+        // changed the render key every ~150ms chunk → Preact remounted the
+        // card and re-fired the msgIn entrance animation → visible flicker.
+        // Stable id = text grows in place, animation runs once.
+        frame: { ...item.frame, id: last.frame.id, text: last.frame.text + item.frame.text },
       }
       commitThread([...prev.slice(0, -1), merged])
       return

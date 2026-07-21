@@ -97,14 +97,15 @@ describe('stalled-stream watchdog', () => {
   it('resets the deadline on every delta (measured from the LAST delta)', () => {
     pushDelta('d1', 'first ')
     vi.advanceTimersByTime(STREAM_WATCHDOG_MS - 100)
-    // A fresh delta arrives before the deadline — the merged card keeps the
-    // newest delta id, and the watchdog restarts from here.
+    // A fresh delta arrives before the deadline — the watchdog restarts from
+    // here. The merged card keeps the FIRST delta's id (stable identity, so it
+    // doesn't remount/flicker per chunk), so interruption is marked on d1.
     pushDelta('d2', 'second ')
     vi.advanceTimersByTime(STREAM_WATCHDOG_MS - 100)
     expect(isStreaming(thread.value)).toBe(true)
     expect(interruptedStreamIds.value.size).toBe(0)
     vi.advanceTimersByTime(100)
-    expect(interruptedStreamIds.value.has('d2')).toBe(true)
+    expect(interruptedStreamIds.value.has('d1')).toBe(true)
     expect(isStreaming(thread.value)).toBe(false)
   })
 
