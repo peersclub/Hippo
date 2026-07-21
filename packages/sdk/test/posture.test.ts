@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clampToViewport,
   cyclePosture,
+  DRAG_MARGIN,
   isMobileViewport,
   MOBILE_MAX,
   MOBILE_POSTURES,
@@ -82,5 +84,36 @@ describe('cyclePosture', () => {
   it('cycles from a cross-viewport posture by normalizing first', () => {
     // holding a web posture but now on mobile: normalize(overlay)=sheet → next=full
     expect(cyclePosture('overlay', true)).toBe('full')
+  })
+})
+
+describe('clampToViewport — drag stays on-screen', () => {
+  const size = { w: 380, h: 600 }
+  const vp = { w: 1440, h: 900 }
+
+  it('leaves an already-on-screen position untouched', () => {
+    expect(clampToViewport({ x: 300, y: 200 }, size, vp)).toEqual({ x: 300, y: 200 })
+  })
+
+  it('pulls back a position past the right/bottom edges', () => {
+    const p = clampToViewport({ x: 5000, y: 5000 }, size, vp)
+    expect(p.x).toBe(vp.w - size.w - DRAG_MARGIN)
+    expect(p.y).toBe(vp.h - size.h - DRAG_MARGIN)
+  })
+
+  it('pulls back a position past the left/top edges to the margin', () => {
+    expect(clampToViewport({ x: -200, y: -200 }, size, vp)).toEqual({
+      x: DRAG_MARGIN,
+      y: DRAG_MARGIN,
+    })
+  })
+
+  it('pins to the margin when the panel is larger than the viewport', () => {
+    // A window narrower/shorter than the panel — never push content off the far edge.
+    const tiny = { w: 300, h: 400 }
+    expect(clampToViewport({ x: 100, y: 100 }, size, tiny)).toEqual({
+      x: DRAG_MARGIN,
+      y: DRAG_MARGIN,
+    })
   })
 })

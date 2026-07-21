@@ -17,7 +17,16 @@ import {
   LANGUAGE_OPTIONS,
 } from './settings.js'
 import { COPIED_FLASH_MS, shareLink } from './share.js'
-import { locale, memoryOptIn, persistLocale, settingsOpen, shareFrame, venueName } from './state.js'
+import {
+  glass,
+  locale,
+  memoryOptIn,
+  persistGlass,
+  persistLocale,
+  settingsOpen,
+  shareFrame,
+  venueName,
+} from './state.js'
 
 const reducedMotion = () =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -395,6 +404,9 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
     memoryOptIn.value = v
     void dispatch({ kind: 'settings', memoryOptIn: v })
   }
+  // Frosted-glass panel — pure client presentation (no uplink); persisted so
+  // the trader's choice survives reloads, like locale.
+  const glassOn = glass.value
   const pickLanguage = (opt: (typeof LANGUAGE_OPTIONS)[number]) => {
     locale.value = opt.locale
     persistLocale(opt.locale)
@@ -437,6 +449,14 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
               <p>{t(L, 'settings_memory_body')}</p>
             </div>
             <Toggle on={memory} onChange={toggle} label={t(L, 'settings_memory_title')} />
+          </div>
+          <div class="obrow">
+            <span class="obicon">◇</span>
+            <div>
+              <b>{t(L, 'settings_glass_title')}</b>
+              <p>{t(L, 'settings_glass_body')}</p>
+            </div>
+            <Toggle on={glassOn} onChange={persistGlass} label={t(L, 'settings_glass_title')} />
           </div>
           {rows
             .filter((r) => r.id !== 'memory')

@@ -61,3 +61,25 @@ export function cyclePosture(current: Posture, mobile: boolean): Posture {
   const next = set[(Math.max(i, 0) + 1) % set.length]
   return next ?? cur
 }
+
+export type Point = { x: number; y: number }
+export type Size = { w: number; h: number }
+
+/** Min on-screen margin so the dragged panel can never be lost past an edge. */
+export const DRAG_MARGIN = 8
+
+/**
+ * Clamp a floating panel's top-left so it stays fully within the viewport
+ * (with a small margin). Pure — the testable core of the drag: given a drop
+ * point, the panel size and the viewport, return the on-screen position.
+ * When the panel is larger than the viewport (tiny window), pin to the
+ * top-left rather than pushing content off the far edge.
+ */
+export function clampToViewport(pos: Point, size: Size, viewport: Size): Point {
+  const maxX = viewport.w - size.w - DRAG_MARGIN
+  const maxY = viewport.h - size.h - DRAG_MARGIN
+  return {
+    x: maxX < DRAG_MARGIN ? DRAG_MARGIN : Math.min(Math.max(pos.x, DRAG_MARGIN), maxX),
+    y: maxY < DRAG_MARGIN ? DRAG_MARGIN : Math.min(Math.max(pos.y, DRAG_MARGIN), maxY),
+  }
+}

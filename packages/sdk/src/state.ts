@@ -28,6 +28,15 @@ export const orders = signal<OrdersSnapshot | null>(null)
 /** Where the panel sits on the page. `pill` = minimized launcher (panel
  * renders null). Full matrix + transitions live in posture.ts. */
 export const posture = signal<Posture>('pill')
+
+/** Custom drag position for the floating (`overlay`) posture — top-left in
+ * viewport px, or null for the default bottom-right anchor. Client-only
+ * presentation state; persisted per embed key (installed by mountPanel). */
+export const floatPos = signal<{ x: number; y: number } | null>(null)
+
+/** Frosted-glass panel — a settings toggle so the host's own data stays
+ * visible through/around the panel. Persisted like locale. */
+export const glass = signal(false)
 /**
  * Connection lifecycle. `connecting`/`live`/`offline` are the transient stream
  * states; `blocked` (invalid key / blocked user — 401) and `capacity` (MAU
@@ -90,6 +99,27 @@ export function setLocalePersistence(fn: (l: Locale) => void) {
 }
 export function persistLocale(l: Locale) {
   localePersister(l)
+}
+
+/** Float-position + glass persistence — same install pattern as locale
+ * (mountPanel owns the key-namespaced storage). The settings toggle and the
+ * drag handler call the persist* helpers; a no-op default keeps tests and
+ * storage-less environments happy. */
+let floatPosPersister: (p: { x: number; y: number } | null) => void = () => {}
+export function setFloatPosPersistence(fn: (p: { x: number; y: number } | null) => void) {
+  floatPosPersister = fn
+}
+export function persistFloatPos(p: { x: number; y: number } | null) {
+  floatPos.value = p
+  floatPosPersister(p)
+}
+let glassPersister: (on: boolean) => void = () => {}
+export function setGlassPersistence(fn: (on: boolean) => void) {
+  glassPersister = fn
+}
+export function persistGlass(on: boolean) {
+  glass.value = on
+  glassPersister(on)
 }
 
 export const openOrderCount = computed(() => orders.value?.open.length ?? 0)

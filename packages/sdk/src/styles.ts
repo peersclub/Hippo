@@ -63,6 +63,19 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .panel.full{inset:0;width:100%;border-inline-start:none;border-radius:0}
 @keyframes sheetIn{from{transform:translateY(100%)}to{transform:none}}
 @media (prefers-reduced-motion:reduce){.panel.sheet{animation:none}}
+/* ── float drag ── the intermediate (overlay) posture is movable: the header
+   is the grab handle; an inline left/top (set by the drag) overrides the
+   bottom-right anchor. Cursor signals it; while dragging, block text
+   selection so a drag never highlights the thread. */
+.panel.overlay .hd{cursor:grab}
+.panel.overlay.dragging{user-select:none}
+.panel.overlay.dragging .hd{cursor:grabbing}
+/* ── frosted glass ── a settings toggle so the host's own data stays visible
+   through/around the panel. Translucent surface + backdrop blur (this floating
+   panel is the sanctioned home for backdrop-filter). Tokens only, so the
+   light-theme swap covers it; the solid gradient becomes a translucent fill. */
+.panel.glass{background:rgba(var(--hippo-panel-deep-rgb),.72);backdrop-filter:blur(12px) saturate(1.1);
+  -webkit-backdrop-filter:blur(12px) saturate(1.1)}
 /* narrow viewport safety net: web geometry collapses into the mobile set */
 @media (max-width:640px){
   .panel,.panel.max{width:100%;border-inline-start:none}
