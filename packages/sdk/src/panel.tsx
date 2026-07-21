@@ -15,7 +15,7 @@ import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onb
 import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
 import { dispatch, outbox } from './outbox.js'
 import { OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
-import { cyclePosture, isMobileViewport, openPosture } from './posture.js'
+import { clampToViewport, cyclePosture, isMobileViewport, openPosture } from './posture.js'
 import { isNearBottom } from './scroll.js'
 import {
   activeChips,
@@ -25,12 +25,17 @@ import {
   composerPrefill,
   connection,
   dir,
+  floatPos,
+  glass,
   locale,
   openOrderCount,
   orders,
+  persistFloatPos,
   posture,
   prefillComposer,
   pulseTag,
+  setFloatPosPersistence,
+  setGlassPersistence,
   setLocalePersistence,
   settingsOpen,
   shareFrame,
@@ -563,9 +568,98 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
     el.addEventListener('keydown', onKey)
     return () => el.removeEventListener('keydown', onKey)
   }, [ob, onMinimize])
+
+  // ── float drag ──────────────────────────────────────────────────────────
+  // The floating (`overlay`) posture is movable: grab the header, drop it
+  // anywhere. Desktop-only — mobile `overlay` is full-screen (CSS). Pointer
+  // capture routes move/up to the header even when the cursor leaves it, and
+  // clampToViewport (posture.ts) keeps the panel from being lost off-screen.
+  const draggable = p === 'overlay' && !isMobileViewport()
+  const fp = floatPos.value
+  const [dragging, setDragging] = useState(false)
+  const drag = useRef<{
+    px: number
+    py: number
+    ox: number
+    oy: number
+    w: number
+    h: number
+  } | null>(null)
+  const startDrag = (e: PointerEvent) => {
+    if (!draggable) return
+    // Let the ⚙ / ⤢ / — controls click through — only bare header starts a drag.
+    if ((e.target as HTMLElement).closest('.ctl')) return
+    const el = rootRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    drag.current = { px: e.clientX, py: e.clientY, ox: r.left, oy: r.top, w: r.width, h: r.height }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    setDragging(true)
+  }
+  const moveDrag = (e: PointerEvent) => {
+    const d = drag.current
+    if (!d) return
+    const raw = { x: d.ox + (e.clientX - d.px), y: d.oy + (e.clientY - d.py) }
+    floatPos.value = clampToViewport(
+      raw,
+      { w: d.w, h: d.h },
+      { w: window.innerWidth, h: window.innerHeight },
+    )
+  }
+  const endDrag = (e: PointerEvent) => {
+    if (!drag.current) return
+    drag.current = null
+    setDragging(false)
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch {
+      // capture may already be gone (pointercancel) — nothing to release
+    }
+    persistFloatPos(floatPos.value) // one write on drop, not per move
+  }
+  // Keep a dragged panel on-screen when the viewport shrinks under it.
+  useEffect(() => {
+    if (!draggable) return
+    const onResize = () => {
+      const cur = floatPos.value
+      const el = rootRef.current
+      if (!cur || !el) return
+      const r = el.getBoundingClientRect()
+      floatPos.value = clampToViewport(
+        cur,
+        { w: r.width, h: r.height },
+        { w: window.innerWidth, h: window.innerHeight },
+      )
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [draggable])
+
+  const positioned = draggable && fp
+  const panelStyle = positioned
+    ? {
+        insetInlineStart: 'auto',
+        insetInlineEnd: 'auto',
+        insetBlockStart: 'auto',
+        insetBlockEnd: 'auto',
+        left: `${fp.x}px`,
+        top: `${fp.y}px`,
+      }
+    : undefined
   return (
-    <div class={`panel ${p}`} dir={dir.value} ref={rootRef}>
-      <div class="hd">
+    <div
+      class={`panel ${p}${glass.value ? ' glass' : ''}${dragging ? ' dragging' : ''}`}
+      style={panelStyle}
+      dir={dir.value}
+      ref={rootRef}
+    >
+      <div
+        class="hd"
+        onPointerDown={draggable ? startDrag : undefined}
+        onPointerMove={draggable ? moveDrag : undefined}
+        onPointerUp={draggable ? endDrag : undefined}
+        onPointerCancel={draggable ? endDrag : undefined}
+      >
         <img class="mark" src={HIPPO_MARK} alt="" />
         <div class="name">
           {t(L, 'brand_ask')}
@@ -638,6 +732,32 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
     } catch {
       // Non-persistent environments simply reset to the config locale.
     }
+  })
+
+  // Float position + frosted-glass preference — same key-namespaced,
+  // fail-silent storage pattern as locale above.
+  const floatKey = `hippo:${config.key}:floatpos`
+  const glassKey = `hippo:${config.key}:glass`
+  try {
+    const raw = localStorage.getItem(floatKey)
+    if (raw) {
+      const parsed = JSON.parse(raw) as { x: number; y: number }
+      if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') floatPos.value = parsed
+    }
+    glass.value = localStorage.getItem(glassKey) === '1'
+  } catch {
+    // Unreadable/absent storage — defaults (bottom-right anchor, opaque) apply.
+  }
+  setFloatPosPersistence((p) => {
+    try {
+      if (p) localStorage.setItem(floatKey, JSON.stringify(p))
+      else localStorage.removeItem(floatKey)
+    } catch {}
+  })
+  setGlassPersistence((on) => {
+    try {
+      localStorage.setItem(glassKey, on ? '1' : '0')
+    } catch {}
   })
 
   const sheet = new CSSStyleSheet()

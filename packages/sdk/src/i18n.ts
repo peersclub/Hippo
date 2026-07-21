@@ -69,6 +69,8 @@ export type MessageKey =
   | 'settings_language'
   | 'settings_memory_title'
   | 'settings_memory_body'
+  | 'settings_glass_title'
+  | 'settings_glass_body'
   | 'clear_memory'
   | 'clear_memory_confirm'
   | 'clear_memory_cancel'
@@ -131,6 +133,9 @@ const en: Catalog = {
   settings_language: 'Answer language',
   settings_memory_title: 'Personal memory',
   settings_memory_body: 'Hippo remembers your preferences and past questions.',
+  settings_glass_title: 'Transparent panel',
+  settings_glass_body:
+    'Frosted glass — keep your exchange visible behind the panel. Drag it anywhere by its header.',
   clear_memory: 'Clear everything Hippo remembers',
   clear_memory_confirm: 'Yes, clear it',
   clear_memory_cancel: 'Keep it',
@@ -194,6 +199,8 @@ const hi: Catalog = {
   settings_language: 'उत्तर की भाषा',
   settings_memory_title: 'व्यक्तिगत मेमोरी',
   settings_memory_body: 'Hippo आपकी पसंद और पिछले प्रश्न याद रखता है।',
+  settings_glass_title: 'पारदर्शी पैनल',
+  settings_glass_body: 'फ्रॉस्टेड ग्लास — पैनल के पीछे आपका एक्सचेंज दिखता रहे। हेडर से इसे कहीं भी खींचें।',
   clear_memory: 'Hippo की सारी यादें मिटाएँ',
   clear_memory_confirm: 'हाँ, मिटाएँ',
   clear_memory_cancel: 'रहने दें',
@@ -258,6 +265,9 @@ const hiLatn: Catalog = {
   settings_language: 'Answer language',
   settings_memory_title: 'Personal memory',
   settings_memory_body: 'Hippo aapki preferences aur pichhle questions yaad rakhta hai.',
+  settings_glass_title: 'Transparent panel',
+  settings_glass_body:
+    'Frosted glass — panel ke peeche apna exchange dikhta rahe. Header se kahin bhi drag karo.',
   clear_memory: 'Hippo ki saari memory clear karo',
   clear_memory_confirm: 'Haan, clear karo',
   clear_memory_cancel: 'Rehne do',
@@ -323,6 +333,9 @@ const ar: Catalog = {
   settings_language: 'لغة الإجابات',
   settings_memory_title: 'الذاكرة الشخصية',
   settings_memory_body: 'يتذكر Hippo تفضيلاتك وأسئلتك السابقة.',
+  settings_glass_title: 'لوحة شفافة',
+  settings_glass_body:
+    'زجاج مصنفر — تبقى بيانات منصتك مرئية خلف اللوحة. اسحبها إلى أي مكان من ترويستها.',
   clear_memory: 'مسح كل ما يتذكره Hippo',
   clear_memory_confirm: 'نعم، امسحه',
   clear_memory_cancel: 'أبقِه',
