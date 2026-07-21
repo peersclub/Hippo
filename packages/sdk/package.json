@@ -7,8 +7,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "vite build --config vite.loader.config.ts && vite build --config vite.panel.config.ts && node scripts/size-gate.mjs && cp -R embed dist/",
-    "dev": "vite build --config vite.loader.config.ts && vite build --watch --config vite.panel.config.ts",
+    "build": "vite build --config vite.loader.config.ts && vite build --config vite.panel.config.ts && node scripts/size-gate.mjs && cp -R embed dist/ && cp assets/hippo-mark.png dist/",
+    "dev": "vite build --config vite.loader.config.ts && cp assets/hippo-mark.png dist/ && vite build --watch --config vite.panel.config.ts",
     "test": "vitest run"
   },
   "dependencies": {

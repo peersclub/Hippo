@@ -70,8 +70,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 }
 /* header */
 .hd{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--hippo-hairline);flex-shrink:0}
-.hd .mark{width:24px;height:24px;border-radius:8px;background:var(--hippo-amber);color:var(--hippo-amber-ink);
-  display:grid;place-items:center;font-family:var(--hippo-font-display);font-weight:700;font-size:12px}
+.hd .mark{width:26px;height:26px;border-radius:7px;object-fit:contain;background:var(--hippo-amber);
+  padding:1px;box-sizing:border-box}
 .hd .name{font-family:var(--hippo-font-display);font-weight:600;font-size:13.5px}
 .hd .name small{display:block;font-family:var(--hippo-font-mono);font-weight:400;font-size:8.5px;letter-spacing:.12em;color:var(--hippo-text-faint);margin-top:1px}
 .hd .ctl{margin-inline-start:auto;display:flex;gap:6px}
@@ -281,8 +281,8 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .pins{flex-shrink:0;display:flex;flex-direction:column;gap:7px;padding:9px 13px 0}
 /* empty thread — never blank */
 .empty{margin:auto;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:20px 8px}
-.empty .emark{width:40px;height:40px;border-radius:13px;background:var(--hippo-amber);color:var(--hippo-amber-ink);
-  display:grid;place-items:center;font-family:var(--hippo-font-display);font-weight:700;font-size:18px}
+.empty .emark{width:52px;height:52px;border-radius:16px;object-fit:contain;background:var(--hippo-amber);
+  padding:3px;box-sizing:border-box}
 .empty h2{font-family:var(--hippo-font-display);font-size:16.5px;font-weight:600}
 .echips{display:flex;flex-direction:column;gap:7px}
 /* chips + composer */

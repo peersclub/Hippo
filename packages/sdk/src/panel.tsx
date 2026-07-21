@@ -49,6 +49,10 @@ type MountOpts = {
   config: { key: string; gateway: string; panelUrl: string; locale?: string; tokenUrl?: string }
 }
 
+/** The Hippo mark, served from the SDK's own dist (same origin as panel.js).
+ *  Referenced by URL — never inlined — so the panel bundle carries no image. */
+const HIPPO_MARK = new URL('hippo-mark.png', import.meta.url).href
+
 let onboarding: OnboardingStore | null = null
 
 /** Re-open the intro flow (settings → "Replay the intro", or host-side). */
@@ -389,7 +393,7 @@ function EmptyHero() {
   const list = chips.length > 0 ? chips : HERO_QUERIES
   return (
     <div class="empty">
-      <span class="emark">H</span>
+      <img class="emark" src={HIPPO_MARK} alt="" />
       <h2>{t(locale.value, 'hero_title')}</h2>
       <div class="echips">
         {list.map((q) => (
@@ -562,7 +566,7 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
   return (
     <div class={`panel ${p}`} dir={dir.value} ref={rootRef}>
       <div class="hd">
-        <span class="mark">H</span>
+        <img class="mark" src={HIPPO_MARK} alt="" />
         <div class="name">
           {t(L, 'brand_ask')}
           <small>{t(L, 'header_subtitle')}</small>

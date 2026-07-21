@@ -74,8 +74,8 @@ function normalizeLocale(raw: string): string {
           transition:transform .15s ease}
         .pill:hover{transform:translateY(-2px)}
         .pill:focus-visible{outline:2px solid #F0B94A;outline-offset:2px}
-        .mark{width:22px;height:22px;border-radius:8px;background:#F0B94A;color:#15171D;
-          display:grid;place-items:center;font-size:11px;font-weight:700}
+        .mark{width:24px;height:24px;border-radius:7px;object-fit:contain;display:block;
+          background:#F0B94A;padding:1px;box-sizing:border-box}
         .evt{display:none;font:500 9.5px ui-monospace,monospace;letter-spacing:.06em;color:#F0B94A}
         .pill.alert .evt{display:inline}
         .pill.alert{animation:hglow 1.7s ease infinite;border-color:rgba(240,185,74,.75)}
@@ -88,8 +88,11 @@ function normalizeLocale(raw: string): string {
       const pill = document.createElement('button')
       pill.className = 'pill'
       pill.setAttribute('aria-label', label)
-      // label is a static constant (no user input) — safe as innerHTML.
-      pill.innerHTML = `<span class="mark">H</span>${label}<span class="evt"></span>`
+      // label + mark URL are constants / the loader's own origin (no user
+      // input) — safe as innerHTML. The Hippo mark is served from the SDK's
+      // dist by URL (not inlined) so the loader stays under its 5KB size gate.
+      const markUrl = new URL('hippo-mark.png', script.src).href
+      pill.innerHTML = `<img class="mark" src="${markUrl}" alt="" />${label}<span class="evt"></span>`
       shadow.appendChild(pill)
       document.body.appendChild(host)
 
