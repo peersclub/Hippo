@@ -14,6 +14,9 @@
 | Operator admin | https://hippo-admin-six.vercel.app | Login below |
 | Partner portal | https://hippo-partner-portal.vercel.app | Login below |
 | Marketing site | https://hippo-site.vercel.app | Open — no login |
+| ↳ Design language | https://hippo-site.vercel.app/design | Open — the Dark Glass Instrument system, live token swatches |
+| ↳ Product roadmap | https://hippo-site.vercel.app/roadmap | Open — shipped / in-progress / planned board |
+| ↳ SDK integration | https://hippo-site.vercel.app/sdk | Open — one-tag embed + per-platform guides |
 
 ## Demo credentials
 
