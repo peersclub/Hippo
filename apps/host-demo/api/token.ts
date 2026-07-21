@@ -36,7 +36,7 @@ function signJwtHS256(claims: Record<string, unknown>, secret: string): string {
 
 export default function handler(req: Req, res: Res): void {
   const secret = process.env.HIPPO_DEMO_JWT_SECRET
-  const partnerId = process.env.HIPPO_DEMO_PARTNER_ID ?? 'koinbx-demo'
+  const partnerId = process.env.HIPPO_DEMO_PARTNER_ID ?? 'assetworks-demo'
   if (!secret) {
     // Fail loud, not with a forged token — the SDK treats 5xx as retryable.
     res.status(503).json({ error: 'token mint not configured' })
