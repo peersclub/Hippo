@@ -76,6 +76,8 @@ type StoredTicket = {
   pairName: string
   rows: Array<{ label: string; value: string }>
   venueOrderId?: number
+  /** Last filledQty already reported — the poll reconciler dedupes on it. */
+  lastFilledQty?: number
   poll?: ReturnType<typeof setInterval>
   /** Present for futures_perp tickets — sent to the host on confirm so the
    *  order is placed as a perp (market:'perp' + direction/leverage/margin). */
@@ -338,6 +340,13 @@ export class AssetworksVenueAdapter implements VenueAdapter {
         displayRows: ticket.rows,
       })
       if (!handoff.status) throw new Error(handoff.error ?? 'assetworks rejected the handoff')
+      // The one place this copy is true: the HOST is now asking the trader.
+      this.handler({
+        ticketId,
+        phase: 'awaiting_confirm',
+        statusLine: 'WAITING FOR YOUR CONFIRM ON THE VENUE',
+        cancellable: true,
+      })
       this.startHandoffWatcher(ticketId, ticket)
       return
     }
@@ -347,6 +356,15 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     if (!placed.status || !placed.data?.orderId)
       throw new Error(placed.error ?? 'assetworks rejected the order at placement')
     ticket.venueOrderId = placed.data.orderId
+    // Placement acked by the venue — the order is live before any fill news.
+    this.handler({
+      ticketId,
+      phase: 'awaiting_confirm',
+      stage: 'working',
+      statusLine: 'PLACED ON THE VENUE — WORKING',
+      venueOrderId: String(placed.data.orderId),
+      cancellable: true,
+    })
     this.startReconciler(ticketId, ticket)
   }
 
@@ -362,6 +380,15 @@ export class AssetworksVenueAdapter implements VenueAdapter {
         const state = st.data?.state
         if (state === 'placed') {
           ticket.venueOrderId = st.data?.venueOrderId
+          // The trader confirmed on the host and the order is on the book.
+          this.handler({
+            ticketId,
+            phase: 'awaiting_confirm',
+            stage: 'working',
+            statusLine: 'PLACED ON THE VENUE — WORKING',
+            ...(st.data?.venueOrderId ? { venueOrderId: String(st.data.venueOrderId) } : {}),
+            cancellable: true,
+          })
           this.stopReconciler(ticket)
           this.startReconciler(ticketId, ticket) // now reconcile the real order
           return
@@ -416,18 +443,25 @@ export class AssetworksVenueAdapter implements VenueAdapter {
         if (mine) {
           sawOpen = true
           ticket.venueOrderId = mine.id
-          if (mapStatus(mine.status) === 'partial')
+          // Dedupe: the poll re-observes the same partial state every tick;
+          // only a CHANGED filled quantity is news worth a frame (and a
+          // journal entry).
+          if (mapStatus(mine.status) === 'partial' && mine.filledQty !== ticket.lastFilledQty) {
+            ticket.lastFilledQty = mine.filledQty
             this.handler({
               ticketId,
               phase: 'partial',
+              stage: 'working',
               statusLine: 'PARTIALLY FILLED',
               venueOrderId: String(mine.id),
               fillPct: mine.qty > 0 ? Math.round((mine.filledQty / mine.qty) * 100) : undefined,
+              cancellable: true,
               rows: [
                 { label: 'Filled', value: `${mine.filledQty} / ${mine.qty}` },
                 { label: 'Rate', value: formatPrice(mine.rate) },
               ],
             })
+          }
         } else if (sawOpen) {
           this.emitFilled(ticketId, ticket)
           return this.stopReconciler(ticket)

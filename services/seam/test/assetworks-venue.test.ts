@@ -116,6 +116,88 @@ describe('AssetworksVenueAdapter', () => {
     expect(calls.some((u) => u.endsWith('/api/v1/trade/orders'))).toBe(false)
   })
 
+  it('api surface: emits a working placement ack (with venueOrderId) before the fill', async () => {
+    const fetchImpl = makeFetch({
+      surface: 'api',
+      openSequence: [[ACTIVE], []],
+    }) as unknown as typeof fetch
+    const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
+    const events: LifecycleEvent[] = []
+    // onEvent is single-handler — one registration records AND resolves.
+    const done = new Promise<void>((resolve, reject) => {
+      adapter.onEvent((e) => {
+        events.push(e)
+        if (e.phase === 'filled') resolve()
+      })
+      setTimeout(() => reject(new Error('no fill')), 1_500)
+    })
+    const ticket = await adapter.prepare(req)
+    await adapter.confirm(ticket.ticketId)
+    await done
+    expect(events[0]).toMatchObject({
+      phase: 'awaiting_confirm',
+      stage: 'working',
+      venueOrderId: '999',
+      cancellable: true,
+    })
+    expect(events.at(-1)?.phase).toBe('filled')
+  })
+
+  it('js_callback surface: waiting copy first, working ack once the host places', async () => {
+    const fetchImpl = makeFetch({
+      surface: 'js_callback',
+      handoffStates: ['pending', 'placed'],
+      openSequence: [[ACTIVE], []],
+    }) as unknown as typeof fetch
+    const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
+    const events: LifecycleEvent[] = []
+    // onEvent is single-handler — one registration records AND resolves.
+    const done = new Promise<void>((resolve, reject) => {
+      adapter.onEvent((e) => {
+        events.push(e)
+        if (e.phase === 'filled') resolve()
+      })
+      setTimeout(() => reject(new Error('no fill')), 1_500)
+    })
+    const ticket = await adapter.prepare(req)
+    await adapter.confirm(ticket.ticketId)
+    await done
+    // The one surface where "waiting for your confirm" is true — then placed.
+    expect(events[0]).toMatchObject({
+      phase: 'awaiting_confirm',
+      statusLine: 'WAITING FOR YOUR CONFIRM ON THE VENUE',
+    })
+    expect(events[0]?.stage).toBeUndefined()
+    const working = events.find((e) => e.stage === 'working')
+    expect(working).toMatchObject({ phase: 'awaiting_confirm', cancellable: true })
+  })
+
+  it('partial fills dedupe on filledQty — a poll tick is not news, a changed fill is', async () => {
+    const partial = (filledQty: number) => ({ ...ACTIVE, status: 30, filledQty }) // 30 = PARTIAL
+    const fetchImpl = makeFetch({
+      surface: 'api',
+      // same partial state observed twice, then progress, then gone (filled)
+      openSequence: [[partial(0.01)], [partial(0.01)], [partial(0.02)], []],
+    }) as unknown as typeof fetch
+    const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
+    const events: LifecycleEvent[] = []
+    // onEvent is single-handler — one registration records AND resolves.
+    const done = new Promise<void>((resolve, reject) => {
+      adapter.onEvent((e) => {
+        events.push(e)
+        if (e.phase === 'filled') resolve()
+      })
+      setTimeout(() => reject(new Error('no fill')), 1_500)
+    })
+    const ticket = await adapter.prepare(req)
+    await adapter.confirm(ticket.ticketId)
+    await done
+    const partials = events.filter((e) => e.phase === 'partial')
+    expect(partials).toHaveLength(2) // 0.01 once (not twice), then 0.02
+    expect(partials[0]).toMatchObject({ stage: 'working', fillPct: 20 })
+    expect(partials[1]?.fillPct).toBe(40)
+  })
+
   it('portfolio merges spot balances, perp positions and open orders', async () => {
     const fetchImpl = vi.fn(async (url: string | URL) => {
       const u = String(url)

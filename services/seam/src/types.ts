@@ -120,6 +120,12 @@ export type LifecycleEvent = {
   ticketId: string
   phase: LifecyclePhase
   statusLine: string
+  /** Progress stage inside the phase ('working', …) — open string vocabulary,
+   * mirrors the protocol's additive LifecycleFrame.stage. */
+  stage?: string
+  /** Whether the trader can still cancel at this point — working orders are;
+   * without it the gateway's passthrough would hide the affordance. */
+  cancellable?: boolean
   venueOrderId?: string
   fillPct?: number
   rows?: Array<{ label: string; value: string }>

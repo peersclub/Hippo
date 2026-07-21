@@ -241,10 +241,16 @@ export function buildService(
   /** callbackUrl per confirmed ticket — where venue events get delivered. */
   const callbacks = new Map<string, string>()
 
+  /** Only these phases end a ticket's lifecycle — awaiting_confirm (placement
+   * acks, cancel-pending) and partial both precede more events. Deleting the
+   * route on any non-partial phase silently dropped the fill that followed a
+   * placement ack. */
+  const TERMINAL_PHASES = new Set(['filled', 'cancelled', 'expired'])
+
   adapter.onEvent((event: LifecycleEvent) => {
     const callbackUrl = callbacks.get(event.ticketId)
     if (!callbackUrl) return
-    if (event.phase !== 'partial') callbacks.delete(event.ticketId) // terminal
+    if (TERMINAL_PHASES.has(event.phase)) callbacks.delete(event.ticketId)
     void deliver(callbackUrl, event)
   })
 
