@@ -164,6 +164,27 @@ export function pushFrame(item: ThreadItem) {
     return
   }
 
+  // Lifecycle frames collapse IN PLACE by ticketId — one card tells the whole
+  // order journey (placing → working → partial ticks → terminal). Without
+  // this every stage event and every partial stacks a new card. Journal
+  // replay after a reconnect replays events in order, so the collapse leaves
+  // exactly the latest state per ticket — correct by construction.
+  if (t === 'lifecycle' && item.kind === 'frame' && item.frame.type === 'lifecycle') {
+    const ticketId = item.frame.ticketId
+    const prev = thread.value
+    for (let i = prev.length - 1; i >= 0; i--) {
+      const x = prev[i]
+      if (x?.kind === 'frame' && x.frame.type === 'lifecycle' && x.frame.ticketId === ticketId) {
+        const next = [...prev]
+        next[i] = item
+        commitThread(next)
+        return
+      }
+    }
+    // No prior card for this ticket — fall through to normal handling (which
+    // also clears a trailing thinking/skeleton via the ephemeral rule).
+  }
+
   if (t === 'orders_snapshot') {
     orders.value = (item as { frame: OrdersSnapshot }).frame
     return

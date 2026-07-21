@@ -225,3 +225,54 @@ describe('banner routing', () => {
     expect(banners.value.map((b) => b.id)).toEqual(['b2', 'b3'])
   })
 })
+
+describe('lifecycle collapse by ticketId', () => {
+  const lifecycle = (id: string, ticketId: string, extra: Record<string, unknown> = {}) => ({
+    ...base,
+    id,
+    type: 'lifecycle' as const,
+    ticketId,
+    phase: 'awaiting_confirm' as const,
+    statusLine: 'SENDING…',
+    rows: [],
+    cancellable: true,
+    ...extra,
+  })
+
+  it('a later frame for the same ticket updates the card IN PLACE', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'u1', type: 'user_echo', text: 'buy' } })
+    pushFrame({ kind: 'frame', frame: lifecycle('l1', 't_1', { stage: 'placing' }) })
+    pushFrame({ kind: 'frame', frame: lifecycle('l2', 't_1', { stage: 'working' }) })
+    pushFrame({
+      kind: 'frame',
+      frame: lifecycle('l3', 't_1', { phase: 'filled', statusLine: 'FILLED' }),
+    })
+    const frames = thread.value.filter((x) => x.kind === 'frame').map((x) => x.frame)
+    expect(frames.filter((f) => f.type === 'lifecycle')).toHaveLength(1)
+    const lc = frames.find((f) => f.type === 'lifecycle') as { id: string; phase: string }
+    expect(lc.id).toBe('l3')
+    expect(lc.phase).toBe('filled')
+    // Position preserved: still where the first lifecycle card landed.
+    expect(frames[1]?.type).toBe('lifecycle')
+  })
+
+  it('different tickets never collapse into each other', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: lifecycle('l1', 't_1') })
+    pushFrame({ kind: 'frame', frame: lifecycle('l2', 't_2') })
+    const lcs = thread.value.filter((x) => x.kind === 'frame' && x.frame.type === 'lifecycle')
+    expect(lcs).toHaveLength(2)
+  })
+
+  it('the first lifecycle frame still clears a trailing thinking/skeleton card', () => {
+    thread.value = []
+    pushFrame({
+      kind: 'frame',
+      frame: { ...base, id: 'th', type: 'thinking', lines: ['Constructing order…'] },
+    })
+    pushFrame({ kind: 'frame', frame: lifecycle('l1', 't_9') })
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(types).toEqual(['lifecycle'])
+  })
+})
