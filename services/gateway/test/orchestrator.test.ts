@@ -267,15 +267,12 @@ describe('orchestrator: streaming research (brief_delta)', () => {
     await sendTurn(app, session.id, { kind: 'user_text', text: 'first question' })
     await waitForJournal(session, (t) => t.includes('brief_delta'))
     await sendTurn(app, session.id, { kind: 'user_text', text: 'second question' })
-    await waitForJournal(
-      session,
-      (t) => t.filter((x) => x === 'research_brief').length >= 2,
-      4_000,
-    )
+    await waitForJournal(session, (t) => t.filter((x) => x === 'research_brief').length >= 2, 4_000)
     const frames = session.journal.after(0).map((e) => e.frame)
     // Turn A ends in its stopped brief BEFORE turn B's skeleton — no interleave.
     const stoppedIdx = frames.findIndex(
-      (f) => f.type === 'research_brief' && (f as { eyebrow?: string }).eyebrow?.includes('STOPPED'),
+      (f) =>
+        f.type === 'research_brief' && (f as { eyebrow?: string }).eyebrow?.includes('STOPPED'),
     )
     const secondSkeletonIdx = frames.findIndex(
       (f, i) => f.type === 'skeleton' && i > frames.findIndex((x) => x.type === 'skeleton'),
@@ -788,9 +785,7 @@ describe('orchestrator: venue-event backstop + post-confirm cancel truth', () =>
     process.env.TICKET_EVENT_TIMEOUT_MS = '80'
     try {
       const { app, session } = await preparedAndConfirmed()
-      await waitForJournal(session, (t) =>
-        t.filter((x) => x === 'lifecycle').length >= 2,
-      )
+      await waitForJournal(session, (t) => t.filter((x) => x === 'lifecycle').length >= 2)
       const lifecycles = session.journal
         .after(0)
         .filter((e) => e.frame.type === 'lifecycle')

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hippo Roadmap — Shipped, In Progress, Planned</title>
+<meta name="description" content="The Hippo product roadmap: what's shipped to main, what's in flight, and what's planned — the conversational trading agent for exchanges, tracked feature by feature." />
+<link rel="icon" type="image/png" href="./assets/hippo-mascot.png" />
+<script>/* pre-paint theme boot — avoids a dark→light flash */
+try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.dataset.theme='light'}catch{}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./site.css" />
+<style>
+  .hero{padding:64px 0 8px;text-align:center}
+  .hero h1{font-family:var(--hippo-font-display);font-size:clamp(30px,4vw,46px);font-weight:700;letter-spacing:-.015em;line-height:1.1;margin:14px 0 14px}
+  .hero .lede{margin:0 auto}
+  .asof{font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.1em;color:var(--hippo-text-faint);margin-top:16px}
+
+  /* summary stat row */
+  .stats{display:flex;justify-content:center;gap:0;margin:26px auto 0;max-width:520px;border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);overflow:hidden;background:var(--hippo-panel)}
+  .stats > div{flex:1;padding:16px 10px;border-right:1px solid var(--hippo-hairline)}
+  .stats > div:last-child{border-right:none}
+  .stats .big{font-family:var(--hippo-font-display);font-size:30px;font-weight:700;line-height:1}
+  .stats .lbl{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-faint);margin-top:7px}
+  .stats .s-done .big{color:var(--hippo-up)}
+  .stats .s-prog .big{color:var(--hippo-amber)}
+  .stats .s-plan .big{color:var(--hippo-text-mid)}
+
+  /* toolbar: search + category filters */
+  .toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:38px 0 22px}
+  .search{flex:0 0 260px;max-width:100%;display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);background:var(--hippo-panel)}
+  .search input{flex:1;background:transparent;border:none;outline:none;color:var(--hippo-text-hi);font-family:var(--hippo-font-body);font-size:13px}
+  .search input::placeholder{color:var(--hippo-text-faint)}
+  .search .ic{color:var(--hippo-text-faint);font-size:13px}
+  .filters{display:flex;gap:7px;flex-wrap:wrap}
+  .fchip{display:inline-flex;align-items:center;gap:7px;font-family:var(--hippo-font-mono);font-size:10.5px;letter-spacing:.04em;padding:6px 12px;border-radius:var(--hippo-radius-pill);border:1px solid var(--hippo-hairline);color:var(--hippo-text-mid);background:transparent;cursor:pointer;transition:border-color .15s,color .15s,background .15s}
+  .fchip:hover{color:var(--hippo-text-hi);border-color:var(--hippo-text-faint)}
+  .fchip.on{color:var(--hippo-amber-ink);background:var(--hippo-amber);border-color:var(--hippo-amber)}
+  .fchip .dot{width:7px;height:7px;border-radius:50%}
+  .fchip.on .dot{display:none}
+
+  /* the board */
+  .board{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:80px}
+  .col{background:var(--hippo-panel);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);padding:16px 14px;min-height:200px}
+  .col-h{display:flex;align-items:center;gap:9px;padding:2px 6px 14px;border-bottom:1px solid var(--hippo-hairline);margin-bottom:14px}
+  .col-h .cdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+  .col-h .name{font-family:var(--hippo-font-mono);font-size:11px;letter-spacing:.12em;color:var(--hippo-text-hi);text-transform:uppercase}
+  .col-h .count{margin-left:auto;font-family:var(--hippo-font-mono);font-size:11px;color:var(--hippo-text-faint);background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:2px 9px}
+  .col-planned .cdot{background:var(--hippo-text-faint)}
+  .col-progress .cdot{background:var(--hippo-amber);animation:pulse var(--hippo-motion-pulse)}
+  .col-done .cdot{background:var(--hippo-up)}
+  .cards{display:flex;flex-direction:column;gap:10px}
+
+  /* feature card */
+  .rc{background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-cell);padding:13px 14px 11px;cursor:default;transition:border-color .15s,transform .15s}
+  .rc:hover{border-color:var(--hippo-text-faint);transform:translateY(-1px)}
+  .rc .cat{display:inline-flex;align-items:center;gap:6px;font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-text-dim);text-transform:uppercase}
+  .rc .cat .dot{width:7px;height:7px;border-radius:50%}
+  .rc h3{font-family:var(--hippo-font-display);font-size:14.5px;font-weight:600;line-height:1.25;margin:9px 0 6px;color:var(--hippo-text-hi)}
+  .rc p{font-size:12px;line-height:1.5;color:var(--hippo-text-mid)}
+  .rc .foot{display:flex;align-items:center;gap:10px;margin-top:11px;padding-top:9px;border-top:1px dashed var(--hippo-dash)}
+  .rc .ref{font-family:var(--hippo-font-mono);font-size:9.5px;color:var(--hippo-text-dim);background:var(--hippo-card-2);border:1px solid var(--hippo-hairline);border-radius:5px;padding:2px 7px}
+  .rc .ref a{color:var(--hippo-amber)}
+  .rc .ref a:hover{text-decoration:underline}
+  .rc .date{margin-left:auto;font-family:var(--hippo-font-mono);font-size:9.5px;color:var(--hippo-text-faint);letter-spacing:.05em}
+  .col-empty{font-family:var(--hippo-font-mono);font-size:10.5px;color:var(--hippo-text-faint);text-align:center;padding:26px 0}
+
+  .legend{font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-text-faint);text-align:center;margin:-40px 0 60px}
+  .legend b{color:var(--hippo-text-mid);font-weight:500}
+
+  @media (max-width:920px){.board{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav">
+    <a class="lockup display" href="/"><span class="chip"><img src="./assets/hippo-mascot.png" alt="Hippo" /></span>Ask Hippo</a>
+    <nav>
+      <a href="/#loop">Product</a>
+      <a href="/#exchanges">For Exchanges</a>
+      <a href="/#trust">Trust</a>
+      <a href="/design">Design</a>
+      <a href="/sdk">SDK</a>
+      <a class="on" href="/roadmap">Roadmap</a>
+    </nav>
+    <button type="button" class="theme-toggle grow" data-theme-toggle aria-label="Toggle theme">☀</button>
+    <a class="btn amber" href="/#cta">Talk to us</a>
+  </div>
+</header>
+
+<!-- ═══ Hero ═══ -->
+<div class="wrap hero">
+  <div class="eyebrow">PRODUCT ROADMAP</div>
+  <h1>What we're building<span style="color:var(--hippo-amber)">.</span></h1>
+  <p class="lede">Hippo is a conversational trading agent that embeds into partner exchanges — thin client, heavy core. This board tracks it feature by feature: what's shipped to <span class="mono" style="font-size:.9em">main</span>, what's in flight, and what's planned. Everything in <b style="color:var(--hippo-text-hi);font-weight:500">Shipped</b> is merged and verified end-to-end.</p>
+  <div class="stats">
+    <div class="s-done"><div class="big" data-stat="done">0</div><div class="lbl">SHIPPED</div></div>
+    <div class="s-prog"><div class="big" data-stat="progress">0</div><div class="lbl">IN PROGRESS</div></div>
+    <div class="s-plan"><div class="big" data-stat="planned">0</div><div class="lbl">PLANNED</div></div>
+  </div>
+  <div class="asof" id="asof">AS OF JULY 20, 2026 · main @ 19e79f5</div>
+</div>
+
+<!-- ═══ Board ═══ -->
+<section class="block" style="padding-top:36px">
+  <div class="wrap">
+    <div class="toolbar">
+      <label class="search">
+        <span class="ic">⌕</span>
+        <input type="search" id="q" placeholder="Search features…" aria-label="Search features" autocomplete="off" />
+      </label>
+      <div class="filters" id="filters"></div>
+    </div>
+
+    <div class="board">
+      <div class="col col-planned">
+        <div class="col-h"><span class="cdot"></span><span class="name">Planned</span><span class="count" data-count="planned">0</span></div>
+        <div class="cards" data-col="planned"></div>
+      </div>
+      <div class="col col-progress">
+        <div class="col-h"><span class="cdot"></span><span class="name">In Progress</span><span class="count" data-count="progress">0</span></div>
+        <div class="cards" data-col="progress"></div>
+      </div>
+      <div class="col col-done">
+        <div class="col-h"><span class="cdot"></span><span class="name">Shipped</span><span class="count" data-count="done">0</span></div>
+        <div class="cards" data-col="done"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="legend"><b>Shipped</b> = merged to main &amp; verified · <b>In Progress</b> = active on a branch/worktree · <b>Planned</b> = scoped, not started</div>
+
+<!-- ═══ Footer ═══ -->
+<footer class="site">
+  <div class="wrap">
+    <div class="row">
+      <a class="lockup display" href="/"><span class="chip"><img src="./assets/hippo-mascot.png" alt="" /></span>Ask Hippo</a>
+      <nav>
+        <a href="/#loop">Product</a>
+        <a href="/#exchanges">For Exchanges</a>
+        <a href="/#trust">Trust</a>
+        <a href="/design">Design</a>
+        <a href="/sdk">SDK</a>
+        <a class="on" href="/roadmap">Roadmap</a>
+      </nav>
+    </div>
+    <div class="fine">THIN CLIENT · HEAVY CORE · ONE PRODUCT, ONE REVENUE STREAM, AN EVAL HARNESS THAT COMPOUNDS</div>
+  </div>
+</footer>
+
+<script type="module" src="./theme.js"></script>
+<script>
+  // ── Categories (small colored dots; amber stays the one true accent) ──
+  const CATS = {
+    protocol:     { label: 'Protocol',     color: 'var(--hippo-amber)' },
+    sdk:          { label: 'SDK',          color: '#6ea8fe' },
+    intelligence: { label: 'Intelligence', color: '#b98cff' },
+    seam:         { label: 'Seam',         color: 'var(--hippo-up)' },
+    installer:    { label: 'Installer',    color: '#4fd1c5' },
+    host:         { label: 'Host',         color: '#f0964a' },
+    ops:          { label: 'Ops',          color: '#9aa4b8' },
+    trust:        { label: 'Trust',        color: '#ff8fb0' },
+    infra:        { label: 'Infra',        color: '#7c869c' },
+  }
+  const R = (id) => `https://github.com/peersclub/Hippo/pull/${id}`
+
+  // ── All data till now (from vault Roadmap.md, as-built @ 19e79f5) ──
+  const FEATURES = [
+    // ───── SHIPPED (merged to main) ─────
+    { s:'done', cat:'protocol', t:'Card protocol v1', d:'Zod schemas, additive-only frames with a per-frame fallback so an old SDK still renders something. Includes brief_delta streaming.', ref:'protocol', date:'Jul 15' },
+    { s:'done', cat:'sdk', t:'Thin-client SDK', d:'Preact in a closed Shadow DOM, two-stage ~1.1KB loader, 3-state posture, onboarding hero, share/feedback/order-pill interactions.', ref:'PR #3 · #6', date:'Jul 14' },
+    { s:'done', cat:'sdk', t:'SDK fold release', d:'Contextual chips (server followups), composer v2 with drafts that survive minimize, scroll anchoring, offline outbox, full a11y fold.', ref:'629251b', date:'Jul 16' },
+    { s:'done', cat:'intelligence', t:'Intent + research engines', d:'Regex fast-paths (<15ms) plus LLM strict-JSON classification. Numbers are retrieval, prose is generation — stats always come from the live snapshot.', ref:'PR #8', date:'Jul 15' },
+    { s:'done', cat:'intelligence', t:'Answer cache (unit economics)', d:'Keyed by canonical-question + symbol + 5-min market window, no user FK — one market answer served fleet-wide. Volatility-scaled TTL 45–300s.', ref:'PR #8', date:'Jul 15' },
+    { s:'done', cat:'trust', t:'Output-side guardrail', d:'Advice-language detector ported 1:1 from the eval harness. One trip regenerates sterner; a second replaces the answer with a decline card.', ref:'PR #8', date:'Jul 15' },
+    { s:'done', cat:'intelligence', t:'Gateway core', d:'Real sessions, an SSE frame journal with Last-Event-ID resume, the deterministic orchestrator state machine, and a truthful degraded fallback.', ref:'PR #7', date:'Jul 15' },
+    { s:'done', cat:'protocol', t:'SSE streaming (brief_delta)', d:'Gateway coalesces model deltas in a 150ms window into one growing card; the authoritative research_brief supersedes them. ~4ms first byte.', ref:'PR #9', date:'Jul 15' },
+    { s:'done', cat:'intelligence', t:'Memory v1 — opt-in persona', d:'Persona (experience level, followed assets, open threads) over Postgres, per-partner + per-user scoped. Wired into the orchestrator; not surveillance.', ref:'PR #10', date:'Jul 15' },
+    { s:'done', cat:'intelligence', t:'Market-data service', d:'CCXT snapshot/live pricing with request coalescing and a bounded LRU cache so a miss-storm never hammers the exchange.', ref:'PR #2', date:'Jul 14' },
+    { s:'done', cat:'seam', t:'Execution seam + adapters', d:'The venue-neutral canonical trading interface (prepare→confirm→lifecycle→positions) with sim / KoinBX / Assetworks adapters selected by VENUE=.', ref:'seam', date:'Jul 18' },
+    { s:'done', cat:'protocol', t:'Canonical order model', d:'Capability-driven spot / futures_perp / options discriminated union, money as strings, VenueCapabilities where presence means enabled. The trade keystone.', ref:'PR #16', date:'Jul 18' },
+    { s:'done', cat:'host', t:'Assetworks test host', d:'A self-contained venue on the KoinBX-shaped HMAC-signed wire with a spot+perps fill engine, plus a Next.js 15 host app to parasite Hippo onto.', ref:'5875aa6', date:'Jul 20' },
+    { s:'done', cat:'ops', t:'Partner admin portal V1', d:'Tenancy by construction (partnerId only from the session): operator invite → one-time claim → login, MAU vs quota, embed tag, secret rotation, audit.', ref:'PR #21', date:'Jul 18' },
+    { s:'done', cat:'ops', t:'Admin panel + durable stores', d:'packages/stores over Postgres — partners, plans, users, memory — with gateway enforcement (suspend/block/MAU quota) and a full audit trail.', ref:'stores', date:'Jul 17' },
+    { s:'done', cat:'trust', t:'Tier-1 auth hardening', d:'Timing-safe internal-token guards on the seam trading surface, gateway venue-events, and memory PII routes; callbackUrl SSRF allowlist; gateway rate limit.', ref:'PR #22–24', date:'Jul 18' },
+    { s:'done', cat:'trust', t:'Non-ephemeral secrets + Secure cookies', d:'admin/portal refuse to boot in prod without distinct JWT secrets (were per-boot random → logged everyone out on redeploy); cookies Secure by default.', ref:'PR #25', date:'Jul 20' },
+    { s:'done', cat:'sdk', t:'SDK partner-token session mint', d:'A data-hippo-token-url attribute fetches a fresh Bearer per mint from the partner’s own endpoint — no long-lived secret ever sits in the page.', ref:'PR #27', date:'Jul 20' },
+    { s:'done', cat:'infra', t:'Cloud deploy — Railway + Vercel', d:'All backend services + Postgres + Redis on Railway, frontends on Vercel. Live loop verified: JWT mint → SSE research brief from claude-haiku-4.5 → order ticket.', ref:'deploy', date:'Jul 20' },
+    { s:'done', cat:'trust', t:'Eval harness v1', d:'A 300-query bake-off set (≥25% Hinglish, 60 advice-bait) with a stdlib runner, mock mode, and launch gates — the compounding IP.', ref:'PR #5', date:'Jul 14' },
+    { s:'done', cat:'installer', t:'CLI: scan · conform · embed · verify', d:'hippo scan (read-only site/API + trade-type discovery), the CTI conformance suite, hippo embed/verify, and hippo register provisioning — all deterministic.', ref:'PR #19', date:'Jul 18' },
+    { s:'done', cat:'sdk', t:'i18n Phase 1 + Arabic copy', d:'Chrome catalog with t()/resolveLocale/isRtl and data-hippo-locale; RTL plumbing. The ar catalog is complete but dormant until a partner enables it.', ref:'PR #15 · #17', date:'Jul 18' },
+
+    // ───── IN PROGRESS ─────
+    { s:'progress', cat:'installer', t:'Model-driven adapter codegen', d:'The deterministic half is done — hippo scan drafts adapter.config.yaml. Pending: the model-driven mapping.ts for divergent shapes + rejections.yaml.', ref:'CLI stage 4', date:'active' },
+    { s:'progress', cat:'seam', t:'Conversational perps via parasite', d:'Spot is the wired parasite path. Extending the seam PrepareRequest + intelligence FuturesPerpOrder + gateway pass-through to place perps from the thread.', ref:'seam', date:'next' },
+    { s:'progress', cat:'ops', t:'Tier-2 durability', d:'Durable ticket routing and a durable seam audit store so nothing rides only in memory. Next migration 009.', ref:'migration 009', date:'active' },
+    { s:'progress', cat:'sdk', t:'Arabic native-speaker review', d:'Kartik / MENA native review gates flipping data-hippo-locale="ar" live for any Arabic-market partner. The copy itself is already merged.', ref:'PR #17', date:'review' },
+    { s:'progress', cat:'infra', t:'Cloud-wire the Assetworks host', d:'The new host-venue service and assetworks-exchange Next.js app aren’t on Railway/Vercel yet, so pushing them to main doesn’t auto-deploy them.', ref:'deploy', date:'active' },
+
+    // ───── PLANNED ─────
+    { s:'planned', cat:'intelligence', t:'Model bake-off', d:'Run the eval harness against real candidates (Qwen3-32B / QwQ-32B vs a 70B baseline) to score Phase 2’s exit gate. Blocked on GPU access.', ref:'eval gate', date:'needs GPU' },
+    { s:'planned', cat:'seam', t:'Confirm-surface options', d:'Deep link / JS callback / partner-hosted modal per venue. Open Decisions #6 — needs pilot-partner eng; only the api surface is wired today.', ref:'Decision #6', date:'partner' },
+    { s:'planned', cat:'seam', t:'KoinBX lifecycle feedback', d:'No status-by-id or webhook from KoinBX exists yet, which blocks reliable terminal order state. Open Decisions #9.', ref:'Decision #9', date:'partner' },
+    { s:'planned', cat:'installer', t:'Second-venue dogfood', d:'Regenerate the KoinBX adapter through the CLI and diff it against the hand-built one — the diff is the codegen quality score.', ref:'CLI', date:'—' },
+    { s:'planned', cat:'installer', t:'Theming extraction', d:'Partner accent theming beyond light/dark, extracted from the partner site by hippo init at integration time.', ref:'hippo init', date:'—' },
+    { s:'planned', cat:'infra', t:'vLLM pods', d:'Regional intent (7–8B) + a global research tier (~30B) + the shared cache tier — the production serving topology.', ref:'infra', date:'—' },
+    { s:'planned', cat:'infra', t:'GPU capacity plan', d:'India + Gulf GPU quotes (Kartik) feeding a real capacity model for the pilot regions.', ref:'infra', date:'—' },
+    { s:'planned', cat:'ops', t:'Pilot launch', d:'Onboarding hero moment, ambient market pulse, and share cards live for the first pilot partner (KoinBX-scale India exchange).', ref:'Phase 5', date:'—' },
+    { s:'planned', cat:'trust', t:'Pilot instrumentation', d:'Sudha’s telemetry: load curves, cache hit rate, queries/MAU, true cost/MAU, and lift — the numbers that underwrite the rate card.', ref:'Phase 5', date:'—' },
+    { s:'planned', cat:'sdk', t:'SDK stop-line review', d:'The exit-gate audit that the SDK only ever draws what the server sends it — no client-invented state.', ref:'exit gate', date:'—' },
+  ]
+
+  // ── Render ──
+  const COLS = ['planned', 'progress', 'done']
+  let activeCat = 'all'
+  let query = ''
+
+  function refChip(ref) {
+    const m = ref.match(/^PR #(\d+)$/)
+    if (m) return `<a href="${R(m[1])}" target="_blank" rel="noopener">${ref}</a>`
+    return ref
+  }
+
+  function cardHTML(f) {
+    const c = CATS[f.cat]
+    return `<article class="rc" data-cat="${f.cat}" data-text="${`${f.t} ${f.d}`.toLowerCase().replace(/"/g, '')}">
+      <span class="cat"><span class="dot" style="background:${c.color}"></span>${c.label}</span>
+      <h3>${f.t}</h3>
+      <p>${f.d}</p>
+      <div class="foot"><span class="ref">${refChip(f.ref)}</span><span class="date">${f.date}</span></div>
+    </article>`
+  }
+
+  function render() {
+    const counts = { planned: 0, progress: 0, done: 0 }
+    for (const col of COLS) {
+      const host = document.querySelector(`[data-col="${col}"]`)
+      const items = FEATURES.filter((f) => f.s === col)
+        .filter((f) => activeCat === 'all' || f.cat === activeCat)
+        .filter((f) => !query || `${f.t} ${f.d}`.toLowerCase().includes(query))
+      counts[col] = items.length
+      host.innerHTML = items.length
+        ? items.map(cardHTML).join('')
+        : `<div class="col-empty">nothing here${query || activeCat !== 'all' ? ' for this filter' : ''}</div>`
+      document.querySelector(`[data-count="${col}"]`).textContent = items.length
+    }
+  }
+
+  // Summary stats reflect the TRUE totals, not the current filter.
+  for (const col of COLS) {
+    document.querySelector(`[data-stat="${col}"]`).textContent = FEATURES.filter((f) => f.s === col).length
+  }
+
+  // Category filter chips (only categories that actually appear).
+  const present = [...new Set(FEATURES.map((f) => f.cat))]
+  const filters = document.getElementById('filters')
+  const chip = (id, label, color) =>
+    `<button type="button" class="fchip${id === 'all' ? ' on' : ''}" data-cat="${id}">${color ? `<span class="dot" style="background:${color}"></span>` : ''}${label}</button>`
+  filters.innerHTML =
+    chip('all', 'All') + present.map((id) => chip(id, CATS[id].label, CATS[id].color)).join('')
+  filters.addEventListener('click', (e) => {
+    const btn = e.target.closest('.fchip')
+    if (!btn) return
+    activeCat = btn.dataset.cat
+    for (const b of filters.querySelectorAll('.fchip')) b.classList.toggle('on', b === btn)
+    render()
+  })
+
+  // Search.
+  document.getElementById('q').addEventListener('input', (e) => {
+    query = e.target.value.trim().toLowerCase()
+    render()
+  })
+
+  render()
+</script>
+</body>
+</html>

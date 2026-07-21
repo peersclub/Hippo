@@ -3,7 +3,11 @@ import { defineConfig, type PluginOption } from 'vite'
 
 // Clean URLs for secondary pages: /design, /sdk → their .html in dev and
 // preview. Static hosts (Vercel/Netlify cleanUrls) do the same in production.
-const PAGES: Record<string, string> = { '/design': '/design.html', '/sdk': '/sdk.html' }
+const PAGES: Record<string, string> = {
+  '/design': '/design.html',
+  '/sdk': '/sdk.html',
+  '/roadmap': '/roadmap.html',
+}
 const rewrite = (req: { url?: string }) => {
   const path = req.url?.split('?')[0] ?? ''
   if (PAGES[path]) req.url = PAGES[path]
@@ -36,6 +40,7 @@ export default defineConfig({
         index: resolve(import.meta.dirname, 'index.html'),
         design: resolve(import.meta.dirname, 'design.html'),
         sdk: resolve(import.meta.dirname, 'sdk.html'),
+        roadmap: resolve(import.meta.dirname, 'roadmap.html'),
       },
     },
   },
