@@ -342,7 +342,7 @@ export class AssetworksVenueAdapter implements VenueAdapter {
       return
     }
 
-    // 'api' — place directly with the scoped key (KoinBX-style).
+    // 'api' — place directly with the scoped key (Assetworks-style).
     const placed = await this.signedPost<CreateOrderData>('/api/v1/trade/orders', orderBody)
     if (!placed.status || !placed.data?.orderId)
       throw new Error(placed.error ?? 'assetworks rejected the order at placement')
@@ -400,7 +400,7 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     void tick()
   }
 
-  /** Poll reconciler (webhook backstop) — identical contract to the KoinBX one:
+  /** Poll reconciler (webhook backstop) — identical contract to the Assetworks one:
    *  while the order shows in open-orders it is working; once it drops out we
    *  treat it as terminally filled. We match by clientOrderId first so the
    *  js_callback path (host placed it) reconciles the same way. */

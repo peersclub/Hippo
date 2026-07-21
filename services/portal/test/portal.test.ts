@@ -23,7 +23,7 @@ async function testPortal() {
     partnerId: 'kbx',
     partnerKey: 'pk_kbx',
     jwtSecret: 'kbx-venue-secret',
-    venueName: 'KoinBX',
+    venueName: 'Assetworks',
     locales: ['en', 'hi'],
     suggestedQueries: ['ETH funding rate'],
     planId: 'pilot',
@@ -181,7 +181,7 @@ describe('portal auth', () => {
       payload: { email: 'admin@koinbx.com', password: 'a long portal password' },
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toMatchObject({ partnerId: 'kbx', role: 'admin', venueName: 'KoinBX' })
+    expect(res.json()).toMatchObject({ partnerId: 'kbx', role: 'admin', venueName: 'Assetworks' })
     const cookie = String(res.headers['set-cookie'])
     expect(cookie).toContain('hippo_portal=')
     expect(cookie).toContain('HttpOnly')
@@ -303,11 +303,11 @@ describe('integration', () => {
       method: 'PATCH',
       url: '/portal/integration',
       headers: { cookie },
-      payload: { venueName: 'KoinBX Pro', jwtSecret: 'smuggled' },
+      payload: { venueName: 'Assetworks Pro', jwtSecret: 'smuggled' },
     })
     // Unknown keys are stripped by the schema, not honored.
     expect(patch.statusCode).toBe(200)
-    expect(patch.json()).toMatchObject({ venueName: 'KoinBX Pro' })
+    expect(patch.json()).toMatchObject({ venueName: 'Assetworks Pro' })
     await app.close()
   })
 

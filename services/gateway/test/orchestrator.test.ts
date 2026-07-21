@@ -408,7 +408,7 @@ describe('orchestrator: action route', () => {
     }>(session, 'order_ticket')
     expect(ticket.sideLabel).toBe('BUY · MKT')
     expect(ticket.rows).toEqual(ticketFixture.rows)
-    expect(ticket.cta).toContain('KoinBX')
+    expect(ticket.cta).toContain('Assetworks')
     await app.close()
   })
 

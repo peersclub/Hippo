@@ -58,19 +58,19 @@ describe('onboarding gating store', () => {
 
 describe('consent rows config', () => {
   it('interpolates the venue name into the venue-data row', () => {
-    const rows = consentRows('KoinBX')
-    expect(rows[0]?.title).toBe('Your account & orders stay with KoinBX')
+    const rows = consentRows('Assetworks')
+    expect(rows[0]?.title).toBe('Your account & orders stay with Assetworks')
     expect(rows[0]?.control).toBe('static')
   })
 
   it('personal memory is a toggle defaulting ON', () => {
-    const memory = consentRows('KoinBX').find((r) => r.id === 'memory')
+    const memory = consentRows('Assetworks').find((r) => r.id === 'memory')
     expect(memory?.control).toBe('toggle')
     expect(memory?.defaultOn).toBe(true)
   })
 
   it('the L2 row is the per-jurisdiction lever — a one-word control switch', () => {
-    const l2 = consentRows('KoinBX').find((r) => r.id === 'l2')
+    const l2 = consentRows('Assetworks').find((r) => r.id === 'l2')
     // Disclosed-in-terms today; flipping to 'checkbox' is the entire change.
     expect(l2?.control).toBe('static')
     expect(['static', 'toggle', 'checkbox']).toContain(l2?.control)

@@ -6,7 +6,7 @@
  * conformance suite *executes* the contract against a live adapter (via a
  * driver) and certifies it. Build Plan/05 sequences this before the codegen
  * generator — "the verifier must exist before the generator" — so a generated
- * adapter can be graded against the same battery the hand-built KoinBX adapter
+ * adapter can be graded against the same battery the hand-built Assetworks adapter
  * passes.
  *
  * These types are the suite's OWN specification of the contract, deliberately

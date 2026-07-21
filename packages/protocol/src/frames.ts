@@ -77,7 +77,7 @@ export const OrderTicketFrame = z.object({
    * money rows stay server-formatted. Additive — omitted reads as spot. */
   capability: z.enum(CAPABILITIES).optional(),
   rows: z.array(z.object({ label: z.string(), value: z.string() })).min(1),
-  cta: z.string(), // e.g. "Review & confirm in KoinBX →"
+  cta: z.string(), // e.g. "Review & confirm in Assetworks →"
   footnote: z.string(), // restates the seam
 })
 

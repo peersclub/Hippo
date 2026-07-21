@@ -1,7 +1,7 @@
 /**
  * Assetworks Exchange — venue-side domain + wire types.
  *
- * The spot trade wire is deliberately KoinBX-shaped (numeric enums, a
+ * The spot trade wire is deliberately Assetworks-shaped (numeric enums, a
  * `{ status, data }` envelope, HMAC headers) so the integration we test is the
  * same SHAPE as the real Phase-3 pilot rails — a parasite adapter written for
  * one is a small diff from the other. Perps are a clean superset: the same
@@ -9,7 +9,7 @@
  * spot wire never needed.
  */
 
-/** KoinBX-compatible enums — a parasite that speaks KoinBX speaks these. */
+/** Assetworks-compatible enums — a parasite that speaks Assetworks speaks these. */
 export const ORDER_SIDE = { buy: 0, sell: 1 } as const
 export const TRADE_TYPE = { limit: 10, market: 20 } as const
 export const ORDER_STATUS = {
@@ -98,7 +98,7 @@ export type Handoff = {
   createdAt: number
 }
 
-/** Normalized place request (parsed from the KoinBX-shaped wire body). */
+/** Normalized place request (parsed from the Assetworks-shaped wire body). */
 export type PlaceRequest = {
   clientOrderId?: string
   market: Market

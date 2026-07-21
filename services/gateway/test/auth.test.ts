@@ -22,7 +22,7 @@ describe('auth: dev mode', () => {
       config: { venueName: string; locales: string[]; suggestedQueries: string[] }
     }
     expect(body.sessionId).toMatch(/^s_/)
-    expect(body.config.venueName).toBe('KoinBX')
+    expect(body.config.venueName).toBe('Assetworks')
     expect(body.config.locales).toContain('hinglish')
     expect(body.config.suggestedQueries.length).toBeGreaterThan(0)
     expect(sessions.get(body.sessionId)?.venueUserId).toBeNull()

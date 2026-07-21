@@ -59,7 +59,7 @@ export function devPartner(): PartnerRecord {
     partnerId: 'koinbx-dev',
     partnerKey: 'pk_demo',
     jwtSecret: devPartnerSecret(),
-    venueName: 'KoinBX',
+    venueName: 'Assetworks',
     locales: ['en', 'hi', 'hinglish'],
     suggestedQueries: [
       "What's driving SOL volume?",

@@ -35,8 +35,8 @@ describe('card protocol v1 — frames', () => {
         { label: 'Instrument', value: 'BTC / USDT' },
         { label: 'Est. cost incl. fees', value: '3,068.30 USDT' },
       ],
-      cta: 'Review & confirm in KoinBX →',
-      footnote: 'Hippo prepared this order. KoinBX will ask you to confirm.',
+      cta: 'Review & confirm in Assetworks →',
+      footnote: 'Hippo prepared this order. Assetworks will ask you to confirm.',
     })
     expect(result.ok).toBe(true)
   })

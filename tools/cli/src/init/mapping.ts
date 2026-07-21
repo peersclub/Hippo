@@ -6,7 +6,7 @@
  * display shape the SDK renders (PreparedTicket, LifecycleEvent, Portfolio,
  * …). This module emits the DETERMINISTIC scaffolding only: a self-contained,
  * compilable TypeScript module with one stub per op, each carrying a `// TODO`
- * and a pointer at the hand-built KoinBX adapter as the reference pattern.
+ * and a pointer at the hand-built Assetworks adapter as the reference pattern.
  *
  * The actual synthesis of a mapping BODY is Open Decision #3 (frontier
  * codegen, needs model access) and is deliberately NOT done here. It sits
@@ -35,7 +35,7 @@ interface CapabilityTarget {
   returnType: string
   /** CTI shape declarations the return type depends on. */
   needs: TargetName[]
-  /** Where to look in the KoinBX adapter for the equivalent transform. */
+  /** Where to look in the Assetworks adapter for the equivalent transform. */
   referenceHint: string
 }
 

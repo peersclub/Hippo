@@ -1,7 +1,7 @@
 import type { OpenApiDoc } from '../../src/scan/cti.js'
 
 /**
- * Realistic exchange-shaped OpenAPI v3 fixture (Binance/KoinBX-style spot API).
+ * Realistic exchange-shaped OpenAPI v3 fixture (Binance/Assetworks-style spot API).
  * Deliberately has NO positions and NO webhooks — those are the expected gaps.
  */
 export const exchangeSpec: OpenApiDoc = {

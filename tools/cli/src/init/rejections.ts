@@ -45,7 +45,7 @@ const CANONICAL: Record<CanonicalReason, ReasonCopy> = {
   },
   not_found: {
     reason: 'The referenced order or symbol was not found.',
-    fix: 'Confirm the order id / symbol; treat a missing resting order as terminal (see the KoinBX poll reconciler).',
+    fix: 'Confirm the order id / symbol; treat a missing resting order as terminal (see the Assetworks poll reconciler).',
   },
   venue_error: {
     reason: 'The venue returned a server-side error.',

@@ -40,9 +40,9 @@ describe('t', () => {
     expect(t('ar', 'brand_ask')).toBe('اسأل Hippo')
   })
   it('interpolates named vars', () => {
-    expect(t('en', 'manage_on', { venue: 'KoinBX' })).toBe('Manage on KoinBX →')
-    expect(t('hi', 'manage_on', { venue: 'KoinBX' })).toContain('KoinBX')
-    expect(t('ar', 'manage_on', { venue: 'KoinBX' })).toContain('KoinBX')
+    expect(t('en', 'manage_on', { venue: 'Assetworks' })).toBe('Manage on Assetworks →')
+    expect(t('hi', 'manage_on', { venue: 'Assetworks' })).toContain('Assetworks')
+    expect(t('ar', 'manage_on', { venue: 'Assetworks' })).toContain('Assetworks')
   })
   it('hi, hi-Latn and ar actually differ from en for translated chrome', () => {
     for (const key of ['hero_title', 'send', 'minimize'] as const) {

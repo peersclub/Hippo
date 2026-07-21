@@ -752,7 +752,7 @@ describe('partner admin invites (portal seats)', () => {
         partnerId: 'kbx',
         partnerKey: 'pk_kbx',
         jwtSecret: 'kbx-secret-123',
-        venueName: 'KoinBX',
+        venueName: 'Assetworks',
         locales: ['en'],
         suggestedQueries: [],
       },

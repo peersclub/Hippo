@@ -1,7 +1,7 @@
 /**
  * In-process driver — adapts a seam VenueAdapter to the conformance suite's
  * ConformanceDriver, calling the adapter's methods directly (no HTTP hop). This
- * is how `hippo conform` dogfoods the real sim and KoinBX adapters against the
+ * is how `hippo conform` dogfoods the real sim and Assetworks adapters against the
  * same battery a generated adapter will face. The suite's contract types and
  * the seam's VenueAdapter types are structurally aligned by design, so the
  * mapping is a thin pass-through.

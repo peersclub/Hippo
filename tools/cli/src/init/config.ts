@@ -24,7 +24,7 @@ const DATA_RETURNING: ReadonlySet<CapabilityId> = new Set([
 function authStrategy(schemes: string[]): string {
   const blob = schemes.join(' ').toLowerCase()
   if (/hmac|signature|sign/.test(blob))
-    return 'hmac-signed request (per-key secret; see the KoinBX adapter as the reference pattern)'
+    return 'hmac-signed request (per-key secret; see the Assetworks adapter as the reference pattern)'
   if (/bearer|oauth|jwt/.test(blob)) return 'bearer token'
   if (/apikey|api-key|x-.*key/.test(blob)) return 'api-key header'
   return 'unknown — confirm with the venue before implementing'

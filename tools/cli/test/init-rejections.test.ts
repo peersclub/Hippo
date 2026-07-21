@@ -69,7 +69,7 @@ describe('draftRejections — from the scanned error responses', () => {
     expect(entry('not_found')?.statuses).toEqual(['404'])
   })
 
-  it('attaches plain-words reason + fix, pointing auth at the KoinBX pattern', () => {
+  it('attaches plain-words reason + fix, pointing auth at the Assetworks pattern', () => {
     expect(entry('auth_failed')?.fix).toContain('koinbx-venue.ts')
     expect(entry('invalid_request')?.reason.length).toBeGreaterThan(0)
   })

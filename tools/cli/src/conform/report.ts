@@ -1,7 +1,7 @@
 /**
  * Conformance report rendering (pure) — the artifact `hippo conform` writes and
  * the fitness signal for the codegen dogfood (Build Plan/05: "regenerate the
- * KoinBX adapter blind; diff against hand-built = quality score"). Markdown
+ * Assetworks adapter blind; diff against hand-built = quality score"). Markdown
  * report + short stdout summary, matching scan/report.ts conventions.
  */
 import type { CheckResult, ConformanceReport } from './types.js'
@@ -47,7 +47,7 @@ export function renderConformanceReport(r: ConformanceReport): string {
     '',
     '---',
     '',
-    '_This suite is venue-neutral: it grades a generated adapter against the same battery the hand-built KoinBX adapter passes. A `FAIL` is a contract violation; a `SKIP` means an earlier failure left nothing to test._',
+    '_This suite is venue-neutral: it grades a generated adapter against the same battery the hand-built Assetworks adapter passes. A `FAIL` is a contract violation; a `SKIP` means an earlier failure left nothing to test._',
     '',
   )
   return lines.join('\n')

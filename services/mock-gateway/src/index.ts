@@ -59,7 +59,7 @@ app.post('/v1/session', async () => {
   return {
     sessionId: id,
     config: {
-      venueName: 'KoinBX',
+      venueName: 'Assetworks',
       locales: ['en', 'hi', 'hinglish'],
       suggestedQueries: [
         "What's driving SOL volume?",

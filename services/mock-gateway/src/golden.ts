@@ -13,7 +13,7 @@ export type FrameDraft = { type: string } & Record<string, unknown>
 export type FrameSource = FrameDraft | (() => Promise<FrameDraft>)
 export type ScriptStep = { afterMs: number; frame: FrameSource }
 
-export const VENUE = 'KoinBX'
+export const VENUE = 'Assetworks'
 
 export const ordersSnapshot: FrameDraft = {
   type: 'orders_snapshot',

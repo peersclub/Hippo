@@ -109,7 +109,7 @@ describe('renderMappingTs — generated module', () => {
     expect(source).toContain('export function mapBalances(raw: VenueResponse): Portfolio {')
   })
 
-  it('points every stub at the KoinBX reference pattern with a TODO', () => {
+  it('points every stub at the Assetworks reference pattern with a TODO', () => {
     expect(source).toContain('services/seam/src/koinbx-venue.ts')
     expect(source).toContain('TODO(hippo:stage4)')
   })
