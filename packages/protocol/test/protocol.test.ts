@@ -82,6 +82,81 @@ describe('card protocol v1 — frames', () => {
     })
     expect(bad.success).toBe(false)
   })
+
+  it('parses a bare lifecycle frame — old gateways send no stage/side', () => {
+    const result = parseFrame({
+      ...base,
+      type: 'lifecycle',
+      ticketId: 't_1',
+      phase: 'awaiting_confirm',
+      statusLine: 'WAITING FOR YOUR CONFIRM ON THE VENUE',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.frame.type === 'lifecycle') {
+      expect(result.frame.stage).toBeUndefined()
+      expect(result.frame.side).toBeUndefined()
+    }
+  })
+
+  it('parses lifecycle progress fields — stage, side, fillPct', () => {
+    const result = parseFrame({
+      ...base,
+      type: 'lifecycle',
+      ticketId: 't_1',
+      phase: 'partial',
+      stage: 'working',
+      side: 'buy',
+      fillPct: 40,
+      statusLine: 'PARTIALLY FILLED',
+      rows: [{ label: 'Filled', value: '0.02 / 0.05' }],
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.frame.type === 'lifecycle') {
+      expect(result.frame.stage).toBe('working')
+      expect(result.frame.side).toBe('buy')
+      expect(result.frame.fillPct).toBe(40)
+    }
+  })
+
+  it('accepts an UNKNOWN stage string — open vocabulary, future servers may grow it', () => {
+    const result = parseFrame({
+      ...base,
+      type: 'lifecycle',
+      ticketId: 't_1',
+      phase: 'awaiting_confirm',
+      stage: 'venue_review',
+      statusLine: 'UNDER REVIEW ON THE VENUE',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.frame.type === 'lifecycle') {
+      expect(result.frame.stage).toBe('venue_review')
+    }
+  })
+
+  it('rejects an invalid side — closed set, mirrors order_ticket', () => {
+    const bad = Frame.safeParse({
+      ...base,
+      type: 'lifecycle',
+      ticketId: 't_1',
+      phase: 'filled',
+      side: 'hold',
+      statusLine: 'FILLED',
+    })
+    expect(bad.success).toBe(false)
+  })
+
+  it('strips unknown lifecycle keys — a newer server never breaks this schema', () => {
+    const result = parseFrame({
+      ...base,
+      type: 'lifecycle',
+      ticketId: 't_1',
+      phase: 'filled',
+      statusLine: 'FILLED',
+      futureField: { anything: true },
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect('futureField' in result.frame).toBe(false)
+  })
 })
 
 describe('card protocol v1 — uplinks', () => {
