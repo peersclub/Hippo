@@ -97,10 +97,15 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
   personas: Map<string, Persona>
   updates: Array<{ userId: string; patch: PersonaUpdate }>
   clears: string[]
+  scopeDocsData: { global: string; host: string; user: string }
+  composed: Map<string, string>
 } {
   const personas = new Map<string, Persona>()
   const updates: Array<{ userId: string; patch: PersonaUpdate }> = []
   const clears: string[] = []
+  // Scope docs the test can preset; composed snapshots the orchestrator wrote.
+  const scopeDocsData = { global: '', host: '', user: '' }
+  const composed = new Map<string, string>()
   const blank = (): Persona => ({
     optIn: false,
     experienceLevel: null,
@@ -132,6 +137,18 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
     },
     async clear(_partnerId, userId) {
       clears.push(userId)
+    },
+    scopeDocsData,
+    composed,
+    async scopeDocs() {
+      return { ...scopeDocsData }
+    },
+    async saveComposed(sessionId, _p, _u, text) {
+      composed.set(sessionId, text)
+    },
+    async getComposed(sessionId) {
+      const c = composed.get(sessionId)
+      return c === undefined ? null : { composed: c, updatedAt: 1 }
     },
   }
 }
@@ -218,6 +235,11 @@ export const deadMemory: MemoryClient = {
   clear: async () => {
     throw new Error('memory unreachable')
   },
+  // Down memory → the compose path degrades to empty docs, never throws into
+  // the turn (the orchestrator must treat memory as best-effort).
+  scopeDocs: async () => ({ global: '', host: '', user: '' }),
+  saveComposed: async () => {},
+  getComposed: async () => null,
 }
 
 export const deadMarket: MarketClient = {

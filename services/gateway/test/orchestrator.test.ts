@@ -1064,3 +1064,57 @@ describe('orchestrator: stage-1 interpretation', () => {
     await app.close()
   })
 })
+
+describe('orchestrator: memory composition (Phase C)', () => {
+  it('composes scope docs, forwards them as memoryContext, tags the card, and saves the snapshot', async () => {
+    let seenMemory: string | undefined
+    const intel = stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        seenMemory = (req as { memoryContext?: string }).memoryContext
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+    })
+    const memory = stubMemory()
+    memory.scopeDocsData.global = 'never give advice'
+    memory.scopeDocsData.host = 'KoinBX-style venue'
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+
+    // memoryContext forwarded, authority-ordered
+    expect(seenMemory).toContain('PLATFORM RULES')
+    expect(seenMemory).toContain('VENUE CONTEXT')
+    expect(seenMemory?.indexOf('PLATFORM RULES')).toBeLessThan(
+      seenMemory?.indexOf('VENUE CONTEXT') ?? 0,
+    )
+    // interpretation card tagged with the applied scopes
+    const interp = frameOfType<{ memoryScopes: string[] }>(session, 'interpretation')
+    expect(interp.memoryScopes).toEqual(['platform', 'venue'])
+    // composed snapshot persisted for the inspector
+    expect(memory.composed.get(session.id)).toContain('PLATFORM RULES')
+    await app.close()
+  })
+
+  it('no scope docs → no memoryContext, empty scopes (memory off is inert)', async () => {
+    let seenMemory: string | undefined = 'set'
+    const intel = stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        seenMemory = (req as { memoryContext?: string }).memoryContext
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+    })
+    const { app, sessions } = await testApp({ intel, memory: stubMemory() })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(seenMemory).toBeUndefined()
+    const interp = frameOfType<{ memoryScopes: string[] }>(session, 'interpretation')
+    expect(interp.memoryScopes).toEqual([])
+    await app.close()
+  })
+})

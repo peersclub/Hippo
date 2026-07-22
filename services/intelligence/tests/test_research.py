@@ -299,3 +299,53 @@ class NeverFiveHundredFloor(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryComposition(unittest.IsolatedAsyncioTestCase):
+    """Composed memory reaches the prompt as context, below the guardrail."""
+
+    class CapturingRouter:
+        def __init__(self, output: str) -> None:
+            self.output = output
+            self.calls = 0
+            self.mode = "mock"
+            self.model = "scripted"
+            self.systems: list[str] = []
+
+        async def chat(self, messages, **_):
+            self.calls += 1
+            self.systems.append(messages[0]["content"])
+            return self.output
+
+    async def test_memory_context_appended_below_guardrail(self) -> None:
+        from prompts import HIPPO_SYSTEM_PROMPT_V0
+
+        router = self.CapturingRouter(CLEAN_PROSE)
+        await research.build_brief(
+            "why is btc down",
+            "BTC",
+            router,
+            concept_mode=True,
+            memory_context="[PLATFORM RULES (binding)]\nAlways be concise.",
+        )
+        system = router.systems[0]
+        # The product guardrail comes FIRST; memory is appended as context.
+        self.assertTrue(system.startswith(HIPPO_SYSTEM_PROMPT_V0))
+        self.assertIn("BACKGROUND MEMORY", system)
+        self.assertIn("Always be concise.", system)
+        self.assertLess(system.index("BACKGROUND MEMORY"), system.index("Always be concise."))
+
+    async def test_no_memory_leaves_system_prompt_untouched(self) -> None:
+        from prompts import HIPPO_SYSTEM_PROMPT_V0
+
+        router = self.CapturingRouter(CLEAN_PROSE)
+        await research.build_brief("why is btc down", "BTC", router, concept_mode=True)
+        self.assertEqual(router.systems[0], HIPPO_SYSTEM_PROMPT_V0)
+
+    def test_cache_scope_varies_by_memory(self) -> None:
+        a = research._cache_scope("BTC", False, "en", None, "memory A")
+        b = research._cache_scope("BTC", False, "en", None, "memory B")
+        none = research._cache_scope("BTC", False, "en", None, None)
+        self.assertNotEqual(a, b)  # different memory → different cache key
+        self.assertNotEqual(a, none)  # memory present → not the fleet-wide key
+        self.assertEqual(none, "BTC:en:-")  # empty memory keeps the original scope

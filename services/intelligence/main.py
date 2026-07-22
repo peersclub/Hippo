@@ -96,6 +96,9 @@ class RespondRequest(BaseModel):
     language: Literal["en", "hi", "hinglish"] | None = None
     # Additive (Memory v1): opt-in persona from the gateway's memory read.
     persona: PersonaIn | None = None
+    # Additive (Memory levels): the composed layered memory block (platform →
+    # venue → user → session). Context only — the guardrail stays authoritative.
+    memoryContext: str | None = Field(default=None, max_length=16_000)
 
 
 @app.post("/v1/intent")
@@ -127,6 +130,7 @@ async def respond(req: RespondRequest) -> dict[str, Any]:
             symbol=req.symbol,
             language=req.language,
             experience_level=_persona_override or (req.persona.experienceLevel if req.persona else None),
+            memory_context=req.memoryContext,
         )
     except Exception:
         # Never 500: degrade to a data-free decline-shaped card rather than
@@ -165,6 +169,7 @@ async def respond_stream(req: RespondRequest) -> StreamingResponse:
                 symbol=req.symbol,
                 language=req.language,
                 experience_level=_persona_override or (req.persona.experienceLevel if req.persona else None),
+                memory_context=req.memoryContext,
             ):
                 # First readable output (any event past the retrieval-only
                 # `meta`) → the first-token-p95 rate-card number.

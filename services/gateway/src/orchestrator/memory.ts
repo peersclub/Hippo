@@ -29,11 +29,30 @@ export type PersonaUpdate = {
   openThread?: { text: string; symbol?: string }
 }
 
+/** A freeform scope-memory document (global/host/user note). */
+export type MemoryDoc = { body: string; updatedAt: number }
+
 export interface MemoryClient {
   /** null when the memory service is unreachable — the turn proceeds. */
   get(partnerId: string, userId: string): Promise<Persona | null>
   update(partnerId: string, userId: string, patch: PersonaUpdate): Promise<void>
   clear(partnerId: string, userId: string): Promise<void>
+  /** Freeform scope documents for prompt composition. All degrade to '' when
+   * memory is down — a turn never waits on or breaks over them. */
+  scopeDocs(
+    partnerId: string,
+    userId: string,
+  ): Promise<{ global: string; host: string; user: string }>
+  /** Persist the composed memory snapshot for a session (inspector record).
+   * Fire-and-forget; failure never affects the turn. */
+  saveComposed(
+    sessionId: string,
+    partnerId: string,
+    userId: string,
+    composed: string,
+  ): Promise<void>
+  /** Read a session's composed snapshot (admin inspector). */
+  getComposed(sessionId: string): Promise<{ composed: string; updatedAt: number } | null>
 }
 
 async function request(url: string, init: RequestInit): Promise<Response> {
@@ -87,6 +106,43 @@ export function createMemoryClient(baseUrl = MEMORY_URL): MemoryClient {
       // Explicit empty JSON body: fastify 400s a bodyless POST that carries
       // a JSON content-type (found live — the fire-and-forget hid the 400).
       await guarded(`${personaUrl(partnerId, userId)}/clear`, { method: 'POST', body: '{}' })
+    },
+    async scopeDocs(partnerId, userId) {
+      // Three independent reads; any that fails degrades to '' — memory being
+      // down must never break or stall a turn. Run in parallel.
+      const read = async (path: string): Promise<string> => {
+        try {
+          const res = await guarded(`${baseUrl}${path}`, { method: 'GET' })
+          if (!res?.ok) return ''
+          return ((await res.json()) as { body?: string }).body ?? ''
+        } catch {
+          return ''
+        }
+      }
+      const [global, host, user] = await Promise.all([
+        read('/v1/scope/global'),
+        read(`/v1/scope/host/${encodeURIComponent(partnerId)}`),
+        read(`/v1/scope/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`),
+      ])
+      return { global, host, user }
+    },
+    async saveComposed(sessionId, partnerId, userId, composed) {
+      await guarded(`${baseUrl}/v1/scope/session/${encodeURIComponent(sessionId)}/composed`, {
+        method: 'PUT',
+        body: JSON.stringify({ composed, partnerId, userId }),
+      })
+    },
+    async getComposed(sessionId) {
+      try {
+        const res = await guarded(`${baseUrl}/v1/scope/session/${encodeURIComponent(sessionId)}`, {
+          method: 'GET',
+        })
+        if (!res?.ok) return null
+        const j = (await res.json()) as { composed?: string; updatedAt?: number }
+        return { composed: j.composed ?? '', updatedAt: j.updatedAt ?? 0 }
+      } catch {
+        return null
+      }
     },
   }
 }
