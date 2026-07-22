@@ -1081,6 +1081,7 @@ describe('orchestrator: memory composition (Phase C)', () => {
     memory.scopeDocsData.host = 'KoinBX-style venue'
     const { app, sessions } = await testApp({ intel, memory })
     const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
     await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
     await waitForJournal(session, (t) => t.includes('research_brief'))
 
@@ -1115,6 +1116,48 @@ describe('orchestrator: memory composition (Phase C)', () => {
     expect(seenMemory).toBeUndefined()
     const interp = frameOfType<{ memoryScopes: string[] }>(session, 'interpretation')
     expect(interp.memoryScopes).toEqual([])
+    await app.close()
+  })
+})
+
+describe('orchestrator: memoryLab entitlement gate (Phase D)', () => {
+  const composeIntel = (capture: { mem?: string }) =>
+    stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        capture.mem = (req as { memoryContext?: string }).memoryContext
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+    })
+
+  it('UNENTITLED partner: docs exist but nothing composes — no memoryContext, empty scopes', async () => {
+    const capture: { mem?: string } = { mem: 'unset' }
+    const memory = stubMemory()
+    memory.scopeDocsData.global = 'never give advice' // a doc IS set…
+    const { app, sessions } = await testApp({ intel: composeIntel(capture), memory })
+    const session = await createSession(app, sessions) // …but no memoryLab entitlement
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(capture.mem).toBeUndefined() // …so it never reaches the model
+    const interp = frameOfType<{ memoryScopes: string[] }>(session, 'interpretation')
+    expect(interp.memoryScopes).toEqual([])
+    expect(memory.composed.get(session.id)).toBeUndefined() // and nothing persisted
+    await app.close()
+  })
+
+  it('ENTITLED partner: the same docs compose and reach the model', async () => {
+    const capture: { mem?: string } = {}
+    const memory = stubMemory()
+    memory.scopeDocsData.global = 'never give advice'
+    const { app, sessions } = await testApp({ intel: composeIntel(capture), memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(capture.mem).toContain('PLATFORM RULES')
+    const interp = frameOfType<{ memoryScopes: string[] }>(session, 'interpretation')
+    expect(interp.memoryScopes).toEqual(['platform'])
     await app.close()
   })
 })

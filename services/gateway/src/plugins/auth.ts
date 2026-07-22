@@ -30,6 +30,10 @@ export type PartnerConfig = {
   venueName: string
   locales: string[]
   suggestedQueries: string[]
+  /** Plan entitlements, resolved at session mint and carried on the session
+   * so the orchestrator can feature-gate server-side (e.g. `memoryLab` for the
+   * pre-prod memory feature). Absent = no entitlements. */
+  entitlements?: Record<string, unknown>
 }
 
 /**
