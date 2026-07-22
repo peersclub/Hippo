@@ -1,6 +1,6 @@
 # 🟢 Live Demo Status — shareable links
 
-**As of:** July 21, 2026 · **Verified:** full loop over the wire against the public link — token endpoint → Bearer session mint → streaming research brief (`anthropic/claude-haiku-4.5`) → prepared order ticket (`BUY · MKT`). All 7 Railway services rebuilt green from main `efcaf99` (incl. the futures/capability work from PR #28). Demo partner identity renamed to `assetworks-demo` (`418f7e1`) — the whole demo is Assetworks end to end now.
+**As of:** July 22, 2026 · **Verified:** full loop over the wire against the public link — token endpoint → Bearer session mint → **"UNDERSTOOD" interpretation card** → streaming research brief (`anthropic/claude-haiku-4.5`) → prepared order ticket (`BUY · MKT`) → honest lifecycle (PLACED · WORKING → FILLED). Railway services running from main `8ffb707` (interpret flow #31 + honest lifecycle #29 + real-venue demo). **Critical prod fix now live:** the seam was never sending its internal token, so every cloud FILL had been silently 401ing since the #24 auth hardening — fixed in `61bb79b`, fills complete over the public link now. Demo partner identity is `assetworks-demo` (`418f7e1`) — the whole demo is Assetworks end to end.
 
 > [!success] The whole app is live and shareable
 > [PR #27](https://github.com/peersclub/Hippo/pull/27) (SDK partner-token session mint) merged; host-demo deployed with the AssetWorks host page; backend complete on Railway (intelligence + memory + Redis joined gateway/admin/portal/market-data/seam after the plan upgrade). Research briefs come from the real LLM — the degraded price-feed fallback is no longer the default path.
@@ -72,7 +72,7 @@ psql "$DATABASE_PUBLIC_URL" -c "update admin_operators set password_hash='$HASH'
 ## Known issues
 
 - **Railway builder bug (found + worked around Jul 20–21):** any workspace `package.json` with a `next` dependency silently crashes Railway's Metal builder — even Dockerfile builds of unrelated services die at "scheduling" with no logs. Proven by bisection builds (evidence IDs in commit `efcaf99`). Workaround: `apps/assetworks-exchange` (Next 15 test host) lives on branch **`assetworks-exchange-app`**, not main. Restore after Railway fixes their scanner — worth a support ticket at station.railway.com.
-- **Main CI red** (biome formatting drift + 1 CLI codegen test, inherited from the AssetWorks push). Deployed product unaffected.
+- **Main CI green** again as of [PR #29](https://github.com/peersclub/Hippo/pull/29) (fixed the vercel.json format drift + the CLI typecheck flake — first fully-green run since July 19). Note the `Lint (biome)` job is intentionally non-blocking (`continue-on-error`); only `Build & test` gates merges.
 - OpenRouter key rotation still pending (same key as `.env`).
 
 ## Redeploy runbook (any of the four frontends)

@@ -101,7 +101,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     <div class="s-prog"><div class="big" data-stat="progress">0</div><div class="lbl">IN PROGRESS</div></div>
     <div class="s-plan"><div class="big" data-stat="planned">0</div><div class="lbl">PLANNED</div></div>
   </div>
-  <div class="asof" id="asof">AS OF JULY 21, 2026 · main @ cd2b804</div>
+  <div class="asof" id="asof">AS OF JULY 22, 2026 · main @ 8ffb707</div>
 </div>
 
 <!-- ═══ Board ═══ -->
@@ -168,9 +168,13 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   }
   const R = (id) => `https://github.com/peersclub/Hippo/pull/${id}`
 
-  // ── All data till now (from vault Roadmap.md, as-built @ cd2b804) ──
+  // ── All data till now (from vault Roadmap.md, as-built @ 8ffb707) ──
   const FEATURES = [
     // ───── SHIPPED (merged to main) ─────
+    { s:'done', cat:'intelligence', t:'Two-stage interpret flow', d:'The fast model now interprets AND restructures every query before the answer model runs, and the trader sees what was understood: a persistent, collapsible “UNDERSTOOD” card above the answer. The gateway forwards the clean rewrite — not the raw text — to the research engine. (Phase A of the memory feature.)', ref:'PR #31', date:'Jul 22' },
+    { s:'done', cat:'host', t:'Host control center', d:'A full operator console on the test host: embed & appearance, venue realism & chaos (manual/instant/working fills, slippage, latency, reject rate, maintenance), instruments & capabilities (which drive a derived /v1/capabilities), live Hippo AI controls (model switch, mock toggle, cache, persona), order management with real cancel, and wallet reset.', ref:'host', date:'Jul 22' },
+    { s:'done', cat:'sdk', t:'Movable frosted-glass panel', d:'The intermediate “overlay” posture becomes a true float: drag it by the header (clamped fully on-screen, position persisted per embed) and toggle a translucent backdrop-blur mode so the host’s own chart and orderbook stay visible around it — non-intrusive co-existence. Pure client presentation, no protocol change.', ref:'PR #30', date:'Jul 21' },
+    { s:'done', cat:'seam', t:'Honest order journey', d:'Lifecycle cards now show real progress — SENDING → PLACED · WORKING → FILLED as one collapsing card with a fill bar and neutral cancelled states — via additive stage/side fields (stage is an open string by design). Fixed the regression where the seam never sent its internal token, so every cloud fill had been silently 401ing since the auth hardening.', ref:'PR #29', date:'Jul 21' },
     { s:'done', cat:'protocol', t:'Card protocol v1', d:'Zod schemas, additive-only frames with a per-frame fallback so an old SDK still renders something. Includes brief_delta streaming.', ref:'protocol', date:'Jul 15' },
     { s:'done', cat:'sdk', t:'Thin-client SDK', d:'Preact in a closed Shadow DOM, two-stage ~1.1KB loader, 3-state posture, onboarding hero, share/feedback/order-pill interactions.', ref:'PR #3 · #6', date:'Jul 14' },
     { s:'done', cat:'sdk', t:'SDK fold release', d:'Contextual chips (server followups), composer v2 with drafts that survive minimize, scroll anchoring, offline outbox, full a11y fold.', ref:'629251b', date:'Jul 16' },
@@ -202,6 +206,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { s:'progress', cat:'infra', t:'Cloud-wire the Assetworks host', d:'The Next.js host app is parked on branch assetworks-exchange-app — its next dependency crashes Railway’s Metal builder, so it stays off main until that’s fixed; the host-venue service still needs Railway wiring.', ref:'branch', date:'blocked' },
 
     // ───── PLANNED ─────
+    { s:'planned', cat:'intelligence', t:'4-level memory (phases B–D)', d:'Building on the shipped interpret flow: session / user / host / global memory stores composed into the prompt, a session inspector to see what was recalled, and entitlement-gated access by plan. Phase A (visible interpretation) is live.', ref:'PR #31 next', date:'active' },
     { s:'planned', cat:'intelligence', t:'Model bake-off', d:'Run the eval harness against real candidates (Qwen3-32B / QwQ-32B vs a 70B baseline) to score Phase 2’s exit gate. Blocked on GPU access.', ref:'eval gate', date:'needs GPU' },
     { s:'planned', cat:'seam', t:'Confirm-surface options', d:'Deep link / JS callback / partner-hosted modal per venue. Open Decisions #6 — needs pilot-partner eng; only the api surface is wired today.', ref:'Decision #6', date:'partner' },
     { s:'planned', cat:'seam', t:'Real-venue lifecycle feedback', d:'A spot pilot venue with no status-by-id or webhook blocks reliable terminal order state; the poll reconciler is the backstop. Open Decisions #9.', ref:'Decision #9', date:'partner' },
