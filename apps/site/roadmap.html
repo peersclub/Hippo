@@ -67,6 +67,16 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   .rc .date{margin-left:auto;font-family:var(--hippo-font-mono);font-size:9.5px;color:var(--hippo-text-faint);letter-spacing:.05em}
   .col-empty{font-family:var(--hippo-font-mono);font-size:10.5px;color:var(--hippo-text-faint);text-align:center;padding:26px 0}
 
+  /* Shipped column: collapsible date groups (keeps the tall column from setting the page height) */
+  .mgroup{border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-cell);background:var(--hippo-card-2);overflow:hidden}
+  .mgroup summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;padding:10px 12px;font-family:var(--hippo-font-mono);font-size:10.5px;letter-spacing:.1em;color:var(--hippo-text-mid);text-transform:uppercase;user-select:none;transition:color .15s}
+  .mgroup summary::-webkit-details-marker{display:none}
+  .mgroup summary::before{content:'▶';font-size:8px;color:var(--hippo-text-faint);transition:transform .15s}
+  .mgroup[open] summary::before{transform:rotate(90deg)}
+  .mgroup summary:hover{color:var(--hippo-text-hi)}
+  .mgroup .mg-count{margin-left:auto;color:var(--hippo-text-faint);background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:1px 8px}
+  .mg-cards{display:flex;flex-direction:column;gap:10px;padding:2px 10px 12px}
+
   .legend{font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-text-faint);text-align:center;margin:-40px 0 60px}
   .legend b{color:var(--hippo-text-mid);font-weight:500}
 
@@ -240,6 +250,35 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     </article>`
   }
 
+  // Sort key for a "Mon D" date string (all-July today, but month-safe).
+  const MONTHS = { Jan:1, Feb:2, Mar:3, Apr:4, May:5, Jun:6, Jul:7, Aug:8, Sep:9, Oct:10, Nov:11, Dec:12 }
+  function dateKey(d) {
+    const m = String(d).match(/^([A-Za-z]{3})\s+(\d+)$/)
+    return m ? MONTHS[m[1]] * 100 + Number(m[2]) : -1
+  }
+
+  // Shipped is long, so group it into collapsible date sections — latest open,
+  // older folded. When a search/filter is active every matching group opens so
+  // results are never hidden behind a collapsed header.
+  function doneGroupedHTML(items, forceOpen) {
+    const groups = new Map()
+    for (const f of items) {
+      if (!groups.has(f.date)) groups.set(f.date, [])
+      groups.get(f.date).push(f)
+    }
+    return [...groups.keys()]
+      .sort((a, b) => dateKey(b) - dateKey(a))
+      .map((date, i) => {
+        const cards = groups.get(date)
+        const open = forceOpen || i === 0
+        return `<details class="mgroup"${open ? ' open' : ''}>
+          <summary>${date}<span class="mg-count">${cards.length}</span></summary>
+          <div class="mg-cards">${cards.map(cardHTML).join('')}</div>
+        </details>`
+      })
+      .join('')
+  }
+
   function render() {
     const counts = { planned: 0, progress: 0, done: 0 }
     for (const col of COLS) {
@@ -248,9 +287,12 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
         .filter((f) => activeCat === 'all' || f.cat === activeCat)
         .filter((f) => !query || `${f.t} ${f.d}`.toLowerCase().includes(query))
       counts[col] = items.length
+      const filtering = !!(query || activeCat !== 'all')
       host.innerHTML = items.length
-        ? items.map(cardHTML).join('')
-        : `<div class="col-empty">nothing here${query || activeCat !== 'all' ? ' for this filter' : ''}</div>`
+        ? col === 'done'
+          ? doneGroupedHTML(items, filtering)
+          : items.map(cardHTML).join('')
+        : `<div class="col-empty">nothing here${filtering ? ' for this filter' : ''}</div>`
       document.querySelector(`[data-count="${col}"]`).textContent = items.length
     }
   }
