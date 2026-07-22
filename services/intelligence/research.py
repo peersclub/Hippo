@@ -8,6 +8,7 @@ the live snapshot embedded in its prompt ("ground every number in this data").
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
@@ -19,6 +20,7 @@ from marketdata import extract_symbol, fetch_snapshot, to_pair
 from prompts import (
     BRIEF_FORMAT_INSTRUCTIONS,
     HIPPO_SYSTEM_PROMPT_V0,
+    MEMORY_CONTEXT_PREFIX,
     STERNER_GUARDRAIL_SUFFIX,
 )
 from providers import Message, MockProvider, ProviderError, ProviderRouter
@@ -181,6 +183,7 @@ async def build_brief(
     concept_mode: bool,
     language: str = "en",
     experience_level: str | None = None,
+    memory_context: str | None = None,
 ) -> dict[str, Any]:
     """Generate a research/concept brief; returns brief OR decline dict.
 
@@ -192,15 +195,15 @@ async def build_brief(
     """
     snapshot = None if concept_mode else await fetch_snapshot(symbol)
     user = _brief_user_prompt(text, symbol, snapshot, language, experience_level)
+    system = _system_with_memory(memory_context)
 
-    prose = await _generate_prose(router, HIPPO_SYSTEM_PROMPT_V0, user)
+    prose = await _generate_prose(router, system, user)
     flagged = detect_advice_language(
         " ".join([prose["headline"], *prose["paragraphs"], *prose["followups"]])
     )
     if flagged:
-        prose = await _generate_prose(
-            router, HIPPO_SYSTEM_PROMPT_V0 + STERNER_GUARDRAIL_SUFFIX, user
-        )
+        # Sterner guardrail suffix stays AFTER the memory block so the law wins.
+        prose = await _generate_prose(router, system + STERNER_GUARDRAIL_SUFFIX, user)
         flagged = detect_advice_language(
             " ".join([prose["headline"], *prose["paragraphs"], *prose["followups"]])
         )
@@ -331,17 +334,39 @@ async def build_decline(
     }
 
 
+# Composed memory is appended to the system prompt (below the guardrail) and
+# folded into the cache scope so a memory-A answer is never served to memory-B.
+def _system_with_memory(memory_context: str | None) -> str:
+    if not memory_context:
+        return HIPPO_SYSTEM_PROMPT_V0
+    return HIPPO_SYSTEM_PROMPT_V0 + MEMORY_CONTEXT_PREFIX + memory_context
+
+
+def _memory_key(memory_context: str | None) -> str:
+    """Short stable hash of the composed memory for the cache scope — an empty
+    memory keeps the original fleet-wide key, so unentitled turns are unaffected."""
+    if not memory_context:
+        return "-"
+    return hashlib.sha1(memory_context.encode("utf-8")).hexdigest()[:12]
+
+
 # --- top-level respond ---------------------------------------------------------
 def _cache_scope(
-    asset: str, concept_mode: bool, lang: str, experience_level: str | None
+    asset: str,
+    concept_mode: bool,
+    lang: str,
+    experience_level: str | None,
+    memory_context: str | None = None,
 ) -> str:
     """Cache key scope. Language always scopes (a Hindi answer never serves
-    an English asker). Experience level scopes CONCEPT answers only — three
-    depth variants are still fleet-wide cacheable; market briefs ignore the
-    level entirely so their cache stays maximally shared (memo §9)."""
+    an English asker). Experience level scopes CONCEPT answers only. Composed
+    memory, when present, scopes everything — a personalised answer must never
+    be served to a different memory context (empty memory keeps the original
+    fleet-wide key)."""
+    mem = _memory_key(memory_context)
     if concept_mode:
-        return f"-:{lang}:{experience_level or '-'}"
-    return f"{asset}:{lang}"
+        return f"-:{lang}:{experience_level or '-'}:{mem}"
+    return f"{asset}:{lang}:{mem}"
 
 
 async def respond(
@@ -352,6 +377,7 @@ async def respond(
     symbol: str | None = None,
     language: str | None = None,
     experience_level: str | None = None,
+    memory_context: str | None = None,
 ) -> dict[str, Any]:
     """Handle POST /v1/respond. Always returns a brief or decline dict."""
     asset = (symbol or extract_symbol(text)).split("/")[0].upper()
@@ -365,7 +391,7 @@ async def respond(
 
     # Cache: market-level answers only (research + concept), keyed on the
     # canonical question + scope + 5-minute window (see _cache_scope).
-    cache_scope = _cache_scope(asset, concept_mode, lang, experience_level)
+    cache_scope = _cache_scope(asset, concept_mode, lang, experience_level, memory_context)
     hit = cache.get(text, cache_scope)
     if hit is not None:
         # Serve the stored brief labeled honestly: cached=true, and the
@@ -380,6 +406,7 @@ async def respond(
         concept_mode=concept_mode,
         language=lang,
         experience_level=experience_level if concept_mode else None,
+        memory_context=memory_context,
     )
     record_respond_outcome(str(answer.get("kind", "brief")))
     if answer.get("kind") == "brief":
@@ -414,6 +441,7 @@ async def respond_stream(
     symbol: str | None = None,
     language: str | None = None,
     experience_level: str | None = None,
+    memory_context: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming variant of respond() for POST /v1/respond/stream (SSE).
 
@@ -443,7 +471,7 @@ async def respond_stream(
         return
 
     concept_mode = intent in ("concept", "smalltalk")
-    cache_scope = _cache_scope(asset, concept_mode, lang, experience_level)
+    cache_scope = _cache_scope(asset, concept_mode, lang, experience_level, memory_context)
     hit = cache.get(text, cache_scope)
     if hit is not None:
         record_respond_outcome(str(hit.get("kind", "brief")))
@@ -464,8 +492,9 @@ async def respond_stream(
     user = _brief_user_prompt(
         text, asset, snapshot, lang, experience_level if concept_mode else None
     )
+    system = _system_with_memory(memory_context)
     messages: list[Message] = [
-        {"role": "system", "content": HIPPO_SYSTEM_PROMPT_V0},
+        {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
     extractor = JsonProseExtractor()
@@ -488,7 +517,7 @@ async def respond_stream(
     if prose is None:
         # Stream was unusable — fall back to the blocking JSON path (which
         # bottoms out at the deterministic mock); `done` supersedes deltas.
-        prose = await _generate_prose(router, HIPPO_SYSTEM_PROMPT_V0, user)
+        prose = await _generate_prose(router, system, user)
 
     flagged = detect_advice_language(
         " ".join([prose["headline"], *prose["paragraphs"], *prose["followups"]])

@@ -184,6 +184,31 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     return scopeStore.setUserNote(req.params.partnerId, req.params.userId, body, Date.now())
   })
 
+  // Session composed-memory snapshot — the gateway writes what it sent; the
+  // admin inspector reads it. Not editable prose (that's the other scopes);
+  // this is the record of the composed block per session.
+  app.get<{ Params: { sessionId: string } }>('/v1/scope/session/:sessionId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    return scopeStore.getSession(req.params.sessionId)
+  })
+  app.put<{ Params: { sessionId: string } }>(
+    '/v1/scope/session/:sessionId/composed',
+    async (req, reply) => {
+      if (!requireInternalToken(req, reply)) return reply
+      const b = req.body as { composed?: unknown; partnerId?: unknown; userId?: unknown } | null
+      if (typeof b?.composed !== 'string')
+        return reply.code(400).send({ error: 'composed (string) required' })
+      await scopeStore.putComposed(
+        req.params.sessionId,
+        typeof b.partnerId === 'string' ? b.partnerId : '',
+        typeof b.userId === 'string' ? b.userId : '',
+        b.composed,
+        Date.now(),
+      )
+      return { ok: true }
+    },
+  )
+
   app.get('/health', async () => ({
     ok: true,
     service: 'memory',

@@ -9,7 +9,7 @@ import { useState } from 'preact/hooks'
 import { ApiError, get, put } from '../api.js'
 import { Busy, ErrorBanner, toast, useLoad } from '../ui.js'
 
-type Scope = 'global' | 'host' | 'user'
+type Scope = 'global' | 'host' | 'user' | 'session'
 type Doc = { body: string; updatedAt: number }
 
 const SCOPES: { key: Scope; label: string; blurb: string }[] = [
@@ -28,12 +28,24 @@ const SCOPES: { key: Scope; label: string; blurb: string }[] = [
     label: 'User',
     blurb: 'A freeform note for one user, alongside their structured persona.',
   },
+  {
+    key: 'session',
+    label: 'Session (inspector)',
+    blurb: 'Read-only: the exact composed memory block that was sent for a session.',
+  },
 ]
 
-function pathFor(scope: Scope, partnerId: string, userId: string): string | null {
+function pathFor(
+  scope: Scope,
+  partnerId: string,
+  userId: string,
+  sessionId: string,
+): string | null {
   if (scope === 'global') return '/v1/memory-config/global'
   if (scope === 'host')
     return partnerId ? `/v1/memory-config/host/${encodeURIComponent(partnerId)}` : null
+  if (scope === 'session')
+    return sessionId ? `/v1/memory-config/session/${encodeURIComponent(sessionId)}` : null
   return partnerId && userId
     ? `/v1/memory-config/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`
     : null
@@ -43,20 +55,23 @@ export function MemoryConfigPage() {
   const [scope, setScope] = useState<Scope>('global')
   const [partnerId, setPartnerId] = useState('')
   const [userId, setUserId] = useState('')
+  const [sessionId, setSessionId] = useState('')
   const [body, setBody] = useState('')
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const path = pathFor(scope, partnerId.trim(), userId.trim())
+  const readOnly = scope === 'session' // the inspector, not an editor
+  const path = pathFor(scope, partnerId.trim(), userId.trim(), sessionId.trim())
 
   const state = useLoad(async () => {
     if (!path) {
       setLoadedFrom(null)
       return
     }
-    const doc = await get<Doc>(path)
-    setBody(doc.body)
+    // Session returns { composed, … }; the editable scopes return { body }.
+    const doc = await get<Doc & { composed?: string }>(path)
+    setBody(readOnly ? (doc.composed ?? '') : doc.body)
     setLoadedFrom(path)
   }, [path])
 
@@ -78,7 +93,8 @@ export function MemoryConfigPage() {
 
   const needsIds =
     (scope === 'host' && !partnerId.trim()) ||
-    (scope === 'user' && (!partnerId.trim() || !userId.trim()))
+    (scope === 'user' && (!partnerId.trim() || !userId.trim())) ||
+    (scope === 'session' && !sessionId.trim())
   const current = SCOPES.find((s) => s.key === scope)
 
   return (
@@ -127,14 +143,41 @@ export function MemoryConfigPage() {
         </div>
       )}
 
+      {scope === 'session' && (
+        <div class="stack">
+          <label class="field">
+            Session ID
+            <input
+              value={sessionId}
+              onInput={(e) => setSessionId((e.target as HTMLInputElement).value)}
+            />
+          </label>
+        </div>
+      )}
+
       {needsIds ? (
         <p class="dim">
-          Enter the {scope === 'user' ? 'partner and user ids' : 'partner id'} to load its memory.
+          Enter the{' '}
+          {scope === 'user'
+            ? 'partner and user ids'
+            : scope === 'session'
+              ? 'session id'
+              : 'partner id'}{' '}
+          to load its memory.
         </p>
       ) : state.loading ? (
         <Busy rows={4} />
       ) : state.error ? (
         <ErrorBanner message={state.error} retry={state.retry} />
+      ) : readOnly ? (
+        <div class="stack">
+          <textarea
+            rows={14}
+            value={body || '(no memory was composed for this session)'}
+            readOnly
+          />
+          <span class="dim mono">{body.length} chars · exactly what was sent to the model</span>
+        </div>
       ) : (
         <form onSubmit={save} class="stack">
           <textarea

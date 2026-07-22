@@ -103,6 +103,9 @@ export interface IntelligenceClient {
     intent: string
     symbol?: string
     persona?: { experienceLevel: 'new' | 'intermediate' | 'pro' }
+    /** Layered memory context (platform → venue → user → session). Passed as
+     * context ONLY; the engine keeps its no-advice guardrail authoritative. */
+    memoryContext?: string
   }): AsyncGenerator<RespondStreamEvent>
 }
 

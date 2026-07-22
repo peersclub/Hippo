@@ -33,7 +33,8 @@ import type {
 import { guessIntent } from './intelligence.js'
 import type { MarketClient, MarketSnapshot } from './market.js'
 import { asOfDisplay, cacheAgeDisplay, symbolFromText } from './market.js'
-import type { MemoryClient } from './memory.js'
+import type { MemoryClient, Persona } from './memory.js'
+import { composeMemory } from './memory-compose.js'
 import type { SeamClient } from './seam.js'
 
 /** Below this intent confidence we don't trust the route and nudge instead. */
@@ -80,6 +81,17 @@ export type Orchestrator = {
 
 function userKey(session: Session): string {
   return session.venueUserId ?? session.id
+}
+
+/** One-line USER-scope summary from the structured persona (opted-in only) —
+ * folded into the composed memory's USER layer. Empty when nothing to say. */
+function personaSummary(persona: Persona | null): string {
+  if (!persona?.optIn) return ''
+  const bits: string[] = []
+  if (persona.experienceLevel) bits.push(`${persona.experienceLevel} trader`)
+  if (persona.followedAssets.length)
+    bits.push(`follows ${persona.followedAssets.slice(0, 5).join(', ')}`)
+  return bits.join(' · ')
 }
 
 /** Fallback interpretation summary when stage-1 didn't supply one (degraded
@@ -645,15 +657,38 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return
     }
 
+    // Memory composition (Phase C, best-effort): read the persona + the three
+    // freeform scope docs and layer them into ONE authority-ordered block
+    // (platform → venue → user → session). All degrade to empty when memory
+    // is down — a turn never waits on or breaks over memory. The composed
+    // block feeds the answer engine as CONTEXT (the no-advice guardrail stays
+    // authoritative in the intelligence system prompt — memory never overrides
+    // it). The applied scopes surface on the interpretation card + inspector.
+    const persona = await memory.get(session.partner.partnerId, userKey(session))
+    const docs = await memory.scopeDocs(session.partner.partnerId, userKey(session))
+    const mem = composeMemory({
+      global: docs.global,
+      host: docs.host,
+      user: docs.user,
+      personaLine: personaSummary(persona),
+    })
+    if (mem.text) {
+      // Persist the exact composed block for the admin/in-session inspector.
+      memory
+        .saveComposed(session.id, session.partner.partnerId, userKey(session), mem.text)
+        .catch(() => {})
+    }
+
     // Stage-1 "understanding" — a persistent, collapsible card above the
     // answer (replaces the ephemeral thinking line; not itself ephemeral, so
     // it survives the skeleton→answer swap). Degraded-mode guessIntent has no
-    // interpretation, so default from the intent. memoryScopes stays empty
-    // until the memory-composition + entitlement work (later phase).
+    // interpretation, so default from the intent. memoryScopes tells the card
+    // which layers were applied.
     emit(session, {
       type: 'interpretation',
       summary: intentRes.interpretation ?? defaultInterpretation(intentRes.intent),
       intent: intentRes.intent,
+      memoryScopes: mem.scopes,
     })
 
     switch (intentRes.intent) {
@@ -672,11 +707,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           await emitMarketOnlyBrief(session, text)
           return
         }
-        // Persona (Memory v1): one read per research turn — null (opted out
-        // or memory down) costs nothing and changes nothing. Experience
-        // level calibrates concept depth in the research engine; the asset
-        // and question are remembered ONLY for opted-in users.
-        const persona = await memory.get(session.partner.partnerId, userKey(session))
+        // Persona asset/thread accrual — opted-in users only (read above).
         const symbol = symbolFromText(text)
         if (persona?.optIn) {
           memory
@@ -733,6 +764,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             ...(persona?.optIn && persona.experienceLevel
               ? { persona: { experienceLevel: persona.experienceLevel } }
               : {}),
+            // Layered memory as CONTEXT — the engine keeps its guardrail first.
+            ...(mem.text ? { memoryContext: mem.text } : {}),
           })
           try {
             while (true) {

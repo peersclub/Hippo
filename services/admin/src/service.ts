@@ -673,6 +673,11 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       (p) => `${p.partnerId}/${p.userId}`,
     )(req, reply),
   )
+  // Session inspector (read-only): the exact composed memory block that was
+  // sent for a session — real history, not a re-derivation.
+  app.get<{ Params: { sessionId: string } }>('/v1/memory-config/session/:sessionId', (req, reply) =>
+    scopeGet(`/v1/scope/session/${req.params.sessionId}`)(req, reply),
+  )
 
   // ── operators (owner-only) ───────────────────────────────────────────────
   app.get('/v1/operators', async (req, reply) => {

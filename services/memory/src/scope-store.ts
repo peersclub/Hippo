@@ -27,6 +27,19 @@ function clampBody(body: string): string {
   return body.length > MAX_BODY ? body.slice(0, MAX_BODY) : body
 }
 
+/** A session's stored note + the composed-memory snapshot that was sent. */
+export type SessionMemory = {
+  note: string
+  composed: string
+  partnerId: string
+  userId: string
+  updatedAt: number
+}
+
+export function emptySession(): SessionMemory {
+  return { note: '', composed: '', partnerId: '', userId: '', updatedAt: 0 }
+}
+
 export interface ScopeMemoryStore {
   getGlobal(): Promise<MemoryDoc>
   setGlobal(body: string, now: number): Promise<MemoryDoc>
@@ -34,6 +47,15 @@ export interface ScopeMemoryStore {
   setHost(partnerId: string, body: string, now: number): Promise<MemoryDoc>
   getUserNote(partnerId: string, userId: string): Promise<MemoryDoc>
   setUserNote(partnerId: string, userId: string, body: string, now: number): Promise<MemoryDoc>
+  getSession(sessionId: string): Promise<SessionMemory>
+  /** Store the composed snapshot (+ ids) for the inspector. */
+  putComposed(
+    sessionId: string,
+    partnerId: string,
+    userId: string,
+    composed: string,
+    now: number,
+  ): Promise<void>
 }
 
 export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
@@ -66,6 +88,20 @@ export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
     const doc = { body: clampBody(body), updatedAt: now }
     this.userNotes.set(this.key(partnerId, userId), doc)
     return doc
+  }
+  private sessions = new Map<string, SessionMemory>()
+  async getSession(sessionId: string) {
+    return this.sessions.get(sessionId) ?? emptySession()
+  }
+  async putComposed(
+    sessionId: string,
+    partnerId: string,
+    userId: string,
+    composed: string,
+    now: number,
+  ) {
+    const prev = this.sessions.get(sessionId) ?? emptySession()
+    this.sessions.set(sessionId, { ...prev, partnerId, userId, composed, updatedAt: now })
   }
 }
 
@@ -129,5 +165,35 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
       [partnerId, userId, clamped, now],
     )
     return { body: clamped, updatedAt: now }
+  }
+  async getSession(sessionId: string): Promise<SessionMemory> {
+    const res = await this.pool.query(
+      'SELECT note, composed, partner_id, user_id, updated_at FROM memory_session WHERE session_id = $1',
+      [sessionId],
+    )
+    const r = res.rows[0]
+    return r
+      ? {
+          note: r.note,
+          composed: r.composed,
+          partnerId: r.partner_id,
+          userId: r.user_id,
+          updatedAt: Number(r.updated_at),
+        }
+      : emptySession()
+  }
+  async putComposed(
+    sessionId: string,
+    partnerId: string,
+    userId: string,
+    composed: string,
+    now: number,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO memory_session (session_id, partner_id, user_id, composed, updated_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (session_id) DO UPDATE SET partner_id = $2, user_id = $3, composed = $4, updated_at = $5`,
+      [sessionId, partnerId, userId, clampBody(composed), now],
+    )
   }
 }
