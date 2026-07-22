@@ -7,6 +7,7 @@ import type {
   Banner,
   BriefDelta,
   Frame,
+  Interpretation,
   Lifecycle,
   OrderTicket,
   Positions,
@@ -509,6 +510,48 @@ function RejectionCard({ frame }: { frame: RejectionTicket }) {
   )
 }
 
+/**
+ * Stage-1 "understanding" — a persistent, collapsible card that sits above the
+ * answer (research-view style). Collapsed by default: the trader sees the
+ * summary, taps to expand the reasoning + which memory scopes were applied.
+ * Everything shown is server-authored (thin-client); the SDK only draws.
+ */
+function InterpretationCard({ frame }: { frame: Interpretation }) {
+  const [open, setOpen] = useState(false)
+  const L = locale.value
+  const hasDetail = Boolean(frame.detail) || frame.memoryScopes.length > 0
+  return (
+    <div class={`interp${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        class="interp-head"
+        aria-expanded={open}
+        disabled={!hasDetail}
+        onClick={() => hasDetail && setOpen((v) => !v)}
+      >
+        {hasDetail && <span class="interp-caret">{open ? '▾' : '▸'}</span>}
+        <span class="interp-eyebrow">{t(L, 'understood')}</span>
+        <span class="interp-summary">{frame.summary}</span>
+      </button>
+      {open && hasDetail && (
+        <div class="interp-body">
+          {frame.detail && <p>{frame.detail}</p>}
+          {frame.memoryScopes.length > 0 && (
+            <div class="interp-scopes">
+              {t(L, 'memory_applied')}
+              {frame.memoryScopes.map((s) => (
+                <span class="interp-scope" key={s}>
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ThinkingCard({ frame }: { frame: Thinking }) {
   const [i, setI] = useState(0)
   useEffect(() => {
@@ -627,6 +670,8 @@ export function renderFrame(frame: Frame): JSX.Element | null {
       return <RejectionCard frame={frame} />
     case 'thinking':
       return <ThinkingCard frame={frame} />
+    case 'interpretation':
+      return <InterpretationCard frame={frame} />
     case 'skeleton':
       return <SkeletonCard frame={frame} />
     case 'brief_delta':

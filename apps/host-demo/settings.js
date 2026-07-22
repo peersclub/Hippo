@@ -27,7 +27,7 @@ const EMBED = [
 ]
 const getPref = (k, d) => {
   try {
-    return localStorage.getItem('hippo_embed_' + k) ?? d
+    return localStorage.getItem(`hippo_embed_${k}`) ?? d
   } catch {
     return d
   }
@@ -35,8 +35,8 @@ const getPref = (k, d) => {
 const setPref = (k, v) => {
   try {
     v === '' || v == null
-      ? localStorage.removeItem('hippo_embed_' + k)
-      : localStorage.setItem('hippo_embed_' + k, v)
+      ? localStorage.removeItem(`hippo_embed_${k}`)
+      : localStorage.setItem(`hippo_embed_${k}`, v)
   } catch {}
 }
 function loadEmbed() {

@@ -8,3 +8,4 @@ dist/
 !.env.example
 coverage/
 .vercel
+services/intelligence/.venv/

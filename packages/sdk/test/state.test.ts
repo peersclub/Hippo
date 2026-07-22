@@ -276,3 +276,26 @@ describe('lifecycle collapse by ticketId', () => {
     expect(types).toEqual(['lifecycle'])
   })
 })
+
+describe('interpretation card persistence', () => {
+  const interp = (id: string) => ({
+    ...base,
+    id,
+    type: 'interpretation' as const,
+    summary: 'Understood: why is BTC down',
+    intent: 'research',
+    memoryScopes: [],
+  })
+
+  it('replaces the transient thinking card but PERSISTS above the answer', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'u1', type: 'user_echo', text: 'why btc' } })
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'th', type: 'thinking', lines: ['…'] } })
+    pushFrame({ kind: 'frame', frame: interp('ip') }) // replaces thinking
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'sk', type: 'skeleton', shape: 'brief' } })
+    pushFrame({ kind: 'frame', frame: briefFrame('b1') }) // replaces skeleton
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    // interpretation survives between the echo and the answer — not ephemeral.
+    expect(types).toEqual(['user_echo', 'interpretation', 'research_brief'])
+  })
+})

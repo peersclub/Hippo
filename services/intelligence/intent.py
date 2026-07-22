@@ -262,10 +262,42 @@ def _validate_classification(
         "confidence": max(0.0, min(1.0, float(confidence))),
         "language": language,
     }
+    # Interpretation + restructured query are additive stage-1 output. When the
+    # model supplies them we take them (trimmed); otherwise _ensure_interpretation
+    # fills deterministic defaults so fast-path/fallback turns still carry them.
+    interp = parsed.get("interpretation")
+    if isinstance(interp, str) and interp.strip():
+        result["interpretation"] = interp.strip()
+    restructured = parsed.get("restructuredQuery")
+    if isinstance(restructured, str) and restructured.strip():
+        result["restructuredQuery"] = restructured.strip()
     if parsed["intent"] == "action":
         order = _validate_order(parsed.get("order"))
         if order is not None:
             result["order"] = order
+    return result
+
+
+# One-line templated "understanding" per intent — used for fast-path hits (no
+# LLM) and whenever the model omits its own interpretation. Never advice.
+_INTERP_TEMPLATES = {
+    "research": "Looking up live market info for this.",
+    "concept": "Explaining the concept — no live data needed.",
+    "action": "Preparing an order ticket to review.",
+    "advice": "This asks for a call — I'll share facts, not advice.",
+    "portfolio": "Checking your own positions and balance.",
+    "smalltalk": "Just saying hi.",
+}
+
+
+def _ensure_interpretation(result: dict[str, Any], text: str) -> dict[str, Any]:
+    """Guarantee interpretation + restructuredQuery are present. The answer
+    engine falls back to the raw text if restructuredQuery is absent, but the
+    UI card always wants a summary line."""
+    result.setdefault(
+        "interpretation", _INTERP_TEMPLATES.get(result["intent"], "Working on it.")
+    )
+    result.setdefault("restructuredQuery", text.strip())
     return result
 
 
@@ -311,4 +343,4 @@ async def classify(
             result = rule_classify(text)
     if language_hint in LANGUAGES:
         result["language"] = language_hint
-    return result
+    return _ensure_interpretation(result, text)

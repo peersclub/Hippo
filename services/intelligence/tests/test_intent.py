@@ -233,6 +233,38 @@ class ClassifyLLMPath(unittest.IsolatedAsyncioTestCase):
         result = await classify("buy 1 btc", router, language_hint="hi")
         self.assertEqual(result["language"], "hi")
 
+    async def test_fast_path_still_carries_interpretation(self) -> None:
+        # No LLM call, but stage-1 output must still be present (templated).
+        router = ScriptedRouter([])
+        result = await classify("buy 1 btc", router)
+        self.assertEqual(router.calls, 0)
+        self.assertTrue(result["interpretation"])
+        self.assertEqual(result["restructuredQuery"], "buy 1 btc")
+
+    async def test_llm_interpretation_and_restructure_pass_through(self) -> None:
+        router = ScriptedRouter(
+            [
+                '{"intent":"research","confidence":0.9,"language":"en",'
+                '"interpretation":"Wants the drivers behind the BTC drop.",'
+                '"restructuredQuery":"What is driving the BTC/USDT price decline today?"}'
+            ]
+        )
+        result = await classify("why btc down", router)
+        self.assertEqual(result["interpretation"], "Wants the drivers behind the BTC drop.")
+        self.assertEqual(
+            result["restructuredQuery"],
+            "What is driving the BTC/USDT price decline today?",
+        )
+
+    async def test_missing_interpretation_gets_deterministic_default(self) -> None:
+        # Model omitted the new fields — the validator must not drop the result,
+        # and _ensure_interpretation backfills both.
+        router = ScriptedRouter(['{"intent":"research","confidence":0.9,"language":"en"}'])
+        result = await classify("why btc down", router)
+        self.assertEqual(result["intent"], "research")
+        self.assertTrue(result["interpretation"])
+        self.assertEqual(result["restructuredQuery"], "why btc down")
+
 
 if __name__ == "__main__":
     unittest.main()

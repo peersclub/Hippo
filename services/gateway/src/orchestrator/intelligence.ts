@@ -43,6 +43,11 @@ export type IntentResult = {
   confidence: number
   language: 'en' | 'hi' | 'hinglish'
   order?: OrderIntent
+  /** Stage-1 "understanding" (additive): a one-line restatement for the
+   * research-view card, and a crisp rewrite forwarded to the answer engine.
+   * Absent from older intelligence builds — callers default gracefully. */
+  interpretation?: string
+  restructuredQuery?: string
 }
 
 export type BriefResponse = {
