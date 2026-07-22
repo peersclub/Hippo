@@ -196,7 +196,13 @@ export async function buildApp(opts: GatewayOptions = {}) {
       }
     }
 
-    const session = sessions.create(auth.partner, auth.venueUserId)
+    // Carry the plan's entitlements onto the session's partner so the
+    // orchestrator can feature-gate server-side (memoryLab etc.). Stored with
+    // the session in both backings, so it survives to later /v1/turns.
+    const partnerWithEntitlements = plan?.entitlements
+      ? { ...auth.partner, entitlements: plan.entitlements }
+      : auth.partner
+    const session = sessions.create(partnerWithEntitlements, auth.venueUserId)
     const userKey = auth.venueUserId ?? session.id
     telemetry.recordPartnerUser(auth.partner.partnerId, userKey)
     // Durable mirror (fire-and-forget) — feeds boot hydration + admin counts.

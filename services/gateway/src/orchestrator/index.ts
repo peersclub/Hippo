@@ -657,26 +657,35 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return
     }
 
-    // Memory composition (Phase C, best-effort): read the persona + the three
-    // freeform scope docs and layer them into ONE authority-ordered block
-    // (platform → venue → user → session). All degrade to empty when memory
-    // is down — a turn never waits on or breaks over memory. The composed
-    // block feeds the answer engine as CONTEXT (the no-advice guardrail stays
-    // authoritative in the intelligence system prompt — memory never overrides
-    // it). The applied scopes surface on the interpretation card + inspector.
+    // Persona read is cheap and unconditional (opt-in accrual + experience
+    // depth predate the memory feature). null = opted out or memory down.
     const persona = await memory.get(session.partner.partnerId, userKey(session))
-    const docs = await memory.scopeDocs(session.partner.partnerId, userKey(session))
-    const mem = composeMemory({
-      global: docs.global,
-      host: docs.host,
-      user: docs.user,
-      personaLine: personaSummary(persona),
-    })
-    if (mem.text) {
-      // Persist the exact composed block for the admin/in-session inspector.
-      memory
-        .saveComposed(session.id, session.partner.partnerId, userKey(session), mem.text)
-        .catch(() => {})
+
+    // Memory composition (Phase C) is PRE-PROD and GATED: only partners whose
+    // plan carries the `memoryLab` entitlement get the four freeform scopes
+    // composed into the prompt. Unentitled partners behave exactly as before —
+    // no scope reads, no memoryContext, empty scopes — so setting a memory doc
+    // has zero effect until a super-admin enables the feature per plan.
+    const memoryLab = session.partner.entitlements?.memoryLab === true
+    let mem = { text: '', scopes: [] as ReturnType<typeof composeMemory>['scopes'] }
+    if (memoryLab) {
+      // Best-effort: memory down → empty block, never blocks/breaks a turn.
+      // Composed as CONTEXT below the answer engine's no-advice guardrail
+      // (which stays authoritative — memory never overrides it). Applied
+      // scopes surface on the interpretation card + the admin inspector.
+      const docs = await memory.scopeDocs(session.partner.partnerId, userKey(session))
+      mem = composeMemory({
+        global: docs.global,
+        host: docs.host,
+        user: docs.user,
+        personaLine: personaSummary(persona),
+      })
+      if (mem.text) {
+        // Persist the exact composed block for the admin/in-session inspector.
+        memory
+          .saveComposed(session.id, session.partner.partnerId, userKey(session), mem.text)
+          .catch(() => {})
+      }
     }
 
     // Stage-1 "understanding" — a persistent, collapsible card above the
