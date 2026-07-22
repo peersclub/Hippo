@@ -17,6 +17,7 @@
  */
 import { timingSafeEqual } from 'node:crypto'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
+import { InMemoryScopeMemoryStore, MAX_BODY, type ScopeMemoryStore } from './scope-store.js'
 import {
   type ExperienceLevel,
   InMemoryPersonaStore,
@@ -58,12 +59,15 @@ function parseUpdate(body: unknown): PersonaUpdate | null {
 
 export type ServiceOptions = {
   store?: PersonaStore
+  /** Freeform scope-memory store (global/host/user-note). Defaults in-memory. */
+  scopeStore?: ScopeMemoryStore
   /** Shared secret for every guarded route; defaults to INTERNAL_API_TOKEN env. */
   internalToken?: string
 }
 
 export function buildService(opts: ServiceOptions = {}): FastifyInstance {
   const store = opts.store ?? new InMemoryPersonaStore()
+  const scopeStore = opts.scopeStore ?? new InMemoryScopeMemoryStore()
   const internalToken = opts.internalToken ?? process.env.INTERNAL_API_TOKEN ?? ''
   const app = Fastify({
     logger: process.env.NODE_ENV !== 'test' && { level: process.env.LOG_LEVEL ?? 'info' },
@@ -140,7 +144,52 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     return { deleted }
   })
 
-  app.get('/health', async () => ({ ok: true, service: 'memory', personas: await store.size() }))
+  // ── scope-memory documents (global / host / user note) ────────────────
+  // Freeform prose a super-admin curates; the gateway composes these (super-
+  // admin → host → user → session) into the prompt. Same internal-token
+  // trust boundary. Bodies are size-bounded server-side (MAX_BODY).
+  const readBody = (b: unknown): string | null =>
+    typeof (b as { body?: unknown } | null)?.body === 'string' ? (b as { body: string }).body : null
+
+  app.get('/v1/scope/global', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    return scopeStore.getGlobal()
+  })
+  app.put('/v1/scope/global', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const body = readBody(req.body)
+    if (body === null) return reply.code(400).send({ error: 'body (string) required' })
+    return scopeStore.setGlobal(body, Date.now())
+  })
+
+  app.get<{ Params: { partnerId: string } }>('/v1/scope/host/:partnerId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    return scopeStore.getHost(req.params.partnerId)
+  })
+  app.put<{ Params: { partnerId: string } }>('/v1/scope/host/:partnerId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const body = readBody(req.body)
+    if (body === null) return reply.code(400).send({ error: 'body (string) required' })
+    return scopeStore.setHost(req.params.partnerId, body, Date.now())
+  })
+
+  app.get<{ Params: Params }>('/v1/scope/user/:partnerId/:userId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    return scopeStore.getUserNote(req.params.partnerId, req.params.userId)
+  })
+  app.put<{ Params: Params }>('/v1/scope/user/:partnerId/:userId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const body = readBody(req.body)
+    if (body === null) return reply.code(400).send({ error: 'body (string) required' })
+    return scopeStore.setUserNote(req.params.partnerId, req.params.userId, body, Date.now())
+  })
+
+  app.get('/health', async () => ({
+    ok: true,
+    service: 'memory',
+    personas: await store.size(),
+    maxBody: MAX_BODY,
+  }))
 
   return app
 }

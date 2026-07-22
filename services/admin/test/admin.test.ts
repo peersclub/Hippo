@@ -865,3 +865,64 @@ describe('session cookie Secure flag', () => {
     })
   })
 })
+
+describe('memory-config (super-admin scope documents)', () => {
+  it('owner can PUT/GET a global doc; proxies with the internal token and audits the level', async () => {
+    const seen: { url: string; init?: RequestInit }[] = []
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      seen.push({ url: String(url), init })
+      return new Response(JSON.stringify({ body: 'PLATFORM RULE', updatedAt: 1 }), { status: 200 })
+    }) as typeof fetch
+    const { app, audit } = await testAdmin({ fetchImpl, internalToken: 'itok' })
+    const cookie = await login(app)
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/v1/memory-config/global',
+      headers: { cookie },
+      payload: { body: 'PLATFORM RULE' },
+    })
+    expect(put.statusCode).toBe(200)
+    // proxied to the memory scope route with the internal token
+    const call = seen.find((s) => s.url.endsWith('/v1/scope/global') && s.init?.method === 'PUT')
+    expect(call).toBeTruthy()
+    expect((call?.init?.headers as Record<string, string>)['x-hippo-internal-token']).toBe('itok')
+    // audited with the scope level
+    const rows = await audit.list({})
+    expect(rows.rows.some((r) => r.action === 'memory_config.set' && r.detail.level === 'global')).toBe(
+      true,
+    )
+  })
+
+  it('a plain operator (not owner) is 403 on memory-config', async () => {
+    const { app, operators } = await testAdmin()
+    await operators.create({
+      email: 'op2@hippo.dev',
+      passwordHash: hashPassword('another good passphrase'),
+      role: 'operator',
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'op2@hippo.dev', password: 'another good passphrase' },
+    })
+    const cookie = ((Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'][0] : res.headers['set-cookie']) ?? '').split(';')[0]
+    const got = await app.inject({
+      method: 'GET',
+      url: '/v1/memory-config/global',
+      headers: { cookie },
+    })
+    expect(got.statusCode).toBe(403)
+  })
+
+  it('rejects a non-string body', async () => {
+    const { app } = await testAdmin({ internalToken: 'itok' })
+    const cookie = await login(app)
+    const bad = await app.inject({
+      method: 'PUT',
+      url: '/v1/memory-config/host/pA',
+      headers: { cookie },
+      payload: { body: 42 },
+    })
+    expect(bad.statusCode).toBe(400)
+  })
+})

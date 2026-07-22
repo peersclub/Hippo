@@ -1,16 +1,17 @@
 import { getPool } from '@hippo/stores'
+import { InMemoryScopeMemoryStore, PostgresScopeMemoryStore } from './scope-store.js'
 import { buildService } from './service.js'
 import { InMemoryPersonaStore, PostgresPersonaStore } from './store.js'
 
 const PORT = Number(process.env.PORT ?? 8792)
 
-// Postgres when DATABASE_URL is set (users_memory table, @hippo/stores
-// migration 004); in-memory otherwise — same selection pattern as REDIS_URL.
-const store = process.env.DATABASE_URL
-  ? new PostgresPersonaStore(getPool())
-  : new InMemoryPersonaStore()
+// Postgres when DATABASE_URL is set (users_memory + memory_* tables,
+// @hippo/stores migrations 004/009); in-memory otherwise.
+const usePg = Boolean(process.env.DATABASE_URL)
+const store = usePg ? new PostgresPersonaStore(getPool()) : new InMemoryPersonaStore()
+const scopeStore = usePg ? new PostgresScopeMemoryStore(getPool()) : new InMemoryScopeMemoryStore()
 
-const app = buildService({ store })
+const app = buildService({ store, scopeStore })
 app
   .listen({ port: PORT, host: '::' })
   .then(() =>
