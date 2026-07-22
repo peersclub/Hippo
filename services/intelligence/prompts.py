@@ -53,11 +53,13 @@ directional probabilities. Describe only what IS, never what anyone should do.
 
 # --- Intent classification (small-model prompt; strict JSON out) -------------
 INTENT_SYSTEM_PROMPT = """\
-You classify one user message sent to a crypto-exchange trading assistant.
-Respond with STRICT JSON only — one object, no prose, no markdown fences:
+You classify AND interpret one user message sent to a crypto-exchange trading
+assistant. Respond with STRICT JSON only — one object, no prose, no markdown:
 {"intent": "research"|"concept"|"action"|"advice"|"portfolio"|"smalltalk",
  "confidence": <number 0..1>,
  "language": "en"|"hi"|"hinglish",
+ "interpretation": "<one plain line: what the user is really asking>",
+ "restructuredQuery": "<the query rewritten crisply for the answer engine — resolve pronouns, expand tickers, keep the user's intent; NEVER invent facts or add advice>",
  "order": {"side": "buy"|"sell", "size": "<string>",
            "instrument": "<BASE/QUOTE like BTC/USDT>",
            "orderType": "market"|"limit", "limitPrice": "<string>"}}
@@ -75,6 +77,10 @@ Rules:
 - "smalltalk": greetings, thanks, chit-chat.
 - "language": "hi" for Devanagari, "hinglish" for romanized Hindi mixed with
   English, else "en".
+- "interpretation": one short line the trader could read as "here's what I
+  understood" — never advice, never a prediction.
+- "restructuredQuery": a clean rewrite for the answer engine. If the message
+  is already crisp, echo it. Do NOT answer it, do NOT add data or opinions.
 JSON only.
 """
 

@@ -254,6 +254,21 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
   border:1px solid var(--hippo-hairline);border-radius:10px;padding:8px 11px}
 .fact .fi{color:var(--hippo-amber);flex-shrink:0;font-size:11px}
 /* thinking / skeleton */
+/* stage-1 understanding — persistent, collapsible, sits above the answer */
+.interp{align-self:flex-start;width:94%;border-radius:var(--hippo-radius-cell);
+  border:1px solid var(--hippo-hairline);background:rgba(var(--hippo-panel-deep-rgb),.5);margin-bottom:2px}
+.interp-head{display:flex;align-items:center;gap:7px;width:100%;text-align:start;padding:8px 11px;
+  font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.06em;color:var(--hippo-text-dim)}
+.interp-head:disabled{cursor:default}
+.interp-caret{color:var(--hippo-amber);flex-shrink:0}
+.interp-eyebrow{color:var(--hippo-text-faint);letter-spacing:.12em;flex-shrink:0}
+.interp-summary{color:var(--hippo-text-mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.interp.open .interp-summary{white-space:normal}
+.interp-body{padding:0 11px 10px 11px;font-size:11.5px;line-height:1.5;color:var(--hippo-text-mid)}
+.interp-body p{margin-bottom:6px}
+.interp-scopes{display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-family:var(--hippo-font-mono);
+  font-size:8.5px;letter-spacing:.08em;color:var(--hippo-text-faint)}
+.interp-scope{padding:2px 7px;border-radius:var(--hippo-radius-pill);background:rgba(var(--hippo-amber-rgb),.12);color:var(--hippo-amber)}
 .think{display:flex;align-items:center;gap:8px;font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.12em;color:var(--hippo-text-dim)}
 .think .dot{width:7px;height:7px;border-radius:50%;background:var(--hippo-amber);animation:hpulse 1.1s ease infinite}
 .sk{background:linear-gradient(90deg,var(--hippo-skeleton-1) 25%,var(--hippo-skeleton-2) 37%,var(--hippo-skeleton-1) 63%);background-size:400% 100%;

@@ -30,7 +30,7 @@ describe('orchestrator: research route', () => {
       200,
     )
     const types = await waitForJournal(session, (t) => t.includes('research_brief'))
-    expect(types).toEqual(['user_echo', 'thinking', 'skeleton', 'research_brief'])
+    expect(types).toEqual(['user_echo', 'thinking', 'interpretation', 'skeleton', 'research_brief'])
 
     const brief = frameOfType<{
       headline: string
@@ -870,7 +870,7 @@ describe('orchestrator: honest order journey (stage + side + order-shaped waitin
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc at market' })
     const types = await waitForJournal(session, (t) => t.includes('order_ticket'))
-    expect(types).toEqual(['user_echo', 'thinking', 'skeleton', 'order_ticket'])
+    expect(types).toEqual(['user_echo', 'thinking', 'interpretation', 'skeleton', 'order_ticket'])
     const thinking = frameOfType<{ lines: string[] }>(session, 'thinking')
     expect(thinking.lines[0]).toBe('Constructing order…')
     expect(thinking.lines[1]).toContain('Checking balance on')
@@ -1011,5 +1011,56 @@ describe('orchestrator: honest order journey (stage + side + order-shaped waitin
     } finally {
       delete process.env.TICKET_EVENT_TIMEOUT_MS
     }
+  })
+})
+
+describe('orchestrator: stage-1 interpretation', () => {
+  it('emits a persistent interpretation frame and forwards the restructured query to the answer engine', async () => {
+    let seenText: string | undefined
+    const intel = stubIntel({
+      intent: async () => ({
+        intent: 'research',
+        confidence: 0.95,
+        language: 'en',
+        interpretation: 'Wants the drivers behind the BTC drop.',
+        restructuredQuery: 'What is driving the BTC/USDT decline today?',
+      }),
+      respondStream: async function* (req) {
+        seenText = req.text
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+    })
+    const { app, sessions } = await testApp({ intel })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+
+    const interp = frameOfType<{ summary: string; intent: string }>(session, 'interpretation')
+    expect(interp.summary).toBe('Wants the drivers behind the BTC drop.')
+    expect(interp.intent).toBe('research')
+    // The RESTRUCTURED query reached the answer engine, not the raw text.
+    expect(seenText).toBe('What is driving the BTC/USDT decline today?')
+    await app.close()
+  })
+
+  it('falls back to a default summary and the raw text when stage-1 omits the new fields', async () => {
+    let seenText: string | undefined
+    const intel = stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        seenText = req.text
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+    })
+    const { app, sessions } = await testApp({ intel })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    const interp = frameOfType<{ summary: string }>(session, 'interpretation')
+    expect(interp.summary.length).toBeGreaterThan(0) // default, not empty
+    expect(seenText).toBe('why btc down') // raw text forwarded
+    await app.close()
   })
 })

@@ -72,6 +72,30 @@ describe('card protocol v1 — frames', () => {
     expect(parseFrame({ type: 'research_brief' }).ok).toBe(false) // missing envelope
   })
 
+  it('parses an interpretation frame — persistent understanding card', () => {
+    const result = parseFrame({
+      ...base,
+      type: 'interpretation',
+      summary: 'Understood: is BTC a buy? → advice-bait → decline with facts',
+      intent: 'advice',
+      memoryScopes: ['platform', 'user'],
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.frame.type === 'interpretation') {
+      expect(result.frame.summary).toContain('BTC')
+      expect(result.frame.memoryScopes).toEqual(['platform', 'user'])
+    }
+  })
+
+  it('interpretation frame defaults memoryScopes to [] and tolerates missing intent', () => {
+    const result = parseFrame({ ...base, type: 'interpretation', summary: 'ok' })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.frame.type === 'interpretation') {
+      expect(result.frame.memoryScopes).toEqual([])
+      expect(result.frame.intent).toBeUndefined()
+    }
+  })
+
   it('rejects a lifecycle frame with an invalid phase', () => {
     const bad = Frame.safeParse({
       ...base,

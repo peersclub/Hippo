@@ -82,6 +82,26 @@ function userKey(session: Session): string {
   return session.venueUserId ?? session.id
 }
 
+/** Fallback interpretation summary when stage-1 didn't supply one (degraded
+ * mode / older intelligence build). One neutral line per intent — never
+ * advice. */
+function defaultInterpretation(intent: string): string {
+  switch (intent) {
+    case 'research':
+      return 'Looking up live market info for this.'
+    case 'concept':
+      return 'Explaining the concept.'
+    case 'action':
+      return 'Preparing an order ticket to review.'
+    case 'advice':
+      return "This asks for a call — I'll share facts, not advice."
+    case 'portfolio':
+      return 'Checking your own positions.'
+    default:
+      return 'Working on your request.'
+  }
+}
+
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const { intel, market, memory, seam, emit, telemetry, log } = deps
 
@@ -625,6 +645,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return
     }
 
+    // Stage-1 "understanding" — a persistent, collapsible card above the
+    // answer (replaces the ephemeral thinking line; not itself ephemeral, so
+    // it survives the skeleton→answer swap). Degraded-mode guessIntent has no
+    // interpretation, so default from the intent. memoryScopes stays empty
+    // until the memory-composition + entitlement work (later phase).
+    emit(session, {
+      type: 'interpretation',
+      summary: intentRes.interpretation ?? defaultInterpretation(intentRes.intent),
+      intent: intentRes.intent,
+    })
+
     switch (intentRes.intent) {
       case 'research':
       case 'concept': {
@@ -694,7 +725,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           }
           activeStreams.set(session.id, handle)
           const stream = intel.respondStream({
-            text,
+            // The RESTRUCTURED query goes to the answer engine (stage-2); the
+            // raw text is the fallback when stage-1 didn't rewrite it.
+            text: intentRes.restructuredQuery ?? text,
             intent: intentRes.intent,
             symbol,
             ...(persona?.optIn && persona.experienceLevel

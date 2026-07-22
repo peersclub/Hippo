@@ -143,6 +143,22 @@ export const ThinkingFrame = z.object({
   lines: z.array(z.string()).min(1), // rotating status lines, server-authored
 })
 
+/**
+ * Stage-1 "understanding" — the fast interpret pass restated for the trader,
+ * research-view style. PERSISTENT (not ephemeral): it stays above the answer,
+ * collapsed by default, so the reasoning is reviewable after the answer lands.
+ * `intent` is the classifier verdict; `memoryScopes` (the memory levels that
+ * were applied) is populated only under the pre-prod inspector entitlement.
+ */
+export const InterpretationFrame = z.object({
+  ...base,
+  type: z.literal('interpretation'),
+  summary: z.string(), // one-line "here's what I understood"
+  intent: z.string().optional(), // research | advice | action | …
+  detail: z.string().optional(), // expanded reasoning (optional)
+  memoryScopes: z.array(z.string()).default([]), // e.g. ['platform','venue','user']
+})
+
 export const SkeletonFrame = z.object({
   ...base,
   type: z.literal('skeleton'),
@@ -217,6 +233,7 @@ export const Frame = z.discriminatedUnion('type', [
   PositionsFrame,
   RejectionTicketFrame,
   ThinkingFrame,
+  InterpretationFrame,
   SkeletonFrame,
   BannerFrame,
   PulseFrame,
@@ -237,6 +254,7 @@ export type AdviceDecline = z.infer<typeof AdviceDeclineFrame>
 export type Positions = z.infer<typeof PositionsFrame>
 export type RejectionTicket = z.infer<typeof RejectionTicketFrame>
 export type Thinking = z.infer<typeof ThinkingFrame>
+export type Interpretation = z.infer<typeof InterpretationFrame>
 export type Skeleton = z.infer<typeof SkeletonFrame>
 export type Banner = z.infer<typeof BannerFrame>
 export type Pulse = z.infer<typeof PulseFrame>

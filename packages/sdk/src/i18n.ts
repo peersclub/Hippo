@@ -43,6 +43,8 @@ export type MessageKey =
   | 'feedback_helpful'
   | 'feedback_not_helpful'
   | 'order_filled'
+  | 'understood'
+  | 'memory_applied'
   | 'journey_prepared'
   | 'journey_placing'
   | 'journey_working'
@@ -107,6 +109,8 @@ const en: Catalog = {
   feedback_helpful: 'Helpful',
   feedback_not_helpful: 'Not helpful',
   order_filled: 'Order filled',
+  understood: 'UNDERSTOOD',
+  memory_applied: 'Memory applied:',
   journey_prepared: 'PREPARED',
   journey_placing: 'PLACING',
   journey_working: 'WORKING',
@@ -173,6 +177,8 @@ const hi: Catalog = {
   feedback_helpful: 'उपयोगी',
   feedback_not_helpful: 'उपयोगी नहीं',
   order_filled: 'ऑर्डर पूरा हुआ',
+  understood: 'समझ लिया',
+  memory_applied: 'लागू मेमोरी:',
   journey_prepared: 'तैयार',
   journey_placing: 'भेजा जा रहा',
   journey_working: 'सक्रिय',
@@ -239,6 +245,8 @@ const hiLatn: Catalog = {
   feedback_helpful: 'Useful',
   feedback_not_helpful: 'Useful nahi',
   order_filled: 'Order fill ho gaya',
+  understood: 'SAMJHA',
+  memory_applied: 'Memory applied:',
   journey_prepared: 'READY',
   journey_placing: 'BHEJ RAHE',
   journey_working: 'ACTIVE',
@@ -307,6 +315,8 @@ const ar: Catalog = {
   feedback_helpful: 'مفيد',
   feedback_not_helpful: 'غير مفيد',
   order_filled: 'تم تنفيذ الأمر',
+  understood: 'فهمت',
+  memory_applied: 'الذاكرة المطبّقة:',
   journey_prepared: 'جاهز',
   journey_placing: 'جارٍ الإرسال',
   journey_working: 'نشط',
