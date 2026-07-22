@@ -207,7 +207,7 @@
       const envGw = '%VITE_GATEWAY_URL%'
       const realGw = envGw.startsWith('http') ? envGw : 'http://localhost:8788'
       // Host-set embed preferences from the settings page (localStorage).
-      const pref = (k, d) => { try { return localStorage.getItem('hippo_embed_' + k) ?? d } catch { return d } }
+      const pref = (k, d) => { try { return localStorage.getItem(`hippo_embed_${k}`) ?? d } catch { return d } }
       const s = document.createElement('script')
       s.src = '/loader.js'; s.async = true
       s.dataset.hippoKey = pref('key', 'pk_assetworks')
