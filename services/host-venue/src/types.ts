@@ -31,7 +31,16 @@ export type MarginMode = 'isolated' | 'cross'
  *  native confirm modal; the trader approves on the host, the host places. */
 export type ConfirmSurface = 'api' | 'js_callback'
 
-/** Live-tunable venue behaviour, editable from the host admin drawer. */
+/** How eligible orders settle. `working` (default) rests for workingWindowMs
+ *  then fills; `instant` fills on the first sweep after the window (window may
+ *  be 0); `manual` never auto-fills — the host approves each fill from the
+ *  settings page, so an operator can hold an order in WORKING as long as they
+ *  like and watch the parasite's working card. */
+export type FillMode = 'working' | 'instant' | 'manual'
+
+/** Live-tunable venue behaviour + capabilities, editable from the host
+ *  settings page. Every field is a test lever whose effect is observable in
+ *  the embedded Hippo chat. */
 export type AdminConfig = {
   confirmSurface: ConfirmSurface
   /** Minimum time an order rests ACTIVE before it can settle. MUST be >= the
@@ -40,9 +49,36 @@ export type AdminConfig = {
   workingWindowMs: number
   /** Taker fee applied to spot notional and perp open/close. */
   feeRate: number
+  /** Maker fee applied to resting limit orders that fill. */
+  makerFee: number
   /** When true, market orders fill in two steps (PARTIAL → SETTLED) to
    *  exercise the parasite's partial-fill lifecycle path. */
   partialFills: boolean
+
+  // ── realism & chaos ──
+  fillMode: FillMode
+  /** Market-order fill slippage against the taker, as a fraction (0.001 = 10bps). */
+  slippagePct: number
+  /** Artificial latency added to signed trade responses (ms) — surfaces the
+   *  parasite's "working"/thinking states and stresses its timeouts. */
+  latencyMs: number
+  /** Probability [0..1] that a placement is rejected — exercises the chat's
+   *  rejection card. */
+  rejectRate: number
+  /** When true, ALL placements are rejected with a maintenance error. */
+  maintenance: boolean
+
+  // ── capabilities (drive /v1/capabilities + what the parasite may place) ──
+  capsSpot: boolean
+  capsPerp: boolean
+  capsOptions: boolean
+  maxLeverage: number
+  marginModes: Array<'isolated' | 'cross'>
+  /** Tradable instruments advertised to the parasite, e.g. ["BTC/USDT", …]. */
+  instruments: string[]
+  /** Per-order base-quantity bounds (0 = unbounded). */
+  minOrderSize: number
+  maxOrderSize: number
 }
 
 /** A resting or settled order on the venue book. */

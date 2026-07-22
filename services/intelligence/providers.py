@@ -520,6 +520,9 @@ class ProviderRouter:
         self.mock = MockProvider()
         self.mode: str = "mock"  # honest default until a probe/call succeeds
         self._down_until: float = 0.0
+        # Test lever: when True, always serve the deterministic mock (lets the
+        # host observe the degraded/mock brief path on demand).
+        self.force_mock: bool = False
 
     async def startup_probe(self) -> None:
         self.mode = "llm" if await self.llm.probe() else "mock"
@@ -548,7 +551,7 @@ class ProviderRouter:
         json_mode: bool = False,
         timeout: float | None = None,
     ) -> str:
-        if time.monotonic() >= self._down_until:
+        if not self.force_mock and time.monotonic() >= self._down_until:
             try:
                 content = await self.llm.chat(
                     messages,
@@ -580,7 +583,7 @@ class ProviderRouter:
         deltas have been shown) propagates as ProviderError — the caller
         finalizes with what it has; it cannot un-show tokens.
         """
-        if time.monotonic() >= self._down_until:
+        if not self.force_mock and time.monotonic() >= self._down_until:
             stream = self.llm.chat_stream(
                 messages,
                 temperature=temperature,

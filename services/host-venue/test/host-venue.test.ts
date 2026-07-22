@@ -27,14 +27,29 @@ function sign(body: object) {
   }
 }
 
+const BASE_CONFIG: AdminConfig = {
+  confirmSurface: 'api',
+  workingWindowMs: 0,
+  feeRate: 0.001,
+  makerFee: 0.0002,
+  partialFills: false,
+  fillMode: 'working',
+  slippagePct: 0,
+  latencyMs: 0,
+  rejectRate: 0,
+  maintenance: false,
+  capsSpot: true,
+  capsPerp: true,
+  capsOptions: false,
+  maxLeverage: 50,
+  marginModes: ['isolated', 'cross'],
+  instruments: ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
+  minOrderSize: 0,
+  maxOrderSize: 0,
+}
+
 function makeApp(cfg: Partial<AdminConfig> = {}) {
-  const config: AdminConfig = {
-    confirmSurface: 'api',
-    workingWindowMs: 0,
-    feeRate: 0.001,
-    partialFills: false,
-    ...cfg,
-  }
+  const config: AdminConfig = { ...BASE_CONFIG, ...cfg }
   const store = new VenueStore(async () => 60_000, config)
   const keys = new Map<string, ApiKeyRecord>([[KEY, { secret: SECRET, userId: USER }]])
   return { app: buildService({ store, keys, uiUserId: USER }), store }
@@ -111,12 +126,7 @@ describe('host-venue signed trade wire', () => {
   })
 
   it('rests a limit buy until price crosses, then fills', async () => {
-    const config: AdminConfig = {
-      confirmSurface: 'api',
-      workingWindowMs: 0,
-      feeRate: 0,
-      partialFills: false,
-    }
+    const config: AdminConfig = { ...BASE_CONFIG, feeRate: 0 }
     const store = new VenueStore(async () => 60_000, config)
     // Limit buy well below market → should rest, not fill.
     const o = store.place(USER, {
@@ -144,12 +154,7 @@ describe('host-venue signed trade wire', () => {
 
   it('opens and closes a perp position with realized PnL', async () => {
     let price = 60_000
-    const config: AdminConfig = {
-      confirmSurface: 'api',
-      workingWindowMs: 0,
-      feeRate: 0,
-      partialFills: false,
-    }
+    const config: AdminConfig = { ...BASE_CONFIG, feeRate: 0 }
     const store = new VenueStore(async () => price, config)
     store.place(USER, {
       market: 'perp',
@@ -211,5 +216,53 @@ describe('host-venue signed trade wire', () => {
     const order = store.approveHandoff('t_hand')
     expect(store.getHandoff('t_hand')?.state).toBe('placed')
     expect(store.order(order.id)?.status).toBe(10)
+  })
+})
+
+describe('host-venue realism & policy levers', () => {
+  const spot = (o = {}) => ({ market: 'spot' as const, pairName: 'BTC-USDT', side: 'buy' as const, kind: 'market' as const, qty: 0.1, rate: 60_000, ...o })
+
+  it('maintenance mode rejects every placement', () => {
+    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, maintenance: true })
+    expect(() => store.place(USER, spot())).toThrow(/maintenance/i)
+  })
+
+  it('rejectRate=1 always rejects (simulated failure)', () => {
+    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, rejectRate: 1 })
+    expect(() => store.place(USER, spot())).toThrow(/rejected/i)
+  })
+
+  it('enforces min/max order size and disabled capabilities', () => {
+    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, minOrderSize: 0.5, maxOrderSize: 2, capsPerp: false })
+    expect(() => store.place(USER, spot({ qty: 0.1 }))).toThrow(/minimum/i)
+    expect(() => store.place(USER, spot({ qty: 5 }))).toThrow(/maximum/i)
+    expect(() => store.place(USER, spot({ market: 'perp', qty: 1, direction: 'long', leverage: 5, marginMode: 'isolated' }))).toThrow(/perp trading is disabled/i)
+  })
+
+  it('applies market slippage against the taker', async () => {
+    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, feeRate: 0, slippagePct: 0.01 })
+    const o = store.place(USER, spot({ qty: 0.1 }))
+    await store.sweep()
+    // buy fills 1% above 60000 = 60600
+    expect(store.order(o.id)?.avgFillPrice).toBeCloseTo(60_600, 0)
+  })
+
+  it('manual fill mode holds orders WORKING until manualFill()', async () => {
+    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, fillMode: 'manual' })
+    const o = store.place(USER, spot({ qty: 0.1 }))
+    await store.sweep()
+    expect(store.order(o.id)?.status).toBe(10) // still ACTIVE — auto-fill suppressed
+    expect(await store.manualFill(o.id)).toBe(true)
+    expect(store.order(o.id)?.status).toBe(20) // SETTLED on host approval
+  })
+
+  it('resetWallet restores seed balances', () => {
+    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, feeRate: 0 })
+    const o = store.place(USER, spot({ qty: 0.1 }))
+    void o
+    store.resetWallet(USER)
+    const bal = new Map(store.balances(USER).map((b) => [b.currencyName, b.amount]))
+    expect(bal.get('USDT')).toBe(100_000)
+    expect(bal.get('BTC')).toBe(2)
   })
 })

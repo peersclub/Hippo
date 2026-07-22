@@ -28,7 +28,23 @@ const config: AdminConfig = {
   // is observed open→absent rather than timing out to "expired".
   workingWindowMs: Number(process.env.ASSETWORKS_WORKING_WINDOW_MS ?? 2_500),
   feeRate: Number(process.env.ASSETWORKS_FEE_RATE ?? 0.001),
+  makerFee: Number(process.env.ASSETWORKS_MAKER_FEE ?? 0.0002),
   partialFills: process.env.ASSETWORKS_PARTIAL_FILLS === '1',
+  // realism & chaos — all off/neutral by default
+  fillMode: 'working',
+  slippagePct: 0,
+  latencyMs: 0,
+  rejectRate: 0,
+  maintenance: false,
+  // capabilities — spot + perps on, options off (matches the venue today)
+  capsSpot: true,
+  capsPerp: true,
+  capsOptions: false,
+  maxLeverage: 50,
+  marginModes: ['isolated', 'cross'],
+  instruments: (process.env.ASSETWORKS_INSTRUMENTS ?? 'BTC/USDT,ETH/USDT,SOL/USDT').split(','),
+  minOrderSize: 0,
+  maxOrderSize: 0,
 }
 
 /** Live price per pair, cached 1s to avoid hammering market-data on each sweep. */

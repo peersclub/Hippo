@@ -106,6 +106,13 @@ export function buildService(opts: BuildOptions) {
   })
   app.options('/*', async (_req, reply) => reply.code(204).send())
 
+  // Simulated venue latency on the signed trade surface — makes the parasite's
+  // "working"/thinking states visible and stresses its request timeouts.
+  app.addHook('preHandler', async (req) => {
+    const ms = store.config.latencyMs
+    if (ms > 0 && req.url.startsWith('/api/v1/trade')) await new Promise((r) => setTimeout(r, ms))
+  })
+
   // ── signed helper: verify HMAC, resolve userId ──────────────────────────
   function authed(req: FastifyRequest, reply: FastifyReply): string | null {
     const raw = (req as unknown as { rawBody?: string }).rawBody ?? ''
@@ -217,15 +224,22 @@ export function buildService(opts: BuildOptions) {
   })
 
   // ═══ HOST-UI-FACING (first-party, unsigned) ══════════════════════════════
-  app.get('/v1/capabilities', async () => ({
-    venue: 'assetworks',
-    instruments,
-    // VenueCapabilities shape (@hippo/protocol): presence == enabled.
-    capabilities: {
-      spot: {},
-      futures_perp: { maxLeverage: 50, marginModes: ['isolated', 'cross'] },
-    },
-  }))
+  // Capabilities are DERIVED from live admin config, so toggling spot/perp/
+  // options or maxLeverage on the settings page reflects in what the parasite
+  // discovers (and may place). VenueCapabilities shape: presence == enabled.
+  app.get('/v1/capabilities', async () => {
+    const c = store.config
+    const capabilities: Record<string, unknown> = {}
+    if (c.capsSpot) capabilities.spot = {}
+    if (c.capsPerp)
+      capabilities.futures_perp = { maxLeverage: c.maxLeverage, marginModes: c.marginModes }
+    if (c.capsOptions) capabilities.options = { settlement: 'cash' }
+    return {
+      venue: 'assetworks',
+      instruments: c.instruments.length ? c.instruments : instruments,
+      capabilities,
+    }
+  })
 
   // Human order ticket — same book as the parasite (uiUserId).
   app.post('/ui/orders', async (req, reply) => {
@@ -241,6 +255,16 @@ export function buildService(opts: BuildOptions) {
   app.post('/ui/orders/:id/cancel', async (req) => {
     const id = num((req.params as { id: string }).id)
     return { ok: store.cancel(id) }
+  })
+  // Manual fill — the host approves a working order (fillMode='manual').
+  app.post('/ui/orders/:id/fill', async (req) => {
+    const id = num((req.params as { id: string }).id)
+    return { ok: await store.manualFill(id) }
+  })
+  // Reset the demo wallet + clear positions (fresh slate for a demo run).
+  app.post('/ui/wallet/reset', async () => {
+    store.resetWallet(uiUserId)
+    return { ok: true }
   })
 
   // js_callback approvals from the host's own confirm modal.
@@ -269,11 +293,31 @@ export function buildService(opts: BuildOptions) {
     if (!adminOk(req, reply)) return reply
     const b = (req.body ?? {}) as Partial<AdminConfig>
     const patch: Partial<AdminConfig> = {}
+    const numKeys = [
+      'workingWindowMs',
+      'feeRate',
+      'makerFee',
+      'slippagePct',
+      'latencyMs',
+      'rejectRate',
+      'maxLeverage',
+      'minOrderSize',
+      'maxOrderSize',
+    ] as const
+    const boolKeys = ['partialFills', 'maintenance', 'capsSpot', 'capsPerp', 'capsOptions'] as const
     if (b.confirmSurface === 'api' || b.confirmSurface === 'js_callback')
       patch.confirmSurface = b.confirmSurface
-    if (typeof b.workingWindowMs === 'number') patch.workingWindowMs = b.workingWindowMs
-    if (typeof b.feeRate === 'number') patch.feeRate = b.feeRate
-    if (typeof b.partialFills === 'boolean') patch.partialFills = b.partialFills
+    if (b.fillMode === 'working' || b.fillMode === 'instant' || b.fillMode === 'manual')
+      patch.fillMode = b.fillMode
+    for (const k of numKeys)
+      if (typeof b[k] === 'number' && Number.isFinite(b[k])) patch[k] = Math.max(0, b[k] as number)
+    for (const k of boolKeys) if (typeof b[k] === 'boolean') patch[k] = b[k]
+    if (Array.isArray(b.marginModes))
+      patch.marginModes = b.marginModes.filter((m) => m === 'isolated' || m === 'cross')
+    if (Array.isArray(b.instruments))
+      patch.instruments = b.instruments.filter(
+        (s) => typeof s === 'string' && /^[A-Z0-9]{2,10}\/[A-Z0-9]{2,10}$/.test(s),
+      )
     return store.setConfig(patch)
   })
 
@@ -282,32 +326,55 @@ export function buildService(opts: BuildOptions) {
   // the browser touching the internal AI service directly. Demo/test control;
   // the venue itself has no opinion on Hippo's model.
   const intelligenceUrl = process.env.INTELLIGENCE_URL ?? 'http://localhost:8791'
-  app.get('/admin/ai/model', async (_req, reply) => {
+  // Generic same-origin proxy to the intelligence service so the settings page
+  // can drive Hippo's engine (model / mock / cache / persona) and see it in
+  // chat, without the browser touching the internal AI service directly.
+  async function aiProxy(
+    reply: FastifyReply,
+    path: string,
+    method: 'GET' | 'POST',
+    body?: unknown,
+  ) {
     try {
-      const res = await fetch(`${intelligenceUrl}/admin/model`, {
+      const res = await fetch(`${intelligenceUrl}${path}`, {
+        method,
+        ...(method === 'POST'
+          ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) }
+          : {}),
         signal: AbortSignal.timeout(3_000),
       })
       return await res.json()
     } catch (err) {
       return reply.code(502).send({ error: `intelligence unreachable: ${String(err)}` })
     }
-  })
+  }
+  // GET → combined AI status; the settings page reads this once.
+  app.get('/admin/ai', async (_req, reply) => aiProxy(reply, '/admin/status', 'GET'))
+  app.get('/admin/ai/model', async (_req, reply) => aiProxy(reply, '/admin/model', 'GET'))
   app.post('/admin/ai/model', async (req, reply) => {
     if (!adminOk(req, reply)) return reply
     const model = (req.body as { model?: unknown })?.model
     if (typeof model !== 'string' || !model)
       return reply.code(400).send({ error: 'model required' })
-    try {
-      const res = await fetch(`${intelligenceUrl}/admin/model`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model }),
-        signal: AbortSignal.timeout(3_000),
-      })
-      return await res.json()
-    } catch (err) {
-      return reply.code(502).send({ error: `intelligence unreachable: ${String(err)}` })
-    }
+    return aiProxy(reply, '/admin/model', 'POST', { model })
+  })
+  app.post('/admin/ai/mode', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    return aiProxy(reply, '/admin/mode', 'POST', {
+      forceMock: (req.body as { forceMock?: unknown })?.forceMock === true,
+    })
+  })
+  app.post('/admin/ai/cache', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    return aiProxy(reply, '/admin/cache', 'POST', {
+      enabled: (req.body as { enabled?: unknown })?.enabled !== false,
+    })
+  })
+  app.post('/admin/ai/persona', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    return aiProxy(reply, '/admin/persona', 'POST', {
+      level: (req.body as { level?: unknown })?.level ?? null,
+    })
   })
 
   // SSE stream powering the live blotter/positions/balances in the host UI.

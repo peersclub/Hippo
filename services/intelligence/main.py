@@ -36,8 +36,33 @@ logging.basicConfig(
 log = logging.getLogger("intelligence")
 
 router = ProviderRouter()
+
+
+class ToggleableCache:
+    """Wraps the answer cache with a runtime on/off switch (test lever). When
+    disabled, get() always misses and set() no-ops, so every turn is a fresh
+    model call — useful for observing live answers vs cached ones in chat."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+        self.enabled = True
+
+    def get(self, *a: Any, **k: Any) -> Any:
+        return self.inner.get(*a, **k) if self.enabled else None
+
+    def set(self, *a: Any, **k: Any) -> Any:
+        return self.inner.set(*a, **k) if self.enabled else None
+
+    def stats(self) -> dict[str, Any]:
+        return {**self.inner.stats(), "enabled": self.enabled}
+
+
 # In-memory by default; Redis-backed when REDIS_URL is set (same surface).
-answer_cache = make_answer_cache()
+answer_cache = ToggleableCache(make_answer_cache())
+
+# Global persona override (test lever). When set, it wins over the per-request
+# persona so the host can force new/intermediate/pro concept-answer depth.
+_persona_override: str | None = None
 
 
 @asynccontextmanager
@@ -101,7 +126,7 @@ async def respond(req: RespondRequest) -> dict[str, Any]:
             answer_cache,
             symbol=req.symbol,
             language=req.language,
-            experience_level=req.persona.experienceLevel if req.persona else None,
+            experience_level=_persona_override or (req.persona.experienceLevel if req.persona else None),
         )
     except Exception:
         # Never 500: degrade to a data-free decline-shaped card rather than
@@ -139,7 +164,7 @@ async def respond_stream(req: RespondRequest) -> StreamingResponse:
                 answer_cache,
                 symbol=req.symbol,
                 language=req.language,
-                experience_level=req.persona.experienceLevel if req.persona else None,
+                experience_level=_persona_override or (req.persona.experienceLevel if req.persona else None),
             ):
                 # First readable output (any event past the retrieval-only
                 # `meta`) → the first-token-p95 rate-card number.
@@ -191,3 +216,53 @@ async def set_model(req: ModelIn) -> dict[str, Any]:
     the brief card reports the new model — so the change is visible in-chat."""
     router.set_model(req.model)
     return {"ok": True, "current": router.configured_model, "mode": router.mode}
+
+
+@app.get("/admin/status")
+async def admin_status() -> dict[str, Any]:
+    """Combined engine state for the host settings page (one round trip)."""
+    available = list(dict.fromkeys([router.configured_model, *AVAILABLE_MODELS]))
+    return {
+        "current": router.configured_model,
+        "mode": router.mode,
+        "available": available,
+        "forceMock": router.force_mock,
+        "cacheEnabled": answer_cache.enabled,
+        "personaLevel": _persona_override,
+    }
+
+
+class ModeIn(BaseModel):
+    forceMock: bool = False
+
+
+@app.post("/admin/mode")
+async def set_mode(req: ModeIn) -> dict[str, Any]:
+    """Force the deterministic mock engine on/off (observe the degraded brief)."""
+    router.force_mock = req.forceMock
+    if req.forceMock:
+        router.mode = "mock"
+    return {"ok": True, "forceMock": router.force_mock}
+
+
+class CacheIn(BaseModel):
+    enabled: bool = True
+
+
+@app.post("/admin/cache")
+async def set_cache(req: CacheIn) -> dict[str, Any]:
+    """Enable/disable the answer cache (fresh model call every turn when off)."""
+    answer_cache.enabled = req.enabled
+    return {"ok": True, "cacheEnabled": answer_cache.enabled}
+
+
+class PersonaIn2(BaseModel):
+    level: Literal["new", "intermediate", "pro"] | None = None
+
+
+@app.post("/admin/persona")
+async def set_persona(req: PersonaIn2) -> dict[str, Any]:
+    """Force a persona experience level (calibrates concept-answer depth)."""
+    global _persona_override
+    _persona_override = req.level
+    return {"ok": True, "personaLevel": _persona_override}

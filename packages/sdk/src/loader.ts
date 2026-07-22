@@ -84,7 +84,10 @@ function normalizeLocale(raw: string): string {
       `
       shadow.appendChild(style)
 
-      const label = PILL_LABEL[config.locale] ?? PILL_LABEL.en ?? 'Ask Hippo'
+      // A partner may override the pill text via data-hippo-label; otherwise
+      // it's the locale default.
+      const label =
+        script.dataset.hippoLabel || PILL_LABEL[config.locale] || PILL_LABEL.en || 'Ask Hippo'
       const pill = document.createElement('button')
       pill.className = 'pill'
       pill.setAttribute('aria-label', label)

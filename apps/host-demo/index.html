@@ -206,10 +206,16 @@
       const real = new URLSearchParams(location.search).get('gw') !== 'mock'
       const envGw = '%VITE_GATEWAY_URL%'
       const realGw = envGw.startsWith('http') ? envGw : 'http://localhost:8788'
+      // Host-set embed preferences from the settings page (localStorage).
+      const pref = (k, d) => { try { return localStorage.getItem('hippo_embed_' + k) ?? d } catch { return d } }
       const s = document.createElement('script')
       s.src = '/loader.js'; s.async = true
-      s.dataset.hippoKey = 'pk_assetworks'
+      s.dataset.hippoKey = pref('key', 'pk_assetworks')
       s.dataset.hippoGateway = real ? realGw : 'http://localhost:8787'
+      s.dataset.hippoTheme = pref('theme', 'dark')
+      s.dataset.hippoLocale = pref('locale', 'en')
+      if (pref('open', '') === '1') s.dataset.hippoOpen = 'auto'
+      const label = pref('label', ''); if (label) s.dataset.hippoLabel = label
       // Cloud + real gateway: mint sessions through the demo token endpoint
       // (api/token.ts) — the prod gateway (HIPPO_DEV=0) rejects bare keys.
       // Local dev gateways run HIPPO_DEV=1 and keep the bare-key mint.

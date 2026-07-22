@@ -142,6 +142,21 @@ export class VenueStore {
   place(userId: string, req: PlaceRequest): Order {
     if (!Number.isFinite(req.qty) || req.qty <= 0) throw new Error('invalid size')
     if (!Number.isFinite(req.rate) || req.rate <= 0) throw new Error('invalid price')
+
+    // ── chaos & policy gates (test levers) ──
+    if (this.config.maintenance)
+      throw new Error('venue under maintenance — orders are temporarily rejected')
+    const cap = this.config[req.market === 'perp' ? 'capsPerp' : 'capsSpot']
+    if (!cap) throw new Error(`${req.market} trading is disabled on this venue`)
+    if (this.config.minOrderSize > 0 && req.qty < this.config.minOrderSize)
+      throw new Error(`below minimum order size (${this.config.minOrderSize})`)
+    if (this.config.maxOrderSize > 0 && req.qty > this.config.maxOrderSize)
+      throw new Error(`above maximum order size (${this.config.maxOrderSize})`)
+    if (req.market === 'perp' && (req.leverage ?? 1) > this.config.maxLeverage)
+      throw new Error(`leverage exceeds venue max (${this.config.maxLeverage}×)`)
+    if (this.config.rejectRate > 0 && this.rand() < this.config.rejectRate)
+      throw new Error('order rejected by the venue (simulated)')
+
     const [base, quote] = split(req.pairName)
 
     if (req.market === 'spot') this.reserveSpot(userId, req, base, quote)
@@ -165,7 +180,7 @@ export class VenueStore {
       marginMode: req.marginMode,
       reduceOnly: req.reduceOnly,
       createdAt: now,
-      settleAfter: now + this.config.workingWindowMs,
+      settleAfter: now + (this.config.fillMode === 'instant' ? 0 : this.config.workingWindowMs),
     }
     this.orders.set(order.id, order)
     this.emit({ type: 'order', order })
@@ -209,6 +224,36 @@ export class VenueStore {
     return true
   }
 
+  /** Host-approved fill (fillMode='manual'). Fills the order now at its rate
+   *  (limit) or the live price with slippage (market). Returns false if the
+   *  order isn't fillable. */
+  async manualFill(id: number): Promise<boolean> {
+    const o = this.orders.get(id)
+    if (!o || (o.status !== ORDER_STATUS.ACTIVE && o.status !== ORDER_STATUS.PARTIAL)) return false
+    let price = o.rate
+    if (o.kind === 'market') {
+      try {
+        price = this.fillPrice(o, await this.getPrice(o.pairName))
+      } catch {
+        return false
+      }
+    }
+    this.fill(o, price)
+    return true
+  }
+
+  /** Reset the demo wallet to the seed balances (or a supplied seed) and clear
+   *  the user's open perp positions — a clean slate for a fresh demo run. */
+  resetWallet(userId: string, seed?: Balance[]): void {
+    const w = new Map<string, { total: number; reserved: number }>()
+    for (const b of seed ?? this.seed) w.set(b.currencyName, { total: b.amount, reserved: 0 })
+    this.wallets.set(userId, w)
+    for (const key of [...this.positions.keys()])
+      if (key.startsWith(`${userId}:`)) this.positions.delete(key)
+    this.pushBalances(userId)
+    void this.openPositions(userId).then((positions) => this.emit({ type: 'positions', positions }))
+  }
+
   private releaseReserve(o: Order): void {
     const remaining = o.qty - o.filledQty
     if (remaining <= 0) return
@@ -243,6 +288,9 @@ export class VenueStore {
           this.emit({ type: 'handoff', handoff: h })
         }
       }
+      // Manual fill mode: nothing auto-fills; the host approves each fill from
+      // the settings page, holding orders in WORKING for as long as they like.
+      if (this.config.fillMode === 'manual') return
       const priceCache = new Map<string, number>()
       for (const o of this.orders.values()) {
         if (o.status !== ORDER_STATUS.ACTIVE && o.status !== ORDER_STATUS.PARTIAL) continue
@@ -257,7 +305,7 @@ export class VenueStore {
           priceCache.set(o.pairName, price)
         }
         if (!this.marketable(o, price)) continue
-        this.fill(o, o.kind === 'limit' ? o.rate : price)
+        this.fill(o, this.fillPrice(o, price))
       }
     } finally {
       this.sweeping = false
@@ -291,10 +339,25 @@ export class VenueStore {
     }
   }
 
+  /** Market orders fill at the live price moved against the taker by the
+   *  configured slippage; limit orders fill at their resting rate (the maker). */
+  private fillPrice(o: Order, price: number): number {
+    if (o.kind === 'limit') return o.rate
+    const s = this.config.slippagePct
+    if (!s) return price
+    return o.side === 'buy' ? price * (1 + s) : price * (1 - s)
+  }
+
+  /** Random in [0,1). Isolated so the chaos gates have one seam to reason about. */
+  private rand(): number {
+    return Math.random()
+  }
+
   private applyFill(o: Order, qty: number, price: number): void {
     const [base, quote] = split(o.pairName)
     const notional = qty * price
-    const fee = notional * this.config.feeRate
+    // Resting limit orders are makers; market orders are takers.
+    const fee = notional * (o.kind === 'limit' ? this.config.makerFee : this.config.feeRate)
     if (o.market === 'spot') {
       if (o.side === 'buy') {
         // Consume the quote reserve at the ORDER rate (what we locked), credit base.
