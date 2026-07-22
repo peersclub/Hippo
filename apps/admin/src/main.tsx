@@ -7,6 +7,7 @@ import { currentOperator, get, post } from './api.js'
 import { AuditPage } from './pages/audit.js'
 import { DashboardPage } from './pages/dashboard.js'
 import { LoginPage } from './pages/login.js'
+import { MemoryConfigPage } from './pages/memory-config.js'
 import { OperatorsPage } from './pages/operators.js'
 import { PartnerDetailPage } from './pages/partner-detail.js'
 import { PartnersPage } from './pages/partners.js'
@@ -23,6 +24,7 @@ const NAV = [
   ['users', 'Users'],
   ['sessions', 'Sessions'],
   ['memory', 'Memory'],
+  ['memory-config', 'Memory Config'],
   ['operators', 'Operators'],
   ['audit', 'Audit'],
 ] as const
@@ -50,6 +52,8 @@ function Page() {
       return <SessionsPage />
     case 'memory':
       return <UsersPage mode="memory" />
+    case 'memory-config':
+      return <MemoryConfigPage />
     case 'audit':
       return <AuditPage />
     default:

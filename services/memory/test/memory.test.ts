@@ -324,3 +324,78 @@ describe('bulk purge (partner offboarding)', () => {
     await app.close()
   })
 })
+
+describe('scope-memory documents (global / host / user note)', () => {
+  const TOKEN = 'test-internal-token'
+  const auth = { 'x-hippo-internal-token': TOKEN }
+
+  it('global doc round-trips and defaults empty', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    const empty = await app.inject({ method: 'GET', url: '/v1/scope/global', headers: auth })
+    expect(empty.json()).toMatchObject({ body: '', updatedAt: 0 })
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/global',
+      headers: auth,
+      payload: { body: 'PLATFORM RULE: never give advice.' },
+    })
+    expect(put.statusCode).toBe(200)
+    const got = await app.inject({ method: 'GET', url: '/v1/scope/global', headers: auth })
+    expect(got.json().body).toBe('PLATFORM RULE: never give advice.')
+  })
+
+  it('host docs are per-partner isolated', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/host/pA',
+      headers: auth,
+      payload: { body: 'Venue A context' },
+    })
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/scope/host/pA', headers: auth })).json().body,
+    ).toBe('Venue A context')
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/scope/host/pB', headers: auth })).json().body,
+    ).toBe('')
+  })
+
+  it('user notes are per (partner,user)', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/user/pA/u1',
+      headers: auth,
+      payload: { body: 'prefers terse answers' },
+    })
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u1', headers: auth })).json().body,
+    ).toBe('prefers terse answers')
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u2', headers: auth })).json().body,
+    ).toBe('')
+  })
+
+  it('rejects a non-string body and a missing token', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    const bad = await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/global',
+      headers: auth,
+      payload: { body: 123 },
+    })
+    expect(bad.statusCode).toBe(400)
+    const noauth = await app.inject({ method: 'GET', url: '/v1/scope/global' })
+    expect(noauth.statusCode).toBe(401)
+  })
+})
+
+describe('scope store clamps oversized bodies', () => {
+  it('truncates a body beyond MAX_BODY', async () => {
+    const { InMemoryScopeMemoryStore, MAX_BODY } = await import('../src/scope-store.js')
+    const store = new InMemoryScopeMemoryStore()
+    const huge = 'x'.repeat(MAX_BODY + 500)
+    const doc = await store.setGlobal(huge, 1)
+    expect(doc.body.length).toBe(MAX_BODY)
+  })
+})

@@ -618,6 +618,62 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     }
   })
 
+  // ── memory-config: freeform scope documents (super-admin only) ─────────
+  // The layered memory a super-admin curates (global/host/user) that the
+  // gateway composes into the prompt. OWNER-gated (the platform's super-admin
+  // tier), audited with the scope level, proxied to the memory service. A
+  // pre-prod control plane — the composition itself gates on an entitlement.
+  const scopeGet = (path: string) => async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!ownerOnly(req, reply)) return reply
+    try {
+      const res = await memoryFetch(path)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'memory service unreachable' })
+    }
+  }
+  const scopePut =
+    (path: string, level: string, target: (p: Record<string, string>) => string) =>
+    async (req: FastifyRequest<{ Params: Record<string, string> }>, reply: FastifyReply) => {
+      const op = ownerOnly(req, reply)
+      if (!op) return reply
+      const body = (req.body as { body?: unknown } | null)?.body
+      if (typeof body !== 'string') return reply.code(400).send({ error: 'body (string) required' })
+      try {
+        const res = await memoryFetch(path, { method: 'PUT', body: JSON.stringify({ body }) })
+        void record(op, 'memory_config.set', target(req.params), { level, length: body.length })
+        return reply.code(res.status).send(await res.json())
+      } catch {
+        return reply.code(502).send({ error: 'memory service unreachable' })
+      }
+    }
+
+  app.get('/v1/memory-config/global', scopeGet('/v1/scope/global'))
+  app.put(
+    '/v1/memory-config/global',
+    scopePut('/v1/scope/global', 'global', () => 'global'),
+  )
+  app.get<{ Params: { partnerId: string } }>('/v1/memory-config/host/:partnerId', (req, reply) =>
+    scopeGet(`/v1/scope/host/${req.params.partnerId}`)(req, reply),
+  )
+  app.put<{ Params: { partnerId: string } }>('/v1/memory-config/host/:partnerId', (req, reply) =>
+    scopePut(
+      `/v1/scope/host/${req.params.partnerId}`,
+      'host',
+      (p) => p.partnerId ?? '',
+    )(req, reply),
+  )
+  app.get<{ Params: UserParams }>('/v1/memory-config/user/:partnerId/:userId', (req, reply) =>
+    scopeGet(`/v1/scope/user/${req.params.partnerId}/${req.params.userId}`)(req, reply),
+  )
+  app.put<{ Params: UserParams }>('/v1/memory-config/user/:partnerId/:userId', (req, reply) =>
+    scopePut(
+      `/v1/scope/user/${req.params.partnerId}/${req.params.userId}`,
+      'user',
+      (p) => `${p.partnerId}/${p.userId}`,
+    )(req, reply),
+  )
+
   // ── operators (owner-only) ───────────────────────────────────────────────
   app.get('/v1/operators', async (req, reply) => {
     const op = ownerOnly(req, reply)
