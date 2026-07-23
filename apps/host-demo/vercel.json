@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter @hippo/sdk build && vite build",
+  "buildCommand": "pnpm --filter @hippo/protocol build && pnpm --filter @hippo/sdk build && vite build",
   "outputDirectory": "dist",
   "cleanUrls": true
 }
