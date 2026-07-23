@@ -40,4 +40,31 @@ describe('composeMemory — authority-ordered layering', () => {
   it('no layers → empty block, empty scopes (memory off costs nothing)', () => {
     expect(composeMemory({})).toEqual({ text: '', scopes: [] })
   })
+
+  it('folds auto-learned SESSION facts into the SESSION layer', () => {
+    const { text, scopes } = composeMemory({ sessionFacts: '- follows: BTC' })
+    expect(scopes).toEqual(['session'])
+    expect(text).toContain('THIS SESSION')
+    expect(text).toContain('follows: BTC')
+  })
+
+  it('session note and session facts combine under one SESSION layer', () => {
+    const { scopes, text } = composeMemory({
+      session: 'asked about SOL earlier',
+      sessionFacts: '- prefers: perps',
+    })
+    expect(scopes).toEqual(['session'])
+    expect(text).toContain('asked about SOL earlier')
+    expect(text).toContain('prefers: perps')
+  })
+
+  it('learned facts stay BELOW platform rules (guardrail authority preserved)', () => {
+    const { text } = composeMemory({
+      global: 'never give advice',
+      userFacts: '- experience: pro',
+      sessionFacts: '- follows: ETH',
+    })
+    expect(text.indexOf('PLATFORM RULES')).toBeLessThan(text.indexOf('experience: pro'))
+    expect(text.indexOf('USER PROFILE')).toBeLessThan(text.indexOf('THIS SESSION'))
+  })
 })

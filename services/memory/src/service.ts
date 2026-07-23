@@ -17,7 +17,13 @@
  */
 import { timingSafeEqual } from 'node:crypto'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
-import { InMemoryScopeMemoryStore, MAX_BODY, type ScopeMemoryStore } from './scope-store.js'
+import {
+  type FactSource,
+  InMemoryScopeMemoryStore,
+  type LearnedFactInput,
+  MAX_BODY,
+  type ScopeMemoryStore,
+} from './scope-store.js'
 import {
   type ExperienceLevel,
   InMemoryPersonaStore,
@@ -26,6 +32,26 @@ import {
 } from './store.js'
 
 const LEVELS: ReadonlySet<string> = new Set(['new', 'intermediate', 'pro'])
+const FACT_SOURCES: ReadonlySet<string> = new Set(['auto', 'admin'])
+
+/** Hand-validate an incoming learned-facts array (same zero-schema-deps rule
+ * as parseUpdate). Malformed entries are dropped, not fatal — the caller is
+ * the trusted gateway, but a bad fact should never 500 a fire-and-forget
+ * write. The store still dedups/caps/guards provenance on top of this. */
+function parseFactInputs(raw: unknown): LearnedFactInput[] {
+  if (!Array.isArray(raw)) return []
+  const out: LearnedFactInput[] = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue
+    const r = item as Record<string, unknown>
+    if (typeof r.type !== 'string' || typeof r.value !== 'string') continue
+    if (typeof r.confidence !== 'number' || !Number.isFinite(r.confidence)) continue
+    const fact: LearnedFactInput = { type: r.type, value: r.value, confidence: r.confidence }
+    if (typeof r.source === 'string' && FACT_SOURCES.has(r.source)) fact.source = r.source as FactSource
+    out.push(fact)
+  }
+  return out
+}
 
 /** Hand-validated (this service deliberately has zero schema deps). */
 function parseUpdate(body: unknown): PersonaUpdate | null {
@@ -210,9 +236,8 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
   )
 
   // ── auto-learned facts (provenance-tracked; separate from prose bodies) ──
-  // Read + user-visible clear only. The write path (upsert) is driven by the
-  // intelligence/gateway auto-learning track and is intentionally not exposed
-  // here yet; the store method exists and is unit-tested. Same token boundary.
+  // GET (read for compose) + DELETE (user-visible clear) + PUT (gateway upsert,
+  // below /health). Same internal-token boundary as the persona routes.
   app.get<{ Params: Params }>('/v1/scope/user/:partnerId/:userId/facts', async (req, reply) => {
     if (!requireInternalToken(req, reply)) return reply
     const { partnerId, userId } = req.params
@@ -239,6 +264,33 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
         sessionId: req.params.sessionId,
       })
       return { cleared }
+    },
+  )
+
+  // Write path (auto-learning integration track): the gateway upserts facts it
+  // extracted from a turn. Body {facts:[{type,value,confidence,source?}]}. The
+  // store dedups by (type,value), caps per scope, and never lets an 'auto'
+  // observation overwrite a curated 'admin' fact. Returns the merged set.
+  app.put<{ Params: Params; Body: { facts?: unknown } }>(
+    '/v1/scope/user/:partnerId/:userId/facts',
+    async (req, reply) => {
+      if (!requireInternalToken(req, reply)) return reply
+      const { partnerId, userId } = req.params
+      const facts = parseFactInputs((req.body as { facts?: unknown })?.facts)
+      return scopeStore.upsertLearnedFacts('user', { partnerId, userId }, facts, Date.now())
+    },
+  )
+  app.put<{ Params: { sessionId: string }; Body: { facts?: unknown } }>(
+    '/v1/scope/session/:sessionId/facts',
+    async (req, reply) => {
+      if (!requireInternalToken(req, reply)) return reply
+      const facts = parseFactInputs((req.body as { facts?: unknown })?.facts)
+      return scopeStore.upsertLearnedFacts(
+        'session',
+        { sessionId: req.params.sessionId },
+        facts,
+        Date.now(),
+      )
     },
   )
 

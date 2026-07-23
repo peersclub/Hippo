@@ -544,8 +544,8 @@ describe('learned-facts HTTP surface', () => {
 
   it('session facts round-trip over HTTP', async () => {
     const app = buildService({ internalToken: TOKEN })
-    // No write route yet, so seed via the store the service builds is not
-    // reachable here; instead assert the read path defaults empty + guarded.
+    // Read path defaults to empty + is token-guarded (write round-trip is
+    // covered by the PUT test below).
     const empty = await app.inject({
       method: 'GET',
       url: '/v1/scope/session/s1/facts',
@@ -556,6 +556,45 @@ describe('learned-facts HTTP surface', () => {
     expect((await app.inject({ method: 'GET', url: '/v1/scope/session/s1/facts' })).statusCode).toBe(
       401,
     )
+    await app.close()
+  })
+
+  it('PUT upserts facts (token-guarded) and GET reads them back — user + session', async () => {
+    const app = buildService({ internalToken: TOKEN })
+
+    // Unauthenticated write is denied.
+    const denied = await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/session/s1/facts',
+      payload: { facts: [{ type: 'followed_asset', value: 'BTC', confidence: 0.9 }] },
+    })
+    expect(denied.statusCode).toBe(401)
+
+    // Authenticated session upsert round-trips.
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/session/s1/facts',
+      headers: auth,
+      payload: {
+        facts: [
+          { type: 'followed_asset', value: 'BTC', confidence: 0.9 },
+          { type: 'answer_style', value: 'concise', confidence: 0.8 },
+        ],
+      },
+    })
+    expect(put.statusCode).toBe(200)
+    const got = await app.inject({ method: 'GET', url: '/v1/scope/session/s1/facts', headers: auth })
+    expect(got.json().map((f: { value: string }) => f.value).sort()).toEqual(['BTC', 'concise'])
+
+    // Malformed entries are dropped, not fatal (fire-and-forget must not 500).
+    const junk = await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/user/pA/u1/facts',
+      headers: auth,
+      payload: { facts: [{ type: 'x' }, 42, { type: 'ok', value: 'v', confidence: 0.5 }] },
+    })
+    expect(junk.statusCode).toBe(200)
+    expect(junk.json()).toHaveLength(1)
     await app.close()
   })
 })

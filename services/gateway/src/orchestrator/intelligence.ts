@@ -13,6 +13,9 @@
 const INTELLIGENCE_URL = process.env.INTELLIGENCE_URL ?? 'http://localhost:8791'
 const INTENT_TIMEOUT_MS = 3_000
 const RESPOND_TIMEOUT_MS = 30_000
+/** Extraction runs AFTER the answer is delivered, so it never sits on the
+ * trader's critical path — but keep it snappy so it can't pile up. */
+const EXTRACT_TIMEOUT_MS = 4_000
 /** After a failed call, fail fast into the degraded path for this long
  * instead of paying the full intent/respond timeouts on every turn; the
  * first call after the window is the probe (mirrors the intelligence
@@ -49,6 +52,11 @@ export type IntentResult = {
   interpretation?: string
   restructuredQuery?: string
 }
+
+/** A candidate durable fact the extractor pulled from a turn. The intelligence
+ * service already canonicalises + allowlists these (closed vocab, no directives);
+ * the gateway treats them as opaque data to forward to the memory store. */
+export type LearnedFactCandidate = { type: string; value: string; confidence: number }
 
 export type BriefResponse = {
   kind: 'brief'
@@ -107,6 +115,17 @@ export interface IntelligenceClient {
      * context ONLY; the engine keeps its no-advice guardrail authoritative. */
     memoryContext?: string
   }): AsyncGenerator<RespondStreamEvent>
+  /**
+   * Post-turn auto-learning: extract durable, allowlisted trading facts from a
+   * completed turn. Fire-and-forget by contract — NEVER throws and NEVER blocks
+   * the answer path; any failure (down/slow/mock) resolves to `[]`. Does not
+   * touch the answer-path breaker.
+   */
+  extractMemory(req: {
+    query: string
+    interpretation?: string
+    answer?: string
+  }): Promise<LearnedFactCandidate[]>
 }
 
 async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promise<T> {
@@ -208,6 +227,21 @@ export function createIntelligenceClient(baseUrl = INTELLIGENCE_URL): Intelligen
             RESPOND_TIMEOUT_MS,
           ) as AsyncGenerator<RespondStreamEvent>,
       ),
+    // Deliberately OUTSIDE `guarded`: extraction is best-effort and post-answer,
+    // so a hiccup here must neither throw to the caller nor trip the breaker
+    // that routes real answers. Always resolves to an array.
+    async extractMemory(req) {
+      try {
+        const { facts } = await postJson<{ facts?: LearnedFactCandidate[] }>(
+          `${baseUrl}/v1/extract-memory`,
+          req,
+          EXTRACT_TIMEOUT_MS,
+        )
+        return Array.isArray(facts) ? facts : []
+      } catch {
+        return []
+      }
+    },
   }
 }
 

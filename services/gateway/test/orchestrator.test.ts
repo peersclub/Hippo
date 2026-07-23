@@ -1161,3 +1161,99 @@ describe('orchestrator: memoryLab entitlement gate (Phase D)', () => {
     await app.close()
   })
 })
+
+describe('orchestrator: auto-learning memory (Phase A, gated + fire-and-forget)', () => {
+  // learnFromTurn runs AFTER the brief is emitted, so poll for the async write.
+  const until = async (cond: () => boolean, ms = 1500): Promise<void> => {
+    const start = Date.now()
+    while (!cond() && Date.now() - start < ms) await new Promise((r) => setTimeout(r, 5))
+    if (!cond()) throw new Error('condition not met in time')
+  }
+  const learnIntel = (facts: Array<{ type: string; value: string; confidence: number }>) =>
+    stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* () {
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+      extractMemory: async () => facts,
+    })
+
+  it('ENTITLED: facts extracted from a turn are upserted to SESSION scope', async () => {
+    const memory = stubMemory()
+    const intel = learnIntel([{ type: 'followed_asset', value: 'BTC', confidence: 0.9 }])
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    await until(() => (memory.learnedFacts.get(`session:${session.id}`)?.length ?? 0) > 0)
+    const facts = memory.learnedFacts.get(`session:${session.id}`) ?? []
+    expect(facts.map((f) => f.value)).toContain('BTC')
+    expect(facts[0].source).toBe('auto')
+    await app.close()
+  })
+
+  it('learned SESSION facts compose into the NEXT turn under THIS SESSION', async () => {
+    const capture: { mem?: string } = {}
+    const intel = stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        capture.mem = (req as { memoryContext?: string }).memoryContext
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+    })
+    const memory = stubMemory()
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    // Pre-seed a prior turn's learned fact for this session.
+    await memory.upsertLearnedFacts('session', { sessionId: session.id }, [
+      { type: 'followed_asset', value: 'ETH', confidence: 0.9 },
+    ])
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(capture.mem).toContain('THIS SESSION')
+    expect(capture.mem).toContain('ETH')
+    const interp = frameOfType<{ memoryScopes: string[] }>(session, 'interpretation')
+    expect(interp.memoryScopes).toContain('session')
+    await app.close()
+  })
+
+  it('UNENTITLED: nothing is learned even if extraction would return facts', async () => {
+    const memory = stubMemory()
+    const intel = learnIntel([{ type: 'followed_asset', value: 'BTC', confidence: 0.9 }])
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions) // no memoryLab
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    // give any stray async write a chance to (not) happen
+    await new Promise((r) => setTimeout(r, 30))
+    expect(memory.learnedFacts.get(`session:${session.id}`)).toBeUndefined()
+    await app.close()
+  })
+
+  it('extraction failure never breaks the turn (best-effort)', async () => {
+    const memory = stubMemory()
+    const intel = stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* () {
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+      extractMemory: async () => {
+        throw new Error('extractor down')
+      },
+    })
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    // The brief still lands; the throwing extractor is swallowed.
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    await new Promise((r) => setTimeout(r, 30))
+    expect(memory.learnedFacts.get(`session:${session.id}`)).toBeUndefined()
+    await app.close()
+  })
+})

@@ -28,12 +28,13 @@ import type {
   DeclineResponse,
   IntelligenceClient,
   IntentResult,
+  LearnedFactCandidate,
   OrderIntent,
 } from './intelligence.js'
 import { guessIntent } from './intelligence.js'
 import type { MarketClient, MarketSnapshot } from './market.js'
 import { asOfDisplay, cacheAgeDisplay, symbolFromText } from './market.js'
-import type { MemoryClient, Persona } from './memory.js'
+import type { LearnedFact, MemoryClient, Persona } from './memory.js'
 import { composeMemory } from './memory-compose.js'
 import type { SeamClient } from './seam.js'
 
@@ -94,6 +95,24 @@ function personaSummary(persona: Persona | null): string {
   return bits.join(' · ')
 }
 
+/** Render auto-learned facts into short, human-readable lines for the composed
+ * memory block. Labels our closed fact-type vocab; unknown types pass through.
+ * Bounded so a store that somehow grew can't bloat the prompt. Pure. */
+function formatLearnedFacts(facts: LearnedFact[]): string {
+  if (!facts.length) return ''
+  const label: Record<string, string> = {
+    followed_asset: 'follows',
+    instrument_pref: 'prefers',
+    leverage_pref: 'typical leverage',
+    experience_level: 'experience',
+    answer_style: 'answers',
+  }
+  return facts
+    .slice(0, 20)
+    .map((f) => `- ${label[f.type] ?? f.type}: ${f.value}`)
+    .join('\n')
+}
+
 /** Fallback interpretation summary when stage-1 didn't supply one (degraded
  * mode / older intelligence build). One neutral line per intent — never
  * advice. */
@@ -116,6 +135,38 @@ function defaultInterpretation(intent: string): string {
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const { intel, market, memory, seam, emit, telemetry, log } = deps
+
+  /**
+   * Post-turn auto-learning (PRE-PROD, gated by `memoryLab`): extract durable
+   * trading facts from the completed turn and persist them to SESSION scope.
+   * Entirely fire-and-forget — it runs after the answer is already delivered,
+   * never awaited on the trader's path, and swallows every error. Extraction
+   * output is untrusted, allowlisted DATA (see the intelligence service); it is
+   * composed as CONTEXT beneath the no-advice guardrail, never as instruction.
+   * Phase A learns SESSION scope only (ephemeral); USER-scope promotion is a
+   * later phase.
+   */
+  function learnFromTurn(
+    session: Session,
+    query: string,
+    interpretation: string | undefined,
+    answer: string,
+  ): void {
+    if (session.partner.entitlements?.memoryLab !== true) return
+    void (async () => {
+      try {
+        const facts = await intel.extractMemory({ query, interpretation, answer })
+        if (!facts.length) return
+        await memory.upsertLearnedFacts(
+          'session',
+          { sessionId: session.id },
+          facts as LearnedFactCandidate[],
+        )
+      } catch {
+        // best-effort: auto-learning must never surface on a turn
+      }
+    })()
+  }
 
   // ── frame builders ─────────────────────────────────────────────────────
 
@@ -673,12 +724,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // Composed as CONTEXT below the answer engine's no-advice guardrail
       // (which stays authoritative — memory never overrides it). Applied
       // scopes surface on the interpretation card + the admin inspector.
-      const docs = await memory.scopeDocs(session.partner.partnerId, userKey(session))
+      // Freeform scope docs + auto-learned SESSION facts, both best-effort
+      // (memory down → '' / [], never blocks or breaks a turn). Read together.
+      const [docs, sessionFacts] = await Promise.all([
+        memory.scopeDocs(session.partner.partnerId, userKey(session)),
+        memory.getLearnedFacts('session', { sessionId: session.id }),
+      ])
       mem = composeMemory({
         global: docs.global,
         host: docs.host,
         user: docs.user,
         personaLine: personaSummary(persona),
+        sessionFacts: formatLearnedFacts(sessionFacts),
       })
       if (mem.text) {
         // Persist the exact composed block for the admin/in-session inspector.
@@ -832,6 +889,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                 const brief = emit(session, briefFrame(ev.data, intentRes.intent))
                 rememberBrief(brief, text, intentRes.intent)
                 telemetry.recordResearchAnswered(userKey(session))
+                // Auto-learn from the delivered answer (gated + fire-and-forget).
+                learnFromTurn(
+                  session,
+                  text,
+                  intentRes.interpretation,
+                  [ev.data.headline, ...ev.data.paragraphs].join(' '),
+                )
                 finished = true
               } else if (ev.event === 'replace' || ev.event === 'decline') {
                 // Guardrail trip mid-brief is an advice decline too.

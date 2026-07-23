@@ -32,6 +32,19 @@ export type PersonaUpdate = {
 /** A freeform scope-memory document (global/host/user note). */
 export type MemoryDoc = { body: string; updatedAt: number }
 
+/** Auto-learned facts (mirrors the memory service's scope-store shapes). */
+export type LearnedFactScope = 'user' | 'session'
+export type LearnedFact = {
+  type: string
+  value: string
+  confidence: number
+  source: 'auto' | 'admin'
+  createdAt: number
+  updatedAt: number
+}
+export type LearnedFactInput = { type: string; value: string; confidence: number; source?: 'auto' | 'admin' }
+export type LearnedFactIds = { partnerId?: string; userId?: string; sessionId?: string }
+
 export interface MemoryClient {
   /** null when the memory service is unreachable — the turn proceeds. */
   get(partnerId: string, userId: string): Promise<Persona | null>
@@ -53,6 +66,16 @@ export interface MemoryClient {
   ): Promise<void>
   /** Read a session's composed snapshot (admin inspector). */
   getComposed(sessionId: string): Promise<{ composed: string; updatedAt: number } | null>
+  /** Auto-learned facts for a scope. Degrades to [] when memory is down — a
+   * turn's composition never waits on or breaks over them. */
+  getLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<LearnedFact[]>
+  /** Persist facts the extractor pulled from a turn. Fire-and-forget; failure
+   * never affects the turn (the store dedups/caps/guards provenance). */
+  upsertLearnedFacts(
+    scope: LearnedFactScope,
+    ids: LearnedFactIds,
+    facts: LearnedFactInput[],
+  ): Promise<void>
 }
 
 async function request(url: string, init: RequestInit): Promise<Response> {
@@ -72,6 +95,10 @@ async function request(url: string, init: RequestInit): Promise<Response> {
 export function createMemoryClient(baseUrl = MEMORY_URL): MemoryClient {
   const personaUrl = (partnerId: string, userId: string) =>
     `${baseUrl}/v1/persona/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`
+  const factsUrl = (scope: LearnedFactScope, ids: LearnedFactIds) =>
+    scope === 'user'
+      ? `${baseUrl}/v1/scope/user/${encodeURIComponent(ids.partnerId ?? '')}/${encodeURIComponent(ids.userId ?? '')}/facts`
+      : `${baseUrl}/v1/scope/session/${encodeURIComponent(ids.sessionId ?? '')}/facts`
   // Network-level failures (timeout, refused) open the breaker; a non-2xx is
   // the service answering and doesn't. Reads degrade to null either way.
   let downUntil = 0
@@ -143,6 +170,20 @@ export function createMemoryClient(baseUrl = MEMORY_URL): MemoryClient {
       } catch {
         return null
       }
+    },
+    async getLearnedFacts(scope, ids) {
+      try {
+        const res = await guarded(factsUrl(scope, ids), { method: 'GET' })
+        if (!res?.ok) return []
+        const j = await res.json()
+        return Array.isArray(j) ? (j as LearnedFact[]) : []
+      } catch {
+        return []
+      }
+    },
+    async upsertLearnedFacts(scope, ids, facts) {
+      if (!facts.length) return
+      await guarded(factsUrl(scope, ids), { method: 'PUT', body: JSON.stringify({ facts }) })
     },
   }
 }

@@ -25,6 +25,10 @@ export type ScopeDocs = {
   session?: string
   /** structured persona summary line (level/assets), already server-formatted */
   personaLine?: string
+  /** auto-learned USER-scope facts, already formatted into lines */
+  userFacts?: string
+  /** auto-learned SESSION-scope facts, already formatted into lines */
+  sessionFacts?: string
 }
 
 /** Machine tags for the interpretation card + inspector (which layers applied). */
@@ -62,12 +66,15 @@ export function composeMemory(docs: ScopeDocs): ComposedMemory {
   const venue = clean(docs.host)
   if (venue) sections.push({ scope: 'venue', body: venue })
 
-  // USER = freeform note + the structured persona summary, whichever exist.
-  const userParts = [clean(docs.user), clean(docs.personaLine)].filter(Boolean)
+  // USER = freeform note + structured persona summary + auto-learned facts.
+  const userParts = [clean(docs.user), clean(docs.personaLine), clean(docs.userFacts)].filter(
+    Boolean,
+  )
   if (userParts.length) sections.push({ scope: 'user', body: userParts.join('\n') })
 
-  const session = clean(docs.session)
-  if (session) sections.push({ scope: 'session', body: session })
+  // SESSION = freeform note + auto-learned session facts.
+  const sessionParts = [clean(docs.session), clean(docs.sessionFacts)].filter(Boolean)
+  if (sessionParts.length) sections.push({ scope: 'session', body: sessionParts.join('\n') })
 
   if (!sections.length) return { text: '', scopes: [] }
 
