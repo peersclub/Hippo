@@ -209,6 +209,39 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     },
   )
 
+  // ── auto-learned facts (provenance-tracked; separate from prose bodies) ──
+  // Read + user-visible clear only. The write path (upsert) is driven by the
+  // intelligence/gateway auto-learning track and is intentionally not exposed
+  // here yet; the store method exists and is unit-tested. Same token boundary.
+  app.get<{ Params: Params }>('/v1/scope/user/:partnerId/:userId/facts', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const { partnerId, userId } = req.params
+    return scopeStore.getLearnedFacts('user', { partnerId, userId })
+  })
+  app.delete<{ Params: Params }>('/v1/scope/user/:partnerId/:userId/facts', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const { partnerId, userId } = req.params
+    const cleared = await scopeStore.clearLearnedFacts('user', { partnerId, userId })
+    return { cleared }
+  })
+  app.get<{ Params: { sessionId: string } }>(
+    '/v1/scope/session/:sessionId/facts',
+    async (req, reply) => {
+      if (!requireInternalToken(req, reply)) return reply
+      return scopeStore.getLearnedFacts('session', { sessionId: req.params.sessionId })
+    },
+  )
+  app.delete<{ Params: { sessionId: string } }>(
+    '/v1/scope/session/:sessionId/facts',
+    async (req, reply) => {
+      if (!requireInternalToken(req, reply)) return reply
+      const cleared = await scopeStore.clearLearnedFacts('session', {
+        sessionId: req.params.sessionId,
+      })
+      return { cleared }
+    },
+  )
+
   app.get('/health', async () => ({
     ok: true,
     service: 'memory',
