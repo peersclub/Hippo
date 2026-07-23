@@ -9,7 +9,13 @@ import type {
   RespondStreamEvent,
 } from '../src/orchestrator/intelligence.js'
 import type { MarketClient, MarketSnapshot } from '../src/orchestrator/market.js'
-import type { MemoryClient, Persona, PersonaUpdate } from '../src/orchestrator/memory.js'
+import type {
+  LearnedFact,
+  LearnedFactIds,
+  MemoryClient,
+  Persona,
+  PersonaUpdate,
+} from '../src/orchestrator/memory.js'
 import type { PreparedTicket, SeamClient, SeamPortfolio } from '../src/orchestrator/seam.js'
 import type { Session, SessionStore } from '../src/plugins/auth.js'
 
@@ -50,6 +56,7 @@ export function stubIntel(overrides: {
   respondStream?: (
     req: Parameters<IntelligenceClient['respondStream']>[0],
   ) => AsyncGenerator<RespondStreamEvent>
+  extractMemory?: IntelligenceClient['extractMemory']
 }): IntelligenceClient {
   const respond = async () => (overrides.respond ? overrides.respond() : briefFixture)
   // Default stream mirrors respond(): meta then done (or a lone decline),
@@ -71,6 +78,7 @@ export function stubIntel(overrides: {
     respond,
     respondStream: (req) =>
       overrides.respondStream ? overrides.respondStream(req) : defaultStream(),
+    extractMemory: overrides.extractMemory ?? (async () => []),
   }
 }
 
@@ -86,6 +94,9 @@ export const deadIntel: IntelligenceClient = {
   respondStream: async function* () {
     throw new Error('intelligence unreachable')
   },
+  // Extraction is best-effort; even hard-down it must resolve, never reject
+  // (the orchestrator treats [] as "nothing learned this turn").
+  extractMemory: async () => [],
 }
 
 export const stubMarket: MarketClient = {
@@ -99,6 +110,7 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
   clears: string[]
   scopeDocsData: { global: string; host: string; user: string }
   composed: Map<string, string>
+  learnedFacts: Map<string, LearnedFact[]>
 } {
   const personas = new Map<string, Persona>()
   const updates: Array<{ userId: string; patch: PersonaUpdate }> = []
@@ -106,6 +118,10 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
   // Scope docs the test can preset; composed snapshots the orchestrator wrote.
   const scopeDocsData = { global: '', host: '', user: '' }
   const composed = new Map<string, string>()
+  // Auto-learned facts, keyed by scope+ids, so tests can assert what accrued.
+  const learnedFacts = new Map<string, LearnedFact[]>()
+  const factsKey = (scope: string, ids: LearnedFactIds) =>
+    scope === 'user' ? `user:${ids.partnerId}:${ids.userId}` : `session:${ids.sessionId}`
   const blank = (): Persona => ({
     optIn: false,
     experienceLevel: null,
@@ -140,6 +156,7 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
     },
     scopeDocsData,
     composed,
+    learnedFacts,
     async scopeDocs() {
       return { ...scopeDocsData }
     },
@@ -149,6 +166,32 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
     async getComposed(sessionId) {
       const c = composed.get(sessionId)
       return c === undefined ? null : { composed: c, updatedAt: 1 }
+    },
+    async getLearnedFacts(scope, ids) {
+      return [...(learnedFacts.get(factsKey(scope, ids)) ?? [])]
+    },
+    async upsertLearnedFacts(scope, ids, facts) {
+      // Minimal merge for tests: dedup by (type,value), auto source, timestamped.
+      const key = factsKey(scope, ids)
+      const cur = learnedFacts.get(key) ?? []
+      const now = Date.now()
+      for (const f of facts) {
+        const existing = cur.find((c) => c.type === f.type && c.value === f.value)
+        if (existing) {
+          existing.confidence = f.confidence
+          existing.updatedAt = now
+        } else {
+          cur.push({
+            type: f.type,
+            value: f.value,
+            confidence: f.confidence,
+            source: f.source ?? 'auto',
+            createdAt: now,
+            updatedAt: now,
+          })
+        }
+      }
+      learnedFacts.set(key, cur)
     },
   }
 }
@@ -240,6 +283,12 @@ export const deadMemory: MemoryClient = {
   scopeDocs: async () => ({ global: '', host: '', user: '' }),
   saveComposed: async () => {},
   getComposed: async () => null,
+  // Facts degrade to [] on read; writes reject like the other mutations (the
+  // orchestrator's learnFromTurn swallows it — auto-learning is best-effort).
+  getLearnedFacts: async () => [],
+  upsertLearnedFacts: async () => {
+    throw new Error('memory unreachable')
+  },
 }
 
 export const deadMarket: MarketClient = {
