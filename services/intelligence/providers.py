@@ -322,6 +322,10 @@ class MockProvider:
         user = next(
             (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
         )
+        if "You extract durable trading facts" in system:
+            # Memory extraction has no deterministic offline heuristic — the
+            # honest mock answer is "learned nothing this turn".
+            return json.dumps({"facts": []})
         if "You classify one user message" in system:
             return self._classify(user)
         if '"headline"' in user or '"headline"' in system:
