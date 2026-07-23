@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import extract as extract_engine
 import intent as intent_engine
 import research
 from cache import make_answer_cache
@@ -117,6 +118,47 @@ async def classify_intent(req: IntentRequest) -> dict[str, Any]:
     # Intent-p95 rate-card number.
     intent_duration.record((time.perf_counter() - start) * 1000.0, {"intent": intent})
     return result
+
+
+class FactIn(BaseModel):
+    """A prior durable fact (untrusted DATA). Loosely typed on input — the
+    extractor re-validates everything against its own allowlist anyway."""
+
+    type: str = Field(max_length=64)
+    value: str = Field(max_length=256)
+    confidence: float | None = None
+
+
+class ExtractMemoryRequest(BaseModel):
+    """Post-turn fact extraction (Memory auto-learn, Track 1). All fields but
+    `query` are optional context; priorFacts helps avoid re-proposing knowns."""
+
+    query: str = Field(min_length=1, max_length=4000)
+    interpretation: str | None = Field(default=None, max_length=4000)
+    answer: str | None = Field(default=None, max_length=16_000)
+    priorFacts: list[FactIn] | None = Field(default=None, max_length=64)
+
+
+@app.post("/v1/extract-memory")
+async def extract_memory(req: ExtractMemoryRequest) -> dict[str, Any]:
+    """Extract durable, trading-relevant facts about the user from a finished
+    turn. Additive to the pinned contract and side-effect free — it returns
+    facts (untrusted DATA) for the caller's memory layer to persist; it never
+    changes intent/research behaviour. Never 500s: on any error or in mock
+    mode it returns {"facts": []}."""
+    try:
+        return await extract_engine.extract(
+            req.query,
+            router,
+            interpretation=req.interpretation,
+            answer=req.answer,
+            prior_facts=[f.model_dump() for f in req.priorFacts] if req.priorFacts else None,
+        )
+    except Exception:
+        # The engine already guarantees this, but the endpoint keeps the
+        # promise absolute even if request marshalling somehow raises.
+        log.exception("extract-memory endpoint error; serving empty facts")
+        return {"facts": []}
 
 
 @app.post("/v1/respond")
