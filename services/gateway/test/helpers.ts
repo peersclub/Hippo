@@ -127,6 +127,7 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
     experienceLevel: null,
     followedAssets: [],
     openThreads: [],
+    learnOptOut: false,
     updatedAt: 0,
     ...initial,
   })
@@ -145,6 +146,7 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
         ...cur,
         ...(patch.optIn !== undefined ? { optIn: patch.optIn } : {}),
         ...(patch.experienceLevel !== undefined ? { experienceLevel: patch.experienceLevel } : {}),
+        ...(patch.learnOptOut !== undefined ? { learnOptOut: patch.learnOptOut } : {}),
         ...(patch.followAsset && (patch.optIn ?? cur.optIn)
           ? { followedAssets: [patch.followAsset.toUpperCase(), ...cur.followedAssets] }
           : {}),

@@ -1403,3 +1403,101 @@ describe('orchestrator: durable memory (Phase B — promotion, cross-session, cl
     await app.close()
   })
 })
+
+describe('orchestrator: auto-learning opt-OUT (Phase C — trader consent)', () => {
+  const until = async (cond: () => boolean, ms = 1500): Promise<void> => {
+    const start = Date.now()
+    while (!cond() && Date.now() - start < ms) await new Promise((r) => setTimeout(r, 5))
+    if (!cond()) throw new Error('condition not met in time')
+  }
+  const learnIntel = (
+    facts: Array<{ type: string; value: string; confidence: number }>,
+    capture?: { mem?: string },
+  ) =>
+    stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        if (capture) capture.mem = (req as { memoryContext?: string }).memoryContext
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+      extractMemory: async () => facts,
+    })
+  const learnedFrames = (session: Awaited<ReturnType<typeof createSession>>) =>
+    session.journal
+      .after(0)
+      .filter((e) => e.frame.type === 'learned_memory')
+      .map((e) => e.frame as unknown as { facts: unknown[]; optIn: boolean })
+
+  it('opted-out trader: learnFromTurn is a no-op and learned facts do NOT compose', async () => {
+    const capture: { mem?: string } = { mem: 'unset' }
+    const intel = learnIntel([{ type: 'followed_asset', value: 'BTC', confidence: 0.9 }], capture)
+    // Persona says the trader opted OUT of auto-learning.
+    const memory = stubMemory({ learnOptOut: true })
+    memory.scopeDocsData.global = 'never give advice' // a CURATED doc still composes
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    // A durable USER fact exists but must be ignored while opted out.
+    await memory.upsertLearnedFacts(
+      'user',
+      { partnerId: session.partner.partnerId, userId: session.id },
+      [{ type: 'followed_asset', value: 'SOL', confidence: 0.9 }],
+    )
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    await new Promise((r) => setTimeout(r, 30))
+    // The curated platform doc still composed; the learned USER fact did NOT.
+    expect(capture.mem).toContain('PLATFORM RULES')
+    expect(capture.mem).not.toContain('SOL')
+    // Nothing was learned to session scope, no promotion — learnFromTurn no-op.
+    expect(memory.learnedFacts.get(`session:${session.id}`)).toBeUndefined()
+    await app.close()
+  })
+
+  it('toggling off clears learned facts + emits an empty optIn:false frame; on resumes', async () => {
+    const capture: { mem?: string } = {}
+    const intel = learnIntel([{ type: 'followed_asset', value: 'BTC', confidence: 0.9 }], capture)
+    const memory = stubMemory()
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    const pKey = `${session.partner.partnerId}:${session.id}`
+    // Seed learned facts in both scopes.
+    await memory.upsertLearnedFacts('session', { sessionId: session.id }, [
+      { type: 'followed_asset', value: 'BTC', confidence: 0.9 },
+    ])
+    await memory.upsertLearnedFacts(
+      'user',
+      { partnerId: session.partner.partnerId, userId: session.id },
+      [{ type: 'followed_asset', value: 'ETH', confidence: 0.9 }],
+    )
+
+    // Turn OFF: persist opt-out, forget existing facts, emit optIn:false + empty.
+    await sendTurn(app, session.id, { kind: 'settings', learnedMemoryOptIn: false })
+    await waitForJournal(session, (t) => t.includes('learned_memory'))
+    await until(() => memory.personas.get(pKey)?.learnOptOut === true)
+    expect(memory.learnedFacts.get(`session:${session.id}`)).toBeUndefined()
+    expect(memory.learnedFacts.get(`user:${session.partner.partnerId}:${session.id}`)).toBeUndefined()
+    const off = learnedFrames(session).at(-1)
+    expect(off?.optIn).toBe(false)
+    expect(off?.facts).toEqual([])
+
+    // While OFF, a research turn learns nothing (the gate holds mid-session).
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    await new Promise((r) => setTimeout(r, 30))
+    expect(memory.learnedFacts.get(`session:${session.id}`)).toBeUndefined()
+
+    // Turn BACK ON: opt-out cleared; the fresh frame reports optIn:true.
+    await sendTurn(app, session.id, { kind: 'settings', learnedMemoryOptIn: true })
+    await until(() => memory.personas.get(pKey)?.learnOptOut === false)
+    await until(() => learnedFrames(session).at(-1)?.optIn === true)
+
+    // Learning resumes: a new turn's extracted fact lands in session scope again.
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down again' })
+    await until(() => (memory.learnedFacts.get(`session:${session.id}`)?.length ?? 0) > 0)
+    expect(memory.learnedFacts.get(`session:${session.id}`)?.map((f) => f.value)).toContain('BTC')
+    await app.close()
+  })
+})

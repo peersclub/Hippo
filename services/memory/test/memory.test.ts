@@ -141,6 +141,42 @@ describe('memory service HTTP surface', () => {
     await app.close()
   })
 
+  it('round-trips learnOptOut (Phase C opt-out) and preserves it across a clear', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    // Default persona is opted IN to auto-learning (learnOptOut false).
+    const def = await app.inject({ method: 'GET', url: '/v1/persona/p1/u1', headers: auth })
+    expect(def.json().learnOptOut).toBe(false)
+
+    // PUT accepts the flag and echoes it back.
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/v1/persona/p1/u1',
+      headers: auth,
+      payload: { learnOptOut: true },
+    })
+    expect(put.statusCode).toBe(200)
+    expect(put.json().learnOptOut).toBe(true)
+
+    // It survives a clear — a consent choice, like optIn (clearing wipes DATA).
+    const cleared = await app.inject({
+      method: 'POST',
+      url: '/v1/persona/p1/u1/clear',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: '{}',
+    })
+    expect(cleared.json().learnOptOut).toBe(true)
+
+    // A non-boolean value is rejected with 400.
+    const bad = await app.inject({
+      method: 'PUT',
+      url: '/v1/persona/p1/u1',
+      headers: auth,
+      payload: { learnOptOut: 'nope' },
+    })
+    expect(bad.statusCode).toBe(400)
+    await app.close()
+  })
+
   it('POST clear accepts an empty JSON body (what the gateway client sends)', async () => {
     const app = buildService({ internalToken: TOKEN })
     await app.inject({
@@ -415,7 +451,7 @@ describe('learned facts — provenance-tracked auto-learning', () => {
       ],
       100,
     )
-    const facts = await store.getLearnedFacts('user', ids)
+    const facts = await store.getLearnedFacts('user', ids, 100)
     expect(facts).toHaveLength(2)
     expect(facts.map((f) => f.type).sort()).toEqual(['risk_tolerance', 'timezone'])
     // source defaults to 'auto' and timestamps are set.
@@ -428,7 +464,7 @@ describe('learned facts — provenance-tracked auto-learning', () => {
     const store = new InMemoryScopeMemoryStore()
     await store.upsertLearnedFacts('user', ids, [{ type: 'risk', value: 'low', confidence: 0.5 }], 1)
     await store.upsertLearnedFacts('user', ids, [{ type: 'risk', value: 'low', confidence: 0.8 }], 2)
-    const facts = await store.getLearnedFacts('user', ids)
+    const facts = await store.getLearnedFacts('user', ids, 2)
     expect(facts).toHaveLength(1)
     expect(facts[0].confidence).toBeCloseTo(0.8)
     expect(facts[0].createdAt).toBe(1) // preserved
@@ -445,7 +481,7 @@ describe('learned facts — provenance-tracked auto-learning', () => {
       facts.push({ type: 'f', value: `keep-${i}`, confidence: 0.5 + i / 1000 })
     }
     await store.upsertLearnedFacts('user', ids, facts, 1)
-    const stored = await store.getLearnedFacts('user', ids)
+    const stored = await store.getLearnedFacts('user', ids, 1)
     expect(stored).toHaveLength(MAX_LEARNED_FACTS)
     expect(stored.some((f) => f.value === 'evict-me')).toBe(false)
   })
@@ -489,6 +525,46 @@ describe('learned facts — provenance-tracked auto-learning', () => {
     expect(await store.clearLearnedFacts('user', ids)).toBe(0)
   })
 
+  it('decay: a fact not re-observed within the TTL ages out of reads (Phase D)', async () => {
+    const { InMemoryScopeMemoryStore, LEARNED_FACT_TTL_MS } = await import('../src/scope-store.js')
+    const store = new InMemoryScopeMemoryStore()
+    // Observed once, longer ago than the TTL, and never again.
+    const longAgo = Date.now() - LEARNED_FACT_TTL_MS - 60_000
+    await store.upsertLearnedFacts(
+      'user',
+      ids,
+      [{ type: 'stale', value: 's', confidence: 0.9 }],
+      longAgo,
+    )
+    // getLearnedFacts reads against Date.now(), so the stale fact is past TTL.
+    expect(await store.getLearnedFacts('user', ids)).toEqual([])
+
+    // A freshly observed fact IS returned, and that upsert opportunistically
+    // pruned the stale one for good.
+    await store.upsertLearnedFacts(
+      'user',
+      ids,
+      [{ type: 'fresh', value: 'f', confidence: 0.9 }],
+      Date.now(),
+    )
+    expect((await store.getLearnedFacts('user', ids)).map((f) => f.type)).toEqual(['fresh'])
+  })
+
+  it('decay: admin-curated facts never age out (exempt from the TTL)', async () => {
+    const { InMemoryScopeMemoryStore, LEARNED_FACT_TTL_MS } = await import('../src/scope-store.js')
+    const store = new InMemoryScopeMemoryStore()
+    const longAgo = Date.now() - LEARNED_FACT_TTL_MS - 60_000
+    await store.upsertLearnedFacts(
+      'user',
+      ids,
+      [{ type: 'style', value: 'terse', confidence: 1, source: 'admin' }],
+      longAgo,
+    )
+    const facts = await store.getLearnedFacts('user', ids)
+    expect(facts).toHaveLength(1)
+    expect(facts[0].source).toBe('admin')
+  })
+
   it('user and session scopes are isolated', async () => {
     const { InMemoryScopeMemoryStore } = await import('../src/scope-store.js')
     const store = new InMemoryScopeMemoryStore()
@@ -499,9 +575,9 @@ describe('learned facts — provenance-tracked auto-learning', () => {
       [{ type: 't', value: 's', confidence: 1 }],
       1,
     )
-    expect((await store.getLearnedFacts('user', ids))[0].value).toBe('u')
-    expect((await store.getLearnedFacts('session', { sessionId: 's1' }))[0].value).toBe('s')
-    expect(await store.getLearnedFacts('session', { sessionId: 's2' })).toEqual([])
+    expect((await store.getLearnedFacts('user', ids, 1))[0].value).toBe('u')
+    expect((await store.getLearnedFacts('session', { sessionId: 's1' }, 1))[0].value).toBe('s')
+    expect(await store.getLearnedFacts('session', { sessionId: 's2' }, 1)).toEqual([])
   })
 })
 
@@ -516,7 +592,7 @@ describe('learned-facts HTTP surface', () => {
       'user',
       { partnerId: 'pA', userId: 'u1' },
       [{ type: 'risk', value: 'low', confidence: 0.7 }],
-      1,
+      Date.now(), // fresh: the HTTP read applies the TTL against the wall clock
     )
     const app = buildService({ scopeStore, internalToken: TOKEN })
 

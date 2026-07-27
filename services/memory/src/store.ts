@@ -30,6 +30,11 @@ export type Persona = {
   followedAssets: string[]
   /** Most-recent-first, capped — enough for "pick up where we left off". */
   openThreads: OpenThread[]
+  /** Phase C: auto-learning opt-OUT. false (default) = learning ON. A separate
+   * consent from `optIn` (structured persona): a trader can keep persona memory
+   * yet stop auto-learning. Survives a `clear` (like optIn — clearing wipes
+   * DATA, not the consent choices). */
+  learnOptOut: boolean
   updatedAt: number
 }
 
@@ -38,6 +43,7 @@ export type PersonaUpdate = {
   experienceLevel?: ExperienceLevel | null
   followAsset?: string
   openThread?: { text: string; symbol?: string }
+  learnOptOut?: boolean
 }
 
 export type PersonaRow = { partnerId: string; userId: string; persona: Persona }
@@ -60,6 +66,7 @@ export function defaultPersona(): Persona {
     experienceLevel: null,
     followedAssets: [],
     openThreads: [],
+    learnOptOut: false,
     updatedAt: 0,
   }
 }
@@ -72,6 +79,9 @@ export function applyUpdate(current: Persona, patch: PersonaUpdate, now = Date.n
 
   if (patch.optIn !== undefined) next.optIn = patch.optIn
   if (patch.experienceLevel !== undefined) next.experienceLevel = patch.experienceLevel
+  // learnOptOut is a consent toggle, not accrued DATA — always settable,
+  // independent of `optIn` (unlike followedAssets/openThreads below).
+  if (patch.learnOptOut !== undefined) next.learnOptOut = patch.learnOptOut
 
   if (next.optIn) {
     if (patch.followAsset) {
@@ -95,7 +105,12 @@ export function applyUpdate(current: Persona, patch: PersonaUpdate, now = Date.n
 /** The settings promise: wipes persona DATA. The opt-in flag itself survives
  * — clearing is not opting out. */
 export function clearedPersona(current: Persona, now = Date.now()): Persona {
-  return { ...defaultPersona(), optIn: current.optIn, updatedAt: now }
+  return {
+    ...defaultPersona(),
+    optIn: current.optIn,
+    learnOptOut: current.learnOptOut,
+    updatedAt: now,
+  }
 }
 
 export interface PersonaStore {
@@ -179,18 +194,24 @@ export class PostgresPersonaStore implements PersonaStore {
 
   async get(partnerId: string, userId: string): Promise<Persona> {
     const res = await this.pool.query(
-      'SELECT persona FROM users_memory WHERE partner_id = $1 AND user_id = $2',
+      'SELECT persona, learn_opt_out FROM users_memory WHERE partner_id = $1 AND user_id = $2',
       [partnerId, userId],
     )
-    return res.rows[0] ? (res.rows[0].persona as Persona) : defaultPersona()
+    if (!res.rows[0]) return defaultPersona()
+    // The dedicated `learn_opt_out` column is authoritative (migration 012):
+    // it carries a default for rows written before Phase C, whose JSONB blob
+    // predates the field. Overlay it onto the persona blob either way.
+    const persona = res.rows[0].persona as Persona
+    return { ...persona, learnOptOut: res.rows[0].learn_opt_out === true }
   }
 
   private async put(partnerId: string, userId: string, persona: Persona): Promise<void> {
     await this.pool.query(
-      `INSERT INTO users_memory (partner_id, user_id, persona, updated_at)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (partner_id, user_id) DO UPDATE SET persona = $3, updated_at = $4`,
-      [partnerId, userId, JSON.stringify(persona), persona.updatedAt],
+      `INSERT INTO users_memory (partner_id, user_id, persona, learn_opt_out, updated_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (partner_id, user_id)
+       DO UPDATE SET persona = $3, learn_opt_out = $4, updated_at = $5`,
+      [partnerId, userId, JSON.stringify(persona), persona.learnOptOut, persona.updatedAt],
     )
   }
 
