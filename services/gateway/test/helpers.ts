@@ -193,6 +193,9 @@ export function stubMemory(initial?: Partial<Persona>): MemoryClient & {
       }
       learnedFacts.set(key, cur)
     },
+    async clearLearnedFacts(scope, ids) {
+      learnedFacts.delete(factsKey(scope, ids))
+    },
   }
 }
 
@@ -289,6 +292,9 @@ export const deadMemory: MemoryClient = {
   upsertLearnedFacts: async () => {
     throw new Error('memory unreachable')
   },
+  // Clearing is best-effort even against a down memory service (the real
+  // client swallows failures), so it resolves rather than rejects.
+  clearLearnedFacts: async () => {},
 }
 
 export const deadMarket: MarketClient = {

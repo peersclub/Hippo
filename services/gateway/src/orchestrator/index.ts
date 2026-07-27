@@ -113,6 +113,22 @@ function formatLearnedFacts(facts: LearnedFact[]): string {
     .join('\n')
 }
 
+/** Human labels for the `learned_memory` frame ("what Hippo remembers"). Maps
+ * the allowlisted fact types to a short phrase; unknown types pass through as
+ * "type: value". Distinct from formatLearnedFacts (which formats the compose
+ * block) — this is the trader-facing surface. Pure. */
+const LEARNED_MEMORY_LABEL: Record<string, (value: string) => string> = {
+  followed_asset: (v) => `Follows ${v}`,
+  instrument_pref: (v) => `Prefers ${v}`,
+  leverage_pref: (v) => `Typical leverage ${v}`,
+  experience_level: (v) => `${v} trader`,
+  answer_style: (v) => `Wants ${v} answers`,
+}
+
+function learnedMemoryLabel(type: string, value: string): string {
+  return LEARNED_MEMORY_LABEL[type]?.(value) ?? `${type}: ${value}`
+}
+
 /** Fallback interpretation summary when stage-1 didn't supply one (degraded
  * mode / older intelligence build). One neutral line per intent — never
  * advice. */
@@ -143,8 +159,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * never awaited on the trader's path, and swallows every error. Extraction
    * output is untrusted, allowlisted DATA (see the intelligence service); it is
    * composed as CONTEXT beneath the no-advice guardrail, never as instruction.
-   * Phase A learns SESSION scope only (ephemeral); USER-scope promotion is a
-   * later phase.
+   * Phase B adds repeat-based promotion to DURABLE user scope: a fact observed
+   * for the first time stays session-only; a re-observation (same type+value
+   * already present in this session's facts) also lands in USER scope, so
+   * durable memory reflects consistently-observed preferences, not one-offs.
    */
   function learnFromTurn(
     session: Session,
@@ -157,15 +175,66 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       try {
         const facts = await intel.extractMemory({ query, interpretation, answer })
         if (!facts.length) return
+        // Read the current session facts BEFORE upserting: any incoming fact
+        // whose (type,value) is already here is a re-observation → promote it
+        // to durable USER scope. First observation stays session-only.
+        const prior = await memory.getLearnedFacts('session', { sessionId: session.id })
+        const seen = new Set(prior.map((f) => `${f.type}\u0000${f.value}`))
+        const repeats = facts.filter((f) => seen.has(`${f.type}\u0000${f.value}`))
         await memory.upsertLearnedFacts(
           'session',
           { sessionId: session.id },
           facts as LearnedFactCandidate[],
         )
+        if (repeats.length) {
+          await memory.upsertLearnedFacts(
+            'user',
+            { partnerId: session.partner.partnerId, userId: userKey(session) },
+            repeats as LearnedFactCandidate[],
+          )
+        }
+        // The learned set changed → refresh "what Hippo remembers" (gated).
+        await emitLearnedMemory(session)
       } catch {
         // best-effort: auto-learning must never surface on a turn
       }
     })()
+  }
+
+  /**
+   * Push the `learned_memory` frame ("what Hippo remembers about you"): durable
+   * USER-scope facts + this-session facts, each with a human label. Gated on
+   * memoryLab and best-effort (memory down → no frame, never an error). Called
+   * on stream connect, after a learn changes the set, and after a clear.
+   */
+  async function emitLearnedMemory(session: Session): Promise<void> {
+    if (session.partner.entitlements?.memoryLab !== true) return
+    try {
+      const [userFacts, sessionFacts] = await Promise.all([
+        memory.getLearnedFacts('user', {
+          partnerId: session.partner.partnerId,
+          userId: userKey(session),
+        }),
+        memory.getLearnedFacts('session', { sessionId: session.id }),
+      ])
+      const facts = [
+        ...userFacts.map((f) => ({
+          label: learnedMemoryLabel(f.type, f.value),
+          type: f.type,
+          value: f.value,
+          scope: 'user' as const,
+        })),
+        ...sessionFacts.map((f) => ({
+          label: learnedMemoryLabel(f.type, f.value),
+          type: f.type,
+          value: f.value,
+          scope: 'session' as const,
+        })),
+      ]
+      emit(session, { type: 'learned_memory', facts })
+    } catch {
+      // best-effort: the memory surface must never break the stream
+    }
   }
 
   // ── frame builders ─────────────────────────────────────────────────────
@@ -724,10 +793,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // Composed as CONTEXT below the answer engine's no-advice guardrail
       // (which stays authoritative — memory never overrides it). Applied
       // scopes surface on the interpretation card + the admin inspector.
-      // Freeform scope docs + auto-learned SESSION facts, both best-effort
-      // (memory down → '' / [], never blocks or breaks a turn). Read together.
-      const [docs, sessionFacts] = await Promise.all([
+      // Freeform scope docs + auto-learned USER (durable, cross-session) and
+      // SESSION facts, all best-effort (memory down → '' / [], never blocks or
+      // breaks a turn). Read together. The USER facts are what makes a returning
+      // trader's fresh session carry their durable memory.
+      const [docs, userFacts, sessionFacts] = await Promise.all([
         memory.scopeDocs(session.partner.partnerId, userKey(session)),
+        memory.getLearnedFacts('user', {
+          partnerId: session.partner.partnerId,
+          userId: userKey(session),
+        }),
         memory.getLearnedFacts('session', { sessionId: session.id }),
       ])
       mem = composeMemory({
@@ -735,6 +810,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         host: docs.host,
         user: docs.user,
         personaLine: personaSummary(persona),
+        userFacts: formatLearnedFacts(userFacts),
         sessionFacts: formatLearnedFacts(sessionFacts),
       })
       if (mem.text) {
@@ -1009,6 +1085,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           })
           .catch((err) => log.warn({ err }, 'orders snapshot unavailable'))
       }
+      // "What Hippo remembers about you" — pushed on connect (gated on
+      // memoryLab; no-op otherwise). Fire-and-forget; the journal replay
+      // re-delivers it on reconnect, the SDK keeps only the latest.
+      void emitLearnedMemory(session)
     },
 
     onVenueEvent,
@@ -1075,6 +1155,21 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           if (uplink.clearMemory) {
             // The settings promise: wipe persona data (opt-in choice survives).
             memory.clear(session.partner.partnerId, userKey(session)).catch(() => {})
+          }
+          if (uplink.clearLearnedMemory && session.partner.entitlements?.memoryLab === true) {
+            // Wipe the auto-learned facts (durable USER + this SESSION), then
+            // push a fresh (empty) learned_memory frame so the SDK's "what
+            // Hippo remembers" surface clears immediately. Gated + best-effort.
+            void (async () => {
+              await Promise.all([
+                memory.clearLearnedFacts('user', {
+                  partnerId: session.partner.partnerId,
+                  userId: userKey(session),
+                }),
+                memory.clearLearnedFacts('session', { sessionId: session.id }),
+              ])
+              await emitLearnedMemory(session)
+            })()
           }
           telemetry.recordUplink('settings')
           return
