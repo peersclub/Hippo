@@ -53,6 +53,10 @@ export const SettingsUplink = z.object({
   // the "what Hippo remembers about you" one-tap clear. Distinct from
   // clearMemory, which wipes the structured persona.
   clearLearnedMemory: z.boolean().optional(),
+  // Phase C: the trader's "Remember my preferences" toggle. true = allow
+  // auto-learning, false = opt out (no extraction, no learned-fact compose).
+  // Default behaviour when unset stays ON for entitled partners (opt-out model).
+  learnedMemoryOptIn: z.boolean().optional(),
 })
 
 /**
