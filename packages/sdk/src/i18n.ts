@@ -77,6 +77,10 @@ export type MessageKey =
   | 'clear_memory_confirm'
   | 'clear_memory_cancel'
   | 'clear_memory_done'
+  | 'learned_memory_title'
+  | 'learned_group_remembered'
+  | 'learned_group_session'
+  | 'learned_clear'
   | 'copy_brief'
   | 'copied'
   | 'stop_streaming'
@@ -144,6 +148,10 @@ const en: Catalog = {
   clear_memory_confirm: 'Yes, clear it',
   clear_memory_cancel: 'Keep it',
   clear_memory_done: 'CLEARED ✓',
+  learned_memory_title: 'What Hippo remembers about you',
+  learned_group_remembered: 'Remembered',
+  learned_group_session: 'This chat',
+  learned_clear: 'Clear what Hippo remembers',
   copy_brief: 'Copy this brief',
   copied: 'Copied',
   stop_streaming: 'Stop generating',
@@ -211,6 +219,10 @@ const hi: Catalog = {
   clear_memory_confirm: 'हाँ, मिटाएँ',
   clear_memory_cancel: 'रहने दें',
   clear_memory_done: 'मिटा दिया ✓',
+  learned_memory_title: 'Hippo आपके बारे में क्या याद रखता है',
+  learned_group_remembered: 'याद रखा गया',
+  learned_group_session: 'इस चैट में',
+  learned_clear: 'Hippo जो याद रखता है उसे मिटाएँ',
   copy_brief: 'यह ब्रीफ़ कॉपी करें',
   copied: 'कॉपी हो गया',
   stop_streaming: 'जनरेट करना रोकें',
@@ -280,6 +292,10 @@ const hiLatn: Catalog = {
   clear_memory_confirm: 'Haan, clear karo',
   clear_memory_cancel: 'Rehne do',
   clear_memory_done: 'CLEAR HO GAYA ✓',
+  learned_memory_title: 'Hippo aapke baare mein kya yaad rakhta hai',
+  learned_group_remembered: 'Yaad rakha',
+  learned_group_session: 'Is chat mein',
+  learned_clear: 'Hippo jo yaad rakhta hai wo clear karo',
   copy_brief: 'Yeh brief copy karo',
   copied: 'Copy ho gaya',
   stop_streaming: 'Generate karna roko',
@@ -350,6 +366,10 @@ const ar: Catalog = {
   clear_memory_confirm: 'نعم، امسحه',
   clear_memory_cancel: 'أبقِه',
   clear_memory_done: 'تم المسح ✓',
+  learned_memory_title: 'ما يتذكره Hippo عنك',
+  learned_group_remembered: 'محفوظ',
+  learned_group_session: 'هذه المحادثة',
+  learned_clear: 'امسح ما يتذكره Hippo',
   copy_brief: 'نسخ هذا الموجز',
   copied: 'تم النسخ',
   stop_streaming: 'إيقاف التوليد',

@@ -438,6 +438,14 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .confirmrow{display:flex;gap:7px}
 .confirmrow .shitem{flex:1;text-align:center}
 .cleared{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.12em;color:var(--hippo-up);text-align:center;padding:11px}
+/* settings: "what Hippo remembers about you" — learned-memory facts by scope */
+.mem{display:flex;flex-direction:column;gap:8px}
+.memgrp{display:flex;flex-direction:column;gap:6px}
+.memgrplab{font-family:var(--hippo-font-mono);font-size:8px;letter-spacing:.14em;color:var(--hippo-text-faint)}
+.memfacts{display:flex;flex-wrap:wrap;gap:6px}
+.memfact{font-size:11px;color:var(--hippo-text-mid);background:rgba(var(--hippo-panel-deep-rgb),.7);
+  border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:5px 10px}
+.mem .shitem[disabled]{opacity:.55}
 /* shared focus ring — every interactive element inside the panel */
 .chip:focus-visible,.livebar button:focus-visible,.fbchip:focus-visible,.fbskip:focus-visible,
 .composer textarea:focus-visible,.send:focus-visible,.jump:focus-visible,.shrx:focus-visible,

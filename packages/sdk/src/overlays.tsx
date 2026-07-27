@@ -13,12 +13,17 @@ import { dispatch } from './outbox.js'
 import {
   type ClearMemoryEvent,
   type ClearMemoryState,
+  clearLearnedMemoryUplink,
   clearMemoryTransition,
+  groupLearnedFacts,
   LANGUAGE_OPTIONS,
+  showLearnedMemory,
 } from './settings.js'
 import { COPIED_FLASH_MS, shareLink } from './share.js'
 import {
+  entitlements,
   glass,
+  learnedFacts,
   locale,
   memoryOptIn,
   persistGlass,
@@ -27,6 +32,11 @@ import {
   shareFrame,
   venueName,
 } from './state.js'
+
+/** Feedback window on the learned-memory clear button: it disables briefly so
+ * the tap registers, then the empty `learned_memory` frame the server sends
+ * empties the whole section. Purely cosmetic — the server is authoritative. */
+const LEARNED_CLEAR_FLASH_MS = 1200
 
 const reducedMotion = () =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -417,6 +427,18 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
     setClear(next)
     if (uplink) void dispatch({ kind: 'settings', clearMemory: true })
   }
+  // "What Hippo remembers about you" — gated on the memoryLab entitlement AND
+  // the server having pushed facts; grouped by scope for display.
+  const showLearned = showLearnedMemory(entitlements.value, learnedFacts.value)
+  const learned = groupLearnedFacts(learnedFacts.value)
+  const [clearingLearned, setClearingLearned] = useState(false)
+  const clearLearned = () => {
+    // Signal intent only — the server re-emits an empty learned_memory frame,
+    // which empties the section. We never hand-clear the set client-side.
+    setClearingLearned(true)
+    void dispatch(clearLearnedMemoryUplink())
+    window.setTimeout(() => setClearingLearned(false), LEARNED_CLEAR_FLASH_MS)
+  }
   // Counsel-owned copy stays single-sourced: the same rows onboarding shows,
   // restated read-only (controls stripped) as the in-place data explainer.
   const rows = consentRows(venueName.value)
@@ -484,6 +506,43 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
             </button>
           ))}
         </div>
+        {showLearned && (
+          <div class="mem">
+            <div class="setlab">{t(L, 'learned_memory_title')}</div>
+            {learned.remembered.length > 0 && (
+              <div class="memgrp">
+                <div class="memgrplab">{t(L, 'learned_group_remembered')}</div>
+                <div class="memfacts">
+                  {learned.remembered.map((f) => (
+                    <span class="memfact" key={`${f.type}:${f.value}`}>
+                      {f.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {learned.session.length > 0 && (
+              <div class="memgrp">
+                <div class="memgrplab">{t(L, 'learned_group_session')}</div>
+                <div class="memfacts">
+                  {learned.session.map((f) => (
+                    <span class="memfact" key={`${f.type}:${f.value}`}>
+                      {f.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              class="shitem danger"
+              disabled={clearingLearned}
+              onClick={clearLearned}
+            >
+              ⌫ {t(L, 'learned_clear')}
+            </button>
+          </div>
+        )}
         {clear.phase === 'idle' && (
           <button type="button" class="shitem" onClick={() => clearEvt({ type: 'request' })}>
             ⌫ {t(L, 'clear_memory')}

@@ -56,7 +56,12 @@ async function load() {
   vi.resetModules()
   const state = await import('../src/state.js')
   const transport = await import('../src/transport.js')
-  return { ...transport, connection: state.connection, sessionId: state.sessionId }
+  return {
+    ...transport,
+    connection: state.connection,
+    sessionId: state.sessionId,
+    entitlements: state.entitlements,
+  }
 }
 
 beforeEach(() => {
@@ -119,6 +124,31 @@ describe('stream death → re-mint', () => {
     // No re-mint — the same session's stream is expected to recover itself.
     expect(n).toBe(1)
     expect(mockEventSources).toHaveLength(1)
+  })
+})
+
+describe('mint captures plan entitlements from config', () => {
+  it('lands config.entitlements into the entitlements signal for feature gating', async () => {
+    stubFetch((url) => {
+      if (url.includes('/v1/session')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sessionId: 's1', config: { entitlements: { memoryLab: true } } }),
+        }
+      }
+      return { ok: true, status: 200 }
+    })
+    const { connect, entitlements } = await load()
+    await connect(cfg)
+    expect(entitlements.value).toEqual({ memoryLab: true })
+  })
+
+  it('leaves the empty default when config carries no entitlements (older plan)', async () => {
+    stubFetch(() => sessionOk('s1'))
+    const { connect, entitlements } = await load()
+    await connect(cfg)
+    expect(entitlements.value).toEqual({})
   })
 })
 
