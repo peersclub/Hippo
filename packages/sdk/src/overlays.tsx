@@ -17,13 +17,16 @@ import {
   clearMemoryTransition,
   groupLearnedFacts,
   LANGUAGE_OPTIONS,
-  showLearnedMemory,
+  learnedMemoryOptInUplink,
+  showLearnedFacts,
+  showLearnedMemoryToggle,
 } from './settings.js'
 import { COPIED_FLASH_MS, shareLink } from './share.js'
 import {
   entitlements,
   glass,
   learnedFacts,
+  learnedMemoryOptIn,
   locale,
   memoryOptIn,
   persistGlass,
@@ -427,10 +430,25 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
     setClear(next)
     if (uplink) void dispatch({ kind: 'settings', clearMemory: true })
   }
-  // "What Hippo remembers about you" — gated on the memoryLab entitlement AND
-  // the server having pushed facts; grouped by scope for display.
-  const showLearned = showLearnedMemory(entitlements.value, learnedFacts.value)
+  // "What Hippo remembers about you" — the SECTION (with its "Remember my
+  // preferences" toggle) shows whenever the plan grants memoryLab; the FACT
+  // LIST additionally needs the server to have pushed facts.
+  const showToggle = showLearnedMemoryToggle(entitlements.value)
   const learned = groupLearnedFacts(learnedFacts.value)
+  // "Remember my preferences" — reflect the server's optIn, but show the tapped
+  // state immediately for feedback until the next learned_memory frame confirms
+  // it (we never persist the choice locally). `pending === signal` clears it.
+  const optIn = learnedMemoryOptIn.value
+  const [pendingOptIn, setPendingOptIn] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (pendingOptIn !== null && pendingOptIn === optIn) setPendingOptIn(null)
+  }, [optIn, pendingOptIn])
+  const shownOptIn = pendingOptIn ?? optIn
+  const showFacts = showLearnedFacts(entitlements.value, learnedFacts.value, shownOptIn)
+  const toggleLearned = (v: boolean) => {
+    setPendingOptIn(v)
+    void dispatch(learnedMemoryOptInUplink(v))
+  }
   const [clearingLearned, setClearingLearned] = useState(false)
   const clearLearned = () => {
     // Signal intent only — the server re-emits an empty learned_memory frame,
@@ -506,41 +524,57 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
             </button>
           ))}
         </div>
-        {showLearned && (
+        {showToggle && (
           <div class="mem">
             <div class="setlab">{t(L, 'learned_memory_title')}</div>
-            {learned.remembered.length > 0 && (
-              <div class="memgrp">
-                <div class="memgrplab">{t(L, 'learned_group_remembered')}</div>
-                <div class="memfacts">
-                  {learned.remembered.map((f) => (
-                    <span class="memfact" key={`${f.type}:${f.value}`}>
-                      {f.label}
-                    </span>
-                  ))}
-                </div>
+            <div class="obrow">
+              <span class="obicon">◎</span>
+              <div>
+                <b>{t(L, 'learned_toggle_title')}</b>
               </div>
+              <Toggle
+                on={shownOptIn}
+                onChange={toggleLearned}
+                label={t(L, 'learned_toggle_title')}
+              />
+            </div>
+            {!shownOptIn && <p class="memoff">{t(L, 'learned_off')}</p>}
+            {showFacts && (
+              <>
+                {learned.remembered.length > 0 && (
+                  <div class="memgrp">
+                    <div class="memgrplab">{t(L, 'learned_group_remembered')}</div>
+                    <div class="memfacts">
+                      {learned.remembered.map((f) => (
+                        <span class="memfact" key={`${f.type}:${f.value}`}>
+                          {f.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {learned.session.length > 0 && (
+                  <div class="memgrp">
+                    <div class="memgrplab">{t(L, 'learned_group_session')}</div>
+                    <div class="memfacts">
+                      {learned.session.map((f) => (
+                        <span class="memfact" key={`${f.type}:${f.value}`}>
+                          {f.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  class="shitem danger"
+                  disabled={clearingLearned}
+                  onClick={clearLearned}
+                >
+                  ⌫ {t(L, 'learned_clear')}
+                </button>
+              </>
             )}
-            {learned.session.length > 0 && (
-              <div class="memgrp">
-                <div class="memgrplab">{t(L, 'learned_group_session')}</div>
-                <div class="memfacts">
-                  {learned.session.map((f) => (
-                    <span class="memfact" key={`${f.type}:${f.value}`}>
-                      {f.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            <button
-              type="button"
-              class="shitem danger"
-              disabled={clearingLearned}
-              onClick={clearLearned}
-            >
-              ⌫ {t(L, 'learned_clear')}
-            </button>
           </div>
         )}
         {clear.phase === 'idle' && (

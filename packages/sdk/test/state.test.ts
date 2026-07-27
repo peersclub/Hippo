@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { banners, learnedFacts, orders, pushFrame, thread } from '../src/state.js'
+import {
+  banners,
+  learnedFacts,
+  learnedMemoryOptIn,
+  orders,
+  pushFrame,
+  thread,
+} from '../src/state.js'
 import { clearStreamWatchdog, interruptedStreamIds } from '../src/streaming.js'
 
 const base = { v: 1 as const, ts: 1 }
@@ -227,11 +234,15 @@ describe('banner routing', () => {
 })
 
 describe('learned_memory routing', () => {
-  const learned = (facts: Array<{ label: string; type: string; value: string; scope: string }>) => ({
+  const learned = (
+    facts: Array<{ label: string; type: string; value: string; scope: string }>,
+    optIn = true,
+  ) => ({
     ...base,
     id: 'lm',
     type: 'learned_memory' as const,
     facts,
+    optIn,
   })
 
   it('captures the latest facts into the learnedFacts signal, never the thread', () => {
@@ -268,6 +279,32 @@ describe('learned_memory routing', () => {
     ]
     pushFrame({ kind: 'frame', frame: learned([]) })
     expect(learnedFacts.value).toEqual([])
+  })
+
+  it('routes the frame optIn into learnedMemoryOptIn (true when on)', () => {
+    learnedMemoryOptIn.value = false
+    pushFrame({
+      kind: 'frame',
+      frame: learned([{ label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' }]),
+    })
+    expect(learnedMemoryOptIn.value).toBe(true)
+  })
+
+  it('reflects optIn:false (learning paused, empty set)', () => {
+    learnedMemoryOptIn.value = true
+    pushFrame({ kind: 'frame', frame: learned([], false) })
+    expect(learnedMemoryOptIn.value).toBe(false)
+    expect(learnedFacts.value).toEqual([])
+  })
+
+  it('lets the LATEST frame win the opt-in state', () => {
+    pushFrame({ kind: 'frame', frame: learned([], false) })
+    expect(learnedMemoryOptIn.value).toBe(false)
+    pushFrame({
+      kind: 'frame',
+      frame: learned([{ label: 'Follows SOL', type: 'followed_asset', value: 'SOL', scope: 'user' }]),
+    })
+    expect(learnedMemoryOptIn.value).toBe(true)
   })
 })
 

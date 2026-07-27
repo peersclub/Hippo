@@ -83,6 +83,14 @@ export const entitlements = signal<Record<string, unknown>>({})
  */
 export const learnedFacts = signal<LearnedFact[]>([])
 
+/**
+ * Phase C "Remember my preferences" — whether auto-learning is currently ON
+ * for this trader, per the latest `learned_memory` frame's `optIn`. Server is
+ * authoritative (opt-OUT model, default true): the toggle only signals intent
+ * via a settings uplink and then reflects the next frame. Latest frame wins.
+ */
+export const learnedMemoryOptIn = signal(true)
+
 /** Brief being shared — non-null opens the full-surface share overlay (§6). */
 export const shareFrame = signal<ResearchBrief | null>(null)
 
@@ -263,7 +271,9 @@ export function pushFrame(item: ThreadItem) {
   // "what Hippo remembers" set wholesale (latest wins). An empty frame (sent
   // after a clear) empties the set, so the settings section empties itself.
   if (t === 'learned_memory') {
-    learnedFacts.value = (item as { frame: LearnedMemory }).frame.facts
+    const f = (item as { frame: LearnedMemory }).frame
+    learnedFacts.value = f.facts
+    learnedMemoryOptIn.value = f.optIn
     return
   }
 

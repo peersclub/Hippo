@@ -446,6 +446,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .memfact{font-size:11px;color:var(--hippo-text-mid);background:rgba(var(--hippo-panel-deep-rgb),.7);
   border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:5px 10px}
 .mem .shitem[disabled]{opacity:.55}
+.memoff{font-size:11px;color:var(--hippo-text-mid);margin:0;padding:2px 0}
 /* shared focus ring — every interactive element inside the panel */
 .chip:focus-visible,.livebar button:focus-visible,.fbchip:focus-visible,.fbskip:focus-visible,
 .composer textarea:focus-visible,.send:focus-visible,.jump:focus-visible,.shrx:focus-visible,

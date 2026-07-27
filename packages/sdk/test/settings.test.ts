@@ -6,7 +6,10 @@ import {
   clearMemoryTransition,
   groupLearnedFacts,
   LANGUAGE_OPTIONS,
+  learnedMemoryOptInUplink,
+  showLearnedFacts,
   showLearnedMemory,
+  showLearnedMemoryToggle,
   toSettingsLanguage,
 } from '../src/settings.js'
 import type { LearnedFact } from '../src/state.js'
@@ -100,5 +103,44 @@ describe('groupLearnedFacts', () => {
 describe('clearLearnedMemoryUplink', () => {
   it('is a settings uplink carrying clearLearnedMemory:true (the one-tap clear)', () => {
     expect(clearLearnedMemoryUplink()).toEqual({ kind: 'settings', clearLearnedMemory: true })
+  })
+})
+
+describe('showLearnedMemoryToggle (Remember-my-preferences gate)', () => {
+  it('shows whenever memoryLab is granted — even with NO facts (learning off)', () => {
+    expect(showLearnedMemoryToggle({ memoryLab: true })).toBe(true)
+  })
+  it('is HIDDEN without the entitlement (older plan)', () => {
+    expect(showLearnedMemoryToggle({})).toBe(false)
+    expect(showLearnedMemoryToggle({ memoryLab: false })).toBe(false)
+    expect(showLearnedMemoryToggle({ memoryLab: 'yes' })).toBe(false)
+  })
+})
+
+describe('showLearnedFacts (fact list, gated by the opt-in toggle)', () => {
+  const facts = [fact('Follows BTC', 'user')]
+
+  it('shows the fact list when entitled, opted-in, and facts exist', () => {
+    expect(showLearnedFacts({ memoryLab: true }, facts, true)).toBe(true)
+  })
+  it('HIDES the fact groups when the toggle is OFF, even with facts', () => {
+    expect(showLearnedFacts({ memoryLab: true }, facts, false)).toBe(false)
+  })
+  it('stays hidden without the entitlement or without facts', () => {
+    expect(showLearnedFacts({}, facts, true)).toBe(false)
+    expect(showLearnedFacts({ memoryLab: true }, [], true)).toBe(false)
+  })
+})
+
+describe('learnedMemoryOptInUplink (the toggle)', () => {
+  it('builds a settings uplink carrying the NEXT opt-in state', () => {
+    expect(learnedMemoryOptInUplink(false)).toEqual({
+      kind: 'settings',
+      learnedMemoryOptIn: false,
+    })
+    expect(learnedMemoryOptInUplink(true)).toEqual({
+      kind: 'settings',
+      learnedMemoryOptIn: true,
+    })
   })
 })
