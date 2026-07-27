@@ -257,4 +257,22 @@ describe('Phase B — learned_memory frame + clearLearnedMemory (additive)', () 
     })
     expect(up.success).toBe(true)
   })
+
+  it('Phase C: learned_memory carries optIn (defaults true) + settings accepts learnedMemoryOptIn', () => {
+    // optIn defaults true when omitted
+    const f = Frame.safeParse({ ...base, type: 'learned_memory' })
+    expect(f.success && f.data.type === 'learned_memory' && f.data.optIn).toBe(true)
+    // explicit false round-trips
+    const f2 = Frame.safeParse({ ...base, type: 'learned_memory', optIn: false })
+    expect(f2.success && f2.data.type === 'learned_memory' && f2.data.optIn).toBe(false)
+    // the toggle uplink
+    const up = Uplink.safeParse({
+      v: 1,
+      sessionId: 's_1',
+      ts: 1_752_480_000_000,
+      kind: 'settings',
+      learnedMemoryOptIn: false,
+    })
+    expect(up.success).toBe(true)
+  })
 })

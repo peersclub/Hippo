@@ -247,6 +247,10 @@ export const LearnedMemoryFrame = z.object({
       }),
     )
     .default([]),
+  // Phase C: whether auto-learning is currently ON for this trader. The SDK's
+  // "Remember my preferences" toggle reflects + flips this (via SettingsUplink
+  // .learnedMemoryOptIn). Default true = on when entitled (opt-OUT model).
+  optIn: z.boolean().default(true),
 })
 
 export const Frame = z.discriminatedUnion('type', [
