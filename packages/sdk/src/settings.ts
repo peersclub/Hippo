@@ -74,6 +74,45 @@ export function showLearnedMemory(
   return entitlements.memoryLab === true && facts.length > 0
 }
 
+/**
+ * Phase C — the "Remember my preferences" toggle (and the section that hosts
+ * it) show whenever the plan grants `memoryLab`, INDEPENDENT of whether facts
+ * exist. Unlike `showLearnedMemory` (the fact list), the toggle must stay
+ * reachable with learning OFF — there are no facts then, but the trader still
+ * needs a way to turn it back on. Absent entitlement keeps it invisible.
+ */
+export function showLearnedMemoryToggle(entitlements: Record<string, unknown>): boolean {
+  return entitlements.memoryLab === true
+}
+
+/**
+ * Whether to render the FACT LIST (grouped Remembered / This-chat + Clear).
+ * Everything `showLearnedMemory` needs, PLUS learning being ON: with the
+ * "Remember my preferences" toggle OFF the server clears the facts anyway, so
+ * the section shows only the toggle + the "off" line, never stale groups.
+ */
+export function showLearnedFacts(
+  entitlements: Record<string, unknown>,
+  facts: readonly LearnedFact[],
+  optIn: boolean,
+): boolean {
+  return optIn && showLearnedMemory(entitlements, facts)
+}
+
+/**
+ * The "Remember my preferences" toggle uplink — a `settings` uplink carrying
+ * the NEXT opt-in state. Signals intent only: the server re-emits a
+ * `learned_memory` frame with the authoritative `optIn` (and, when turned
+ * OFF, an empty fact set), which the SDK reflects. Mirrors
+ * `clearLearnedMemoryUplink` — the SDK never persists the choice locally.
+ */
+export function learnedMemoryOptInUplink(on: boolean): {
+  kind: 'settings'
+  learnedMemoryOptIn: boolean
+} {
+  return { kind: 'settings', learnedMemoryOptIn: on }
+}
+
 export type GroupedLearnedFacts = {
   /** Durable facts (scope `user`) — the "Remembered" group. */
   remembered: LearnedFact[]

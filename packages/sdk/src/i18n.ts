@@ -81,6 +81,8 @@ export type MessageKey =
   | 'learned_group_remembered'
   | 'learned_group_session'
   | 'learned_clear'
+  | 'learned_toggle_title'
+  | 'learned_off'
   | 'copy_brief'
   | 'copied'
   | 'stop_streaming'
@@ -152,6 +154,8 @@ const en: Catalog = {
   learned_group_remembered: 'Remembered',
   learned_group_session: 'This chat',
   learned_clear: 'Clear what Hippo remembers',
+  learned_toggle_title: 'Remember my preferences',
+  learned_off: 'Preference memory is off — Hippo won’t learn from this chat.',
   copy_brief: 'Copy this brief',
   copied: 'Copied',
   stop_streaming: 'Stop generating',
@@ -223,6 +227,8 @@ const hi: Catalog = {
   learned_group_remembered: 'याद रखा गया',
   learned_group_session: 'इस चैट में',
   learned_clear: 'Hippo जो याद रखता है उसे मिटाएँ',
+  learned_toggle_title: 'मेरी पसंद याद रखें',
+  learned_off: 'पसंद की मेमोरी बंद है — Hippo इस चैट से कुछ नहीं सीखेगा।',
   copy_brief: 'यह ब्रीफ़ कॉपी करें',
   copied: 'कॉपी हो गया',
   stop_streaming: 'जनरेट करना रोकें',
@@ -296,6 +302,8 @@ const hiLatn: Catalog = {
   learned_group_remembered: 'Yaad rakha',
   learned_group_session: 'Is chat mein',
   learned_clear: 'Hippo jo yaad rakhta hai wo clear karo',
+  learned_toggle_title: 'Meri preferences yaad rakho',
+  learned_off: 'Preference memory off hai — Hippo is chat se kuch nahi seekhega.',
   copy_brief: 'Yeh brief copy karo',
   copied: 'Copy ho gaya',
   stop_streaming: 'Generate karna roko',
@@ -370,6 +378,8 @@ const ar: Catalog = {
   learned_group_remembered: 'محفوظ',
   learned_group_session: 'هذه المحادثة',
   learned_clear: 'امسح ما يتذكره Hippo',
+  learned_toggle_title: 'تذكّر تفضيلاتي',
+  learned_off: 'ذاكرة التفضيلات متوقفة — لن يتعلّم Hippo من هذه المحادثة.',
   copy_brief: 'نسخ هذا الموجز',
   copied: 'تم النسخ',
   stop_streaming: 'إيقاف التوليد',
