@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { banners, orders, pushFrame, thread } from '../src/state.js'
+import { banners, learnedFacts, orders, pushFrame, thread } from '../src/state.js'
 import { clearStreamWatchdog, interruptedStreamIds } from '../src/streaming.js'
 
 const base = { v: 1 as const, ts: 1 }
@@ -223,6 +223,51 @@ describe('banner routing', () => {
     })
     expect(banners.value).toHaveLength(2)
     expect(banners.value.map((b) => b.id)).toEqual(['b2', 'b3'])
+  })
+})
+
+describe('learned_memory routing', () => {
+  const learned = (facts: Array<{ label: string; type: string; value: string; scope: string }>) => ({
+    ...base,
+    id: 'lm',
+    type: 'learned_memory' as const,
+    facts,
+  })
+
+  it('captures the latest facts into the learnedFacts signal, never the thread', () => {
+    thread.value = []
+    learnedFacts.value = []
+    pushFrame({
+      kind: 'frame',
+      frame: learned([
+        { label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' },
+        { label: 'Asking about ETH', type: 'topic', value: 'ETH', scope: 'session' },
+      ]),
+    })
+    expect(thread.value).toHaveLength(0)
+    expect(learnedFacts.value.map((f) => f.label)).toEqual(['Follows BTC', 'Asking about ETH'])
+    expect(learnedFacts.value.map((f) => f.scope)).toEqual(['user', 'session'])
+  })
+
+  it('keeps only the LATEST frame (a new set replaces the previous one)', () => {
+    learnedFacts.value = []
+    pushFrame({
+      kind: 'frame',
+      frame: learned([{ label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' }]),
+    })
+    pushFrame({
+      kind: 'frame',
+      frame: learned([{ label: 'Follows SOL', type: 'followed_asset', value: 'SOL', scope: 'user' }]),
+    })
+    expect(learnedFacts.value.map((f) => f.label)).toEqual(['Follows SOL'])
+  })
+
+  it('empties the set on an empty frame (the post-clear re-emit)', () => {
+    learnedFacts.value = [
+      { label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' },
+    ]
+    pushFrame({ kind: 'frame', frame: learned([]) })
+    expect(learnedFacts.value).toEqual([])
   })
 })
 

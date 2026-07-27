@@ -1,4 +1,11 @@
-import type { Banner, Frame, OrdersSnapshot, ResearchBrief, UnknownFrame } from '@hippo/protocol'
+import type {
+  Banner,
+  Frame,
+  LearnedMemory,
+  OrdersSnapshot,
+  ResearchBrief,
+  UnknownFrame,
+} from '@hippo/protocol'
 import { computed, signal } from '@preact/signals'
 import { resolveChips } from './chips.js'
 import type { FeedbackState } from './feedback.js'
@@ -56,6 +63,25 @@ export const banners = signal<Banner[]>([])
 /** Consent/settings memory opt-in — set by onboarding, toggled in settings. */
 export const memoryOptIn = signal(true)
 export const settingsOpen = signal(false)
+
+/** A single auto-learned trading fact the server has surfaced for this trader. */
+export type LearnedFact = LearnedMemory['facts'][number]
+
+/**
+ * Plan entitlements resolved at session mint (e.g. `{ memoryLab: true }`),
+ * carried on the mint `config`. Purely a feature gate — the SDK renders the
+ * learned-memory section only when the server both grants the entitlement AND
+ * pushes facts. Absent/empty = the feature stays invisible (older plans).
+ */
+export const entitlements = signal<Record<string, unknown>>({})
+
+/**
+ * "What Hippo remembers about you" — the latest server-pushed set of learned
+ * facts (durable `user` + this-chat `session`). Server is authoritative: the
+ * SDK only ever mirrors the newest `learned_memory` frame, never invents or
+ * persists facts client-side. A post-clear empty frame empties this.
+ */
+export const learnedFacts = signal<LearnedFact[]>([])
 
 /** Brief being shared — non-null opens the full-surface share overlay (§6). */
 export const shareFrame = signal<ResearchBrief | null>(null)
@@ -231,6 +257,13 @@ export function pushFrame(item: ThreadItem) {
   if (t === 'banner') {
     const b = (item as { frame: Banner }).frame
     banners.value = [...banners.value.filter((x) => x.kind !== b.kind), b]
+    return
+  }
+  // Learned-memory frames never enter the thread — they replace the current
+  // "what Hippo remembers" set wholesale (latest wins). An empty frame (sent
+  // after a clear) empties the set, so the settings section empties itself.
+  if (t === 'learned_memory') {
+    learnedFacts.value = (item as { frame: LearnedMemory }).frame.facts
     return
   }
 

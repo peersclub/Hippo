@@ -1,5 +1,12 @@
 import { parseFrame, type Uplink } from '@hippo/protocol'
-import { connection, pushFrame, sessionId, suggestedQueries, venueName } from './state.js'
+import {
+  connection,
+  entitlements,
+  pushFrame,
+  sessionId,
+  suggestedQueries,
+  venueName,
+} from './state.js'
 
 export type TransportConfig = { gateway: string; key: string; tokenUrl?: string }
 
@@ -87,11 +94,18 @@ async function mint(config: TransportConfig): Promise<MintResult> {
   try {
     const data = (await res.json()) as {
       sessionId: string
-      config?: { venueName?: string; suggestedQueries?: string[] }
+      config?: {
+        venueName?: string
+        suggestedQueries?: string[]
+        entitlements?: Record<string, unknown>
+      }
     }
     sessionId.value = data.sessionId
     if (data.config?.venueName) venueName.value = data.config.venueName
     if (data.config?.suggestedQueries) suggestedQueries.value = data.config.suggestedQueries
+    // Plan entitlements gate additive features (e.g. the learned-memory view).
+    // Absent = keep the empty default, so unentitled plans render nothing new.
+    if (data.config?.entitlements) entitlements.value = data.config.entitlements
     return 'ok'
   } catch {
     return 'retry'
