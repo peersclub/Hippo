@@ -60,6 +60,27 @@ _ANSWER_STYLES = {"concise", "detailed"}
 _TICKER_RE = re.compile(r"^[A-Z0-9]{2,10}$")
 _LEVERAGE_RE = re.compile(r"^\d{1,3}x$")
 
+# followed_asset is a CLOSED value space, not "any 2-10 letter word". The old
+# `value.upper() if value.isalpha()` fallback accepted ANY alphabetic token as a
+# ticker — so a model that (mis)extracted a person's name ("John", "Smith")
+# would have that name stored as a followed asset. A crypto ticker is public,
+# non-identifying reference data; a name is PII. We therefore only accept a bare
+# token as a ticker if it is a recognized crypto asset. normalize_asset() covers
+# the pilot keyword set; _KNOWN_TICKERS widens that to the well-known majors a
+# real trader might mention, without ever opening the door to arbitrary words.
+_KNOWN_TICKERS = frozenset(
+    {
+        # pilot set (also covered by normalize_asset)
+        "BTC", "ETH", "SOL", "ADA", "MATIC", "DOGE", "XRP",
+        # well-known majors / commonly-traded tickers
+        "BNB", "AVAX", "LINK", "DOT", "LTC", "TRX", "BCH", "ATOM", "NEAR",
+        "APT", "SUI", "ARB", "OP", "TON", "INJ", "SEI", "TIA", "RNDR",
+        "SHIB", "PEPE", "WIF", "BONK", "FIL", "ICP", "ETC", "XLM", "HBAR",
+        "ALGO", "VET", "AAVE", "UNI", "MKR", "LDO", "CRV", "SNX", "GRT",
+        "USDT", "USDC", "DAI",
+    }
+)
+
 # Light, conservative synonym folding so a well-meaning model that writes the
 # obvious near-miss ("perp", "short answers") still lands on canonical values.
 _INSTRUMENT_SYNONYMS = {
@@ -90,6 +111,23 @@ _DIRECTIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Defense in depth #2: an explicit PII / sensitive-data reject scan. The closed
+# value spaces above already make it impossible to STORE contact info, IDs, or
+# balances (canonical tickers/enums/leverage tokens carry none of it) — but this
+# scans the RAW proposed value and drops the whole fact if it looks like PII, so
+# the "facts, not surveillance" guarantee is explicit and auditable rather than
+# an emergent side effect of the enums. Canonical values never trip it: tickers
+# and enum words have no "@" and no 7+ digit runs; "10x" has only two digits.
+_PII_RE = re.compile(
+    r"""
+    @                       # email local@domain
+  | \d[\d\s().\-]{5,}\d     # 7+ digit run (phone / card / SSN / account / balance)
+  | \b0x[0-9a-fA-F]{6,}\b   # hex wallet / EVM address
+  | \b[13bc][a-km-zA-HJ-NP-Z1-9]{25,}\b  # BTC-style / bech32 wallet address
+    """,
+    re.VERBOSE,
+)
+
 
 def _normalize_value(ftype: str, value: str) -> str | None:
     """Map a raw model value to its canonical form, or None if it doesn't
@@ -98,8 +136,13 @@ def _normalize_value(ftype: str, value: str) -> str | None:
     if not v:
         return None
     if ftype == "followed_asset":
-        # Accept a known name ("bitcoin") or an already-ticker-shaped token.
-        asset = normalize_asset(v) or (v.upper() if v.isalpha() else None)
+        # Accept a known asset name ("bitcoin" → BTC) or a RECOGNIZED ticker.
+        # A bare alphabetic token is only a ticker if it is in the known set —
+        # never "any 2-10 letter word", which would let a name leak through.
+        asset = normalize_asset(v)
+        if asset is None and v.isalpha():
+            cand = v.upper()
+            asset = cand if cand in _KNOWN_TICKERS else None
         return asset if asset and _TICKER_RE.match(asset) else None
     if ftype == "instrument_pref":
         low = v.lower()
@@ -125,6 +168,12 @@ def _validate_fact(raw: object) -> dict[str, Any] | None:
     ftype = raw.get("type")
     value = raw.get("value")
     if ftype not in FACT_TYPES or not isinstance(value, str):
+        return None
+    # Reject the whole fact if the RAW proposed value carries anything that
+    # smells like PII (email, phone/card/ID digit runs, wallet address) before
+    # we even canonicalize — a smuggled identifier never reaches memory.
+    if _PII_RE.search(value):
+        log.warning("dropped extracted fact with PII-like value")
         return None
     norm = _normalize_value(ftype, value)
     if norm is None:
