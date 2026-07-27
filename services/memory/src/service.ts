@@ -62,6 +62,10 @@ function parseUpdate(body: unknown): PersonaUpdate | null {
     if (typeof raw.optIn !== 'boolean') return null
     patch.optIn = raw.optIn
   }
+  if (raw.learnOptOut !== undefined) {
+    if (typeof raw.learnOptOut !== 'boolean') return null
+    patch.learnOptOut = raw.learnOptOut
+  }
   if (raw.experienceLevel !== undefined) {
     if (raw.experienceLevel !== null && !LEVELS.has(String(raw.experienceLevel))) return null
     patch.experienceLevel = raw.experienceLevel as ExperienceLevel | null

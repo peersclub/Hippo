@@ -169,8 +169,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     query: string,
     interpretation: string | undefined,
     answer: string,
+    persona: Persona | null,
   ): void {
     if (session.partner.entitlements?.memoryLab !== true) return
+    // Phase C opt-OUT: a trader who turned "Remember my preferences" off gets
+    // no extraction, no promotion — auto-learning is a full no-op for them.
+    if (persona?.learnOptOut === true) return
     void (async () => {
       try {
         const facts = await intel.extractMemory({ query, interpretation, answer })
@@ -210,6 +214,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   async function emitLearnedMemory(session: Session): Promise<void> {
     if (session.partner.entitlements?.memoryLab !== true) return
     try {
+      // The frame's `optIn` always reflects the CURRENT opt-out state so the
+      // SDK's "Remember my preferences" toggle stays in sync. A trader who has
+      // opted out has no learned facts to show (the toggle-off cleared them and
+      // learnFromTurn is a no-op), so emit an empty, optIn:false frame — no
+      // fact reads needed.
+      const persona = await memory.get(session.partner.partnerId, userKey(session))
+      const optIn = persona?.learnOptOut !== true
+      if (!optIn) {
+        emit(session, { type: 'learned_memory', facts: [], optIn: false })
+        return
+      }
       const [userFacts, sessionFacts] = await Promise.all([
         memory.getLearnedFacts('user', {
           partnerId: session.partner.partnerId,
@@ -231,7 +246,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           scope: 'session' as const,
         })),
       ]
-      emit(session, { type: 'learned_memory', facts })
+      emit(session, { type: 'learned_memory', facts, optIn: true })
     } catch {
       // best-effort: the memory surface must never break the stream
     }
@@ -797,13 +812,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // SESSION facts, all best-effort (memory down → '' / [], never blocks or
       // breaks a turn). Read together. The USER facts are what makes a returning
       // trader's fresh session carry their durable memory.
+      //
+      // Phase C opt-OUT: if the trader turned auto-learning off, the learned
+      // facts do NOT compose — but the curated freeform scope docs and the
+      // structured persona line still do (those are separate consents), so the
+      // block behaves exactly as it did before auto-learning existed.
+      const optedOutOfLearning = persona?.learnOptOut === true
       const [docs, userFacts, sessionFacts] = await Promise.all([
         memory.scopeDocs(session.partner.partnerId, userKey(session)),
-        memory.getLearnedFacts('user', {
-          partnerId: session.partner.partnerId,
-          userId: userKey(session),
-        }),
-        memory.getLearnedFacts('session', { sessionId: session.id }),
+        optedOutOfLearning
+          ? Promise.resolve([])
+          : memory.getLearnedFacts('user', {
+              partnerId: session.partner.partnerId,
+              userId: userKey(session),
+            }),
+        optedOutOfLearning
+          ? Promise.resolve([])
+          : memory.getLearnedFacts('session', { sessionId: session.id }),
       ])
       mem = composeMemory({
         global: docs.global,
@@ -971,6 +996,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                   text,
                   intentRes.interpretation,
                   [ev.data.headline, ...ev.data.paragraphs].join(' '),
+                  persona,
                 )
                 finished = true
               } else if (ev.event === 'replace' || ev.event === 'decline') {
@@ -1155,6 +1181,37 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           if (uplink.clearMemory) {
             // The settings promise: wipe persona data (opt-in choice survives).
             memory.clear(session.partner.partnerId, userKey(session)).catch(() => {})
+          }
+          if (
+            uplink.learnedMemoryOptIn !== undefined &&
+            session.partner.entitlements?.memoryLab === true
+          ) {
+            // Phase C toggle. Persist as the persona's learnOptOut (inverse of
+            // the trader-facing "on"). Turning it OFF also forgets everything
+            // already learned — "stop remembering" must actually forget — so it
+            // reuses the same clear path as clearLearnedMemory. Either way we
+            // re-emit "what Hippo remembers" so the SDK reflects the new state
+            // (empty + optIn:false when off; resumes learning when back on).
+            const optIn = uplink.learnedMemoryOptIn
+            void (async () => {
+              try {
+                await memory.update(session.partner.partnerId, userKey(session), {
+                  learnOptOut: !optIn,
+                })
+                if (!optIn) {
+                  await Promise.all([
+                    memory.clearLearnedFacts('user', {
+                      partnerId: session.partner.partnerId,
+                      userId: userKey(session),
+                    }),
+                    memory.clearLearnedFacts('session', { sessionId: session.id }),
+                  ])
+                }
+                await emitLearnedMemory(session)
+              } catch {
+                // best-effort: a settings toggle must never surface an error
+              }
+            })()
           }
           if (uplink.clearLearnedMemory && session.partner.entitlements?.memoryLab === true) {
             // Wipe the auto-learned facts (durable USER + this SESSION), then

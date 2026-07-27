@@ -19,6 +19,9 @@ export type Persona = {
   experienceLevel: ExperienceLevel | null
   followedAssets: string[]
   openThreads: Array<{ text: string; symbol?: string; ts: number }>
+  /** Phase C: auto-learning opt-OUT. false (default) = learning ON. Separate
+   * consent from `optIn`; gates learnFromTurn + the learned-fact compose. */
+  learnOptOut: boolean
   updatedAt: number
 }
 
@@ -27,6 +30,7 @@ export type PersonaUpdate = {
   experienceLevel?: ExperienceLevel | null
   followAsset?: string
   openThread?: { text: string; symbol?: string }
+  learnOptOut?: boolean
 }
 
 /** A freeform scope-memory document (global/host/user note). */

@@ -81,6 +81,23 @@ export type LearnedFactIds = {
  * facts, then keeps the highest-confidence auto facts. */
 export const MAX_LEARNED_FACTS = 50
 
+/** Phase D fact decay: an auto-learned fact that is not re-observed within this
+ * window ages out — it stops composing into prompts and is pruned on the next
+ * upsert to the same scope. Default 90 days; override with LEARNED_FACT_TTL_MS
+ * (milliseconds). Admin-curated facts are exempt (they never decay, matching
+ * their eviction exemption). Re-observing a fact refreshes updated_at, so an
+ * active preference is kept indefinitely — only genuinely stale ones expire. */
+export const LEARNED_FACT_TTL_MS: number = (() => {
+  const parsed = Number(process.env.LEARNED_FACT_TTL_MS)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 90 * 24 * 60 * 60 * 1000
+})()
+
+/** A fact still composes iff it is admin-curated OR was observed within the TTL.
+ * `now - LEARNED_FACT_TTL_MS` is the cutoff; a fact exactly at the edge expires. */
+function isFresh(fact: LearnedFact, now: number): boolean {
+  return fact.source === 'admin' || fact.updatedAt > now - LEARNED_FACT_TTL_MS
+}
+
 function factKey(type: string, value: string): string {
   return `${type}\u0000${value}`
 }
@@ -169,8 +186,14 @@ export interface ScopeMemoryStore {
     facts: LearnedFactInput[],
     now?: number,
   ): Promise<LearnedFact[]>
-  /** The facts stored for a scope (most-recent-first; empty if none). */
-  getLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<LearnedFact[]>
+  /** The facts stored for a scope (most-recent-first; empty if none). Facts
+   * that aged past LEARNED_FACT_TTL_MS (measured against `now`) are omitted —
+   * `now` is injectable for deterministic tests, defaulting to the wall clock. */
+  getLearnedFacts(
+    scope: LearnedFactScope,
+    ids: LearnedFactIds,
+    now?: number,
+  ): Promise<LearnedFact[]>
   /** Clear all learned facts for a scope (the user-visible clear / opt-out).
    * Returns the number removed. */
   clearLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<number>
@@ -236,11 +259,19 @@ export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
   ): Promise<LearnedFact[]> {
     const key = this.learnedKey(scope, ids)
     const merged = mergeLearnedFacts(this.learned.get(key) ?? [], facts, now)
-    this.learned.set(key, merged)
-    return merged
+    // Phase D: opportunistically prune facts that aged past the TTL, so a
+    // scope that stops being observed doesn't accumulate stale entries.
+    const kept = merged.filter((f) => isFresh(f, now))
+    this.learned.set(key, kept)
+    return kept
   }
-  async getLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<LearnedFact[]> {
-    return this.learned.get(this.learnedKey(scope, ids)) ?? []
+  async getLearnedFacts(
+    scope: LearnedFactScope,
+    ids: LearnedFactIds,
+    now = Date.now(),
+  ): Promise<LearnedFact[]> {
+    // Phase D: stale (past-TTL) auto facts stop composing. Admin facts never decay.
+    return (this.learned.get(this.learnedKey(scope, ids)) ?? []).filter((f) => isFresh(f, now))
   }
   async clearLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<number> {
     const key = this.learnedKey(scope, ids)
@@ -369,6 +400,15 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
           [scope, partnerId, userId, sessionId, f.type, f.value, f.confidence, source, now],
         )
       }
+      // Phase D fact decay: prune auto facts that aged past the TTL (admin
+      // facts are exempt). Opportunistic — runs on every upsert to this scope.
+      await client.query(
+        `DELETE FROM memory_learned_facts
+           WHERE scope = $1 AND partner_id = $2
+             AND COALESCE(user_id, '') = $3 AND COALESCE(session_id, '') = $4
+             AND source <> 'admin' AND updated_at <= $5`,
+        [scope, partnerId, userId ?? '', sessionId ?? '', now - LEARNED_FACT_TTL_MS],
+      )
       // Enforce the per-scope cap: keep admin facts first, then highest
       // confidence (tie-break newest); evict the rest.
       await client.query(
@@ -393,18 +433,27 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
     return this.getLearnedFacts(scope, ids)
   }
 
-  async getLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<LearnedFact[]> {
+  async getLearnedFacts(
+    scope: LearnedFactScope,
+    ids: LearnedFactIds,
+    now = Date.now(),
+  ): Promise<LearnedFact[]> {
     const cols =
       'fact_type, fact_value, confidence, source, created_at, updated_at FROM memory_learned_facts'
+    // Phase D: stale (past-TTL) auto facts stop composing; admin facts never
+    // decay. `cutoff = now - TTL`; only facts observed after it are returned.
+    const cutoff = now - LEARNED_FACT_TTL_MS
     const res =
       scope === 'session'
         ? await this.pool.query(
-            `SELECT ${cols} WHERE scope = 'session' AND session_id = $1 ORDER BY updated_at DESC`,
-            [ids.sessionId ?? ''],
+            `SELECT ${cols} WHERE scope = 'session' AND session_id = $1
+               AND (source = 'admin' OR updated_at > $2) ORDER BY updated_at DESC`,
+            [ids.sessionId ?? '', cutoff],
           )
         : await this.pool.query(
-            `SELECT ${cols} WHERE scope = 'user' AND partner_id = $1 AND user_id = $2 ORDER BY updated_at DESC`,
-            [ids.partnerId ?? '', ids.userId ?? ''],
+            `SELECT ${cols} WHERE scope = 'user' AND partner_id = $1 AND user_id = $2
+               AND (source = 'admin' OR updated_at > $3) ORDER BY updated_at DESC`,
+            [ids.partnerId ?? '', ids.userId ?? '', cutoff],
           )
     return res.rows.map((r) => ({
       type: r.fact_type as string,
