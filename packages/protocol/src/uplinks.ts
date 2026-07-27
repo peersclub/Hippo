@@ -49,6 +49,10 @@ export const SettingsUplink = z.object({
   language: z.enum(['en', 'hi', 'hinglish', 'ar']).optional(),
   memoryOptIn: z.boolean().optional(),
   clearMemory: z.boolean().optional(),
+  // Phase B: wipe the auto-learned facts (durable USER + current SESSION) —
+  // the "what Hippo remembers about you" one-tap clear. Distinct from
+  // clearMemory, which wipes the structured persona.
+  clearLearnedMemory: z.boolean().optional(),
 })
 
 /**
