@@ -223,3 +223,38 @@ describe('card protocol v1 — uplinks', () => {
     expect(up.success).toBe(false)
   })
 })
+
+describe('Phase B — learned_memory frame + clearLearnedMemory (additive)', () => {
+  it('parses a learned_memory frame with user + session facts', () => {
+    const r = Frame.safeParse({
+      ...base,
+      type: 'learned_memory',
+      facts: [
+        { label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' },
+        { label: 'Prefers perps', type: 'instrument_pref', value: 'perps', scope: 'session' },
+      ],
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('defaults facts to [] and rejects an unknown scope', () => {
+    expect(Frame.safeParse({ ...base, type: 'learned_memory' }).success).toBe(true)
+    const bad = Frame.safeParse({
+      ...base,
+      type: 'learned_memory',
+      facts: [{ label: 'x', type: 't', value: 'v', scope: 'global' }],
+    })
+    expect(bad.success).toBe(false)
+  })
+
+  it('accepts clearLearnedMemory on the settings uplink', () => {
+    const up = Uplink.safeParse({
+      v: 1,
+      sessionId: 's_1',
+      ts: 1_752_480_000_000,
+      kind: 'settings',
+      clearLearnedMemory: true,
+    })
+    expect(up.success).toBe(true)
+  })
+})

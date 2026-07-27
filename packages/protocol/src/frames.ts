@@ -225,6 +225,30 @@ export const BriefDeltaFrame = z.object({
   model: z.string().optional(),
 })
 
+/**
+ * "What Hippo remembers about you" (Phase B, pre-prod). The trading facts Hippo
+ * has learned for this trader — DURABLE ones (scope 'user', kept across
+ * sessions) and CURRENT ones (scope 'session', this conversation only) — so the
+ * trader can see and clear them. Server-pushed on stream connect and again
+ * whenever the set changes; the SDK keeps only the latest. Emitted only under
+ * the memoryLab entitlement; SDKs that predate this frame ignore it. Clearing
+ * is the `clearLearnedMemory` flag on SettingsUplink.
+ */
+export const LearnedMemoryFrame = z.object({
+  ...base,
+  type: z.literal('learned_memory'),
+  facts: z
+    .array(
+      z.object({
+        label: z.string(), // human phrase, e.g. "Follows BTC"
+        type: z.string(), // machine key, e.g. "followed_asset"
+        value: z.string(), // e.g. "BTC"
+        scope: z.enum(['user', 'session']), // durable vs this-session
+      }),
+    )
+    .default([]),
+})
+
 export const Frame = z.discriminatedUnion('type', [
   ResearchBriefFrame,
   OrderTicketFrame,
@@ -240,6 +264,7 @@ export const Frame = z.discriminatedUnion('type', [
   OrdersSnapshotFrame,
   UserEchoFrame,
   BriefDeltaFrame,
+  LearnedMemoryFrame,
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
@@ -255,6 +280,7 @@ export type Positions = z.infer<typeof PositionsFrame>
 export type RejectionTicket = z.infer<typeof RejectionTicketFrame>
 export type Thinking = z.infer<typeof ThinkingFrame>
 export type Interpretation = z.infer<typeof InterpretationFrame>
+export type LearnedMemory = z.infer<typeof LearnedMemoryFrame>
 export type Skeleton = z.infer<typeof SkeletonFrame>
 export type Banner = z.infer<typeof BannerFrame>
 export type Pulse = z.infer<typeof PulseFrame>
