@@ -184,7 +184,7 @@ function renderBlotter() {
     const open = state.orders.filter((o) => o.status === 10 || o.status === 30)
     if (!open.length) {
       el.innerHTML =
-        '<div class="empty">No open orders. Place one from the ticket — or ask Hippo.</div>'
+        '<div class="empty">No <b>working</b> orders right now. Market orders fill instantly — a filled buy shows in <b>Positions</b> / <b>Balances</b>, not here. Only a resting <b>limit</b> order (or a partially-filled one) waits in this tab. Place a limit order from the ticket — or ask Hippo — to see one here.</div>'
       return
     }
     el.innerHTML = `<table><thead><tr><th>ID</th><th>Pair</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th></th></tr></thead><tbody>${open
