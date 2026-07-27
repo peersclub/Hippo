@@ -1257,3 +1257,149 @@ describe('orchestrator: auto-learning memory (Phase A, gated + fire-and-forget)'
     await app.close()
   })
 })
+
+describe('orchestrator: durable memory (Phase B — promotion, cross-session, clear)', () => {
+  const until = async (cond: () => boolean, ms = 1500): Promise<void> => {
+    const start = Date.now()
+    while (!cond() && Date.now() - start < ms) await new Promise((r) => setTimeout(r, 5))
+    if (!cond()) throw new Error('condition not met in time')
+  }
+  const learnIntel = (facts: Array<{ type: string; value: string; confidence: number }>) =>
+    stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* () {
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+      extractMemory: async () => facts,
+    })
+
+  it('promotion: observed once stays session-only; observed twice → durable USER scope', async () => {
+    const memory = stubMemory()
+    const intel = learnIntel([{ type: 'instrument_pref', value: 'perps', confidence: 0.9 }])
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    const userKey = `user:${session.partner.partnerId}:${session.id}`
+    const sessKey = `session:${session.id}`
+
+    // Turn 1: first observation → session-only, NOT durable.
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'trade btc perps' })
+    await until(() => (memory.learnedFacts.get(sessKey)?.length ?? 0) > 0)
+    expect(memory.learnedFacts.get(sessKey)?.map((f) => f.value)).toContain('perps')
+    expect(memory.learnedFacts.get(userKey)).toBeUndefined() // no durable promotion yet
+
+    // Turn 2: same fact re-observed → promoted to durable USER scope.
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'more btc perps' })
+    await until(() => (memory.learnedFacts.get(userKey)?.length ?? 0) > 0)
+    const durable = memory.learnedFacts.get(userKey) ?? []
+    expect(durable.map((f) => f.value)).toContain('perps')
+    expect(durable[0].source).toBe('auto')
+    await app.close()
+  })
+
+  it('cross-session compose: a durable USER fact carries into a fresh session', async () => {
+    const capture: { mem?: string } = {}
+    const intel = stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        capture.mem = (req as { memoryContext?: string }).memoryContext
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+    })
+    const memory = stubMemory()
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    // Durable fact from a PRIOR session; THIS session's own facts stay empty.
+    await memory.upsertLearnedFacts(
+      'user',
+      { partnerId: session.partner.partnerId, userId: session.id },
+      [{ type: 'followed_asset', value: 'SOL', confidence: 0.9 }],
+    )
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    expect(capture.mem).toContain('USER PROFILE')
+    expect(capture.mem).toContain('SOL')
+    const interp = frameOfType<{ memoryScopes: string[] }>(session, 'interpretation')
+    expect(interp.memoryScopes).toContain('user')
+    await app.close()
+  })
+
+  it('emits a learned_memory frame after a learn changes the set', async () => {
+    const memory = stubMemory()
+    const intel = learnIntel([{ type: 'followed_asset', value: 'BTC', confidence: 0.9 }])
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('learned_memory'))
+    const frame = frameOfType<{ facts: Array<{ label: string; scope: string; value: string }> }>(
+      session,
+      'learned_memory',
+    )
+    const btc = frame.facts.find((f) => f.value === 'BTC')
+    expect(btc?.label).toBe('Follows BTC')
+    expect(btc?.scope).toBe('session')
+    await app.close()
+  })
+
+  it('clear: clearLearnedMemory empties both scopes and emits an empty learned_memory frame', async () => {
+    const memory = stubMemory()
+    const { app, sessions } = await testApp({ memory })
+    const session = await createSession(app, sessions)
+    session.partner = { ...session.partner, entitlements: { memoryLab: true } }
+    // Seed both scopes.
+    await memory.upsertLearnedFacts('session', { sessionId: session.id }, [
+      { type: 'followed_asset', value: 'BTC', confidence: 0.9 },
+    ])
+    await memory.upsertLearnedFacts(
+      'user',
+      { partnerId: session.partner.partnerId, userId: session.id },
+      [{ type: 'followed_asset', value: 'ETH', confidence: 0.9 }],
+    )
+    await sendTurn(app, session.id, { kind: 'settings', clearLearnedMemory: true })
+    await waitForJournal(session, (t) => t.includes('learned_memory'))
+    await until(
+      () =>
+        (memory.learnedFacts.get(`session:${session.id}`)?.length ?? 0) === 0 &&
+        (memory.learnedFacts.get(`user:${session.partner.partnerId}:${session.id}`)?.length ?? 0) ===
+          0,
+    )
+    const frame = frameOfType<{ facts: unknown[] }>(session, 'learned_memory')
+    expect(frame.facts).toEqual([])
+    await app.close()
+  })
+
+  it('gated off: no memoryLab → no promotion, no USER compose, no learned_memory frame', async () => {
+    const capture: { mem?: string } = { mem: 'unset' }
+    const intel = stubIntel({
+      intent: async () => ({ intent: 'research', confidence: 0.95, language: 'en' }),
+      respondStream: async function* (req) {
+        capture.mem = (req as { memoryContext?: string }).memoryContext
+        yield { event: 'meta', data: {} }
+        yield { event: 'done', data: briefFixture }
+      },
+      extractMemory: async () => [{ type: 'followed_asset', value: 'BTC', confidence: 0.9 }],
+    })
+    const memory = stubMemory()
+    const { app, sessions } = await testApp({ intel, memory })
+    const session = await createSession(app, sessions) // …but no memoryLab
+    // A durable USER fact exists for this very user…
+    await memory.upsertLearnedFacts(
+      'user',
+      { partnerId: session.partner.partnerId, userId: session.id },
+      [{ type: 'followed_asset', value: 'SOL', confidence: 0.9 }],
+    )
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why btc down' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    await new Promise((r) => setTimeout(r, 30))
+    // …yet nothing composes (the durable fact is ignored), nothing is learned to
+    // session scope, and no learned_memory surface is pushed.
+    expect(capture.mem).toBeUndefined()
+    expect(memory.learnedFacts.get(`session:${session.id}`)).toBeUndefined()
+    expect(session.journal.after(0).some((e) => e.frame.type === 'learned_memory')).toBe(false)
+    await app.close()
+  })
+})

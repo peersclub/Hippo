@@ -76,6 +76,10 @@ export interface MemoryClient {
     ids: LearnedFactIds,
     facts: LearnedFactInput[],
   ): Promise<void>
+  /** Wipe all auto-learned facts for a scope (the "what Hippo remembers" one-tap
+   * clear). Best-effort: degrades quietly when memory is down — clearing must
+   * never surface as an error on the settings path. */
+  clearLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<void>
 }
 
 async function request(url: string, init: RequestInit): Promise<Response> {
@@ -184,6 +188,15 @@ export function createMemoryClient(baseUrl = MEMORY_URL): MemoryClient {
     async upsertLearnedFacts(scope, ids, facts) {
       if (!facts.length) return
       await guarded(factsUrl(scope, ids), { method: 'PUT', body: JSON.stringify({ facts }) })
+    },
+    async clearLearnedFacts(scope, ids) {
+      // Mirror getLearnedFacts: swallow every failure so a down memory service
+      // never turns a "forget me" tap into an error the trader sees.
+      try {
+        await guarded(factsUrl(scope, ids), { method: 'DELETE' })
+      } catch {
+        // best-effort: clearing learned memory must never surface
+      }
     },
   }
 }
