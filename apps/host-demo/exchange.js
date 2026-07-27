@@ -10,7 +10,10 @@
 //     backend, so both show up in this blotter — the whole point of the test.
 
 const qs = new URLSearchParams(location.search)
-const envHost = '%VITE_HOST_VENUE_URL%'
+// Vite inlines import.meta.env.* into JS at build time; a `%VITE_*%` placeholder
+// is only replaced inside index.html, so in this module it stayed literal on
+// Vercel and always fell back to localhost. import.meta.env is the real bake.
+const envHost = import.meta.env.VITE_HOST_VENUE_URL || ''
 const HOST = qs.get('host') || (envHost.startsWith('http') ? envHost : 'http://localhost:8796')
 
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']

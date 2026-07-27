@@ -4,7 +4,10 @@
 // in the embedded Hippo chat.
 
 const qs = new URLSearchParams(location.search)
-const envHost = '%VITE_HOST_VENUE_URL%'
+// Vite inlines import.meta.env.* into JS at build time; the old `%VITE_*%`
+// placeholder is only substituted inside index.html, never in .js modules —
+// so on Vercel it stayed literal and always fell back to localhost.
+const envHost = import.meta.env.VITE_HOST_VENUE_URL || ''
 const HOST = qs.get('host') || (envHost.startsWith('http') ? envHost : 'http://localhost:8796')
 
 const $ = (id) => document.getElementById(id)
