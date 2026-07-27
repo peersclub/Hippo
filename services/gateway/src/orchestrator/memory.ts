@@ -193,7 +193,12 @@ export function createMemoryClient(baseUrl = MEMORY_URL): MemoryClient {
       // Mirror getLearnedFacts: swallow every failure so a down memory service
       // never turns a "forget me" tap into an error the trader sees.
       try {
-        await guarded(factsUrl(scope, ids), { method: 'DELETE' })
+        // Explicit empty JSON body: the shared request() sets content-type
+        // application/json, and fastify 400s a bodyless DELETE under that
+        // content-type (FST_ERR_CTP_EMPTY_JSON_BODY) — same gotcha the persona
+        // `clear` handles. Without this the DELETE silently 400s and the
+        // fire-and-forget hides it, so "forget me" never actually clears.
+        await guarded(factsUrl(scope, ids), { method: 'DELETE', body: '{}' })
       } catch {
         // best-effort: clearing learned memory must never surface
       }
