@@ -208,6 +208,39 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
   font-size:12.5px;padding:12px;border-radius:11px;background:var(--hippo-amber);color:var(--hippo-amber-ink);text-align:center}
 .tfoot{font-size:9.5px;text-align:center;padding:0 13px 11px;line-height:1.5;color:var(--hippo-text-faint)}
 .action-failed{font-family:var(--hippo-font-mono);font-size:10px;text-align:center;padding:0 13px 9px;color:var(--hippo-down)}
+/* order draft — the interactive stage before a ticket. Native controls
+   (select / range / decimal inputs) restyled through tokens only. */
+.dpx{display:flex;align-items:baseline;gap:8px;padding:9px 13px;border-bottom:1px solid var(--hippo-hairline);
+  font-family:var(--hippo-font-mono)}
+.dpx .dpsym{font-size:9px;letter-spacing:.12em;color:var(--hippo-text-faint)}
+.dpx .dplast{font-size:14px;font-weight:600;color:var(--hippo-text-hi);transition:color .3s}
+.dpx .dplast.tick{color:var(--hippo-amber)}
+.dpx .dpchg{margin-inline-start:auto;font-size:9.5px}
+.dpx .dpchg.pos{color:var(--hippo-up)}.dpx .dpchg.neg{color:var(--hippo-down)}
+.dgrid{display:flex;flex-direction:column;gap:9px;padding:11px 13px 2px}
+.drow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dfield{display:flex;flex-direction:column;gap:4px}
+.dfield .dlab{display:flex;align-items:baseline;font-family:var(--hippo-font-mono);font-size:8.5px;
+  letter-spacing:.12em;color:var(--hippo-text-faint)}
+.dfield .dnote{letter-spacing:.06em;color:var(--hippo-text-dim);text-transform:none}
+.dfield .dlevout{margin-inline-start:auto;font-size:10px;font-weight:600;color:var(--hippo-amber)}
+.dfield select,.dfield input[type=text]{font-family:var(--hippo-font-mono);font-size:11.5px;color:var(--hippo-text-hi);
+  background:rgba(var(--hippo-panel-deep-rgb),.7);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-cell);
+  padding:8px 10px;outline:none;appearance:none;width:100%}
+.dfield select{cursor:pointer}
+.dfield select:focus,.dfield input[type=text]:focus{border-color:rgba(var(--hippo-amber-rgb),.5)}
+.dfield input[type=text]:read-only{color:var(--hippo-text-dim);cursor:default}
+.dfield select:disabled,.dfield input:disabled{opacity:.5;cursor:default}
+.dfield select option{background:var(--hippo-panel);color:var(--hippo-text-hi)}
+.dfield input[type=range]{width:100%;height:22px;accent-color:var(--hippo-amber);cursor:pointer;
+  background:none;border:0;padding:0;margin:0}
+.ddismiss{display:block;margin:0 auto 10px;font-family:var(--hippo-font-mono);font-size:8.5px;
+  letter-spacing:.12em;color:var(--hippo-text-faint);padding:3px 8px}
+.ddismiss:hover{color:var(--hippo-text-hi)}
+/* dismissed draft — collapsed to a one-line receipt of the trader's choice */
+.draft-gone{align-self:flex-start;font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;
+  color:var(--hippo-text-faint);border:1px dashed var(--hippo-hairline);border-radius:var(--hippo-radius-pill);
+  padding:6px 12px}
 /* lifecycle */
 .await{display:flex;align-items:center;gap:8px;padding:10px 13px;border-top:1px dashed rgba(var(--hippo-white-rgb),.09);
   font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-amber)}
@@ -295,6 +328,7 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
   .sk{animation:none}
   .fillbar span{transition:none}
   .livebar .asof{transition:none}
+  .dpx .dplast{transition:none}
 }
 /* positions */
 .pos-row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;font-family:var(--hippo-font-mono);font-size:11px}
@@ -451,7 +485,8 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .chip:focus-visible,.livebar button:focus-visible,.fbchip:focus-visible,.fbskip:focus-visible,
 .composer textarea:focus-visible,.send:focus-visible,.jump:focus-visible,.shrx:focus-visible,
 .shitem:focus-visible,.lang:focus-visible,.obnotnow:focus-visible,.omanage:focus-visible,
-.cta:focus-visible,.await .cxl:focus-visible,.obcheck:focus-visible{
+.cta:focus-visible,.await .cxl:focus-visible,.obcheck:focus-visible,
+.dfield select:focus-visible,.dfield input:focus-visible,.ddismiss:focus-visible{
   outline:2px solid var(--hippo-amber);outline-offset:1px}
 /* ── light lean — PURE token swap (redeclares tokens only) ── */
 :host([data-theme="light"]){

@@ -90,6 +90,20 @@ export type MessageKey =
   | 'composer_placeholder_capacity'
   | 'capacity_title'
   | 'capacity_body'
+  | 'draft_pair'
+  | 'draft_order_type'
+  | 'draft_type_market'
+  | 'draft_type_limit'
+  | 'draft_price'
+  | 'draft_price_market'
+  | 'draft_size'
+  | 'draft_leverage'
+  | 'draft_margin'
+  | 'draft_margin_isolated'
+  | 'draft_margin_cross'
+  | 'draft_dismiss'
+  | 'draft_dismissed'
+  | 'draft_sent'
 
 type Catalog = Record<MessageKey, string>
 
@@ -164,6 +178,20 @@ const en: Catalog = {
   capacity_title: 'HIPPO IS BUSY THIS MONTH',
   capacity_body:
     'Hippo has reached this month’s capacity. Your thread is safe — please check back soon.',
+  draft_pair: 'Pair',
+  draft_order_type: 'Order type',
+  draft_type_market: 'Market',
+  draft_type_limit: 'Limit',
+  draft_price: 'Price',
+  draft_price_market: '≈ market',
+  draft_size: 'Size',
+  draft_leverage: 'Leverage',
+  draft_margin: 'Margin',
+  draft_margin_isolated: 'Isolated',
+  draft_margin_cross: 'Cross',
+  draft_dismiss: 'Dismiss',
+  draft_dismissed: 'Order draft dismissed',
+  draft_sent: 'SENT ✓',
 }
 
 // First pass — pending native review.
@@ -236,6 +264,20 @@ const hi: Catalog = {
   composer_placeholder_capacity: 'Hippo इस महीने व्यस्त है',
   capacity_title: 'Hippo इस महीने व्यस्त है',
   capacity_body: 'Hippo इस महीने की क्षमता तक पहुँच गया है। आपकी बातचीत सुरक्षित है — कृपया कुछ देर बाद देखें।',
+  draft_pair: 'पेयर',
+  draft_order_type: 'ऑर्डर प्रकार',
+  draft_type_market: 'मार्केट',
+  draft_type_limit: 'लिमिट',
+  draft_price: 'कीमत',
+  draft_price_market: '≈ मार्केट',
+  draft_size: 'मात्रा',
+  draft_leverage: 'लीवरेज',
+  draft_margin: 'मार्जिन',
+  draft_margin_isolated: 'आइसोलेटेड',
+  draft_margin_cross: 'क्रॉस',
+  draft_dismiss: 'हटाएँ',
+  draft_dismissed: 'ऑर्डर ड्राफ़्ट हटा दिया गया',
+  draft_sent: 'भेज दिया ✓',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -312,6 +354,22 @@ const hiLatn: Catalog = {
   capacity_title: 'Hippo IS MAHINE BUSY HAI',
   capacity_body:
     'Hippo is mahine ki capacity tak pahunch gaya hai. Aapki baat-cheet safe hai — thodi der baad dekhein.',
+  // Product terms (pair, market, limit, leverage, margin) stay in English —
+  // that's how Indian traders actually say them.
+  draft_pair: 'Pair',
+  draft_order_type: 'Order type',
+  draft_type_market: 'Market',
+  draft_type_limit: 'Limit',
+  draft_price: 'Price',
+  draft_price_market: '≈ market',
+  draft_size: 'Quantity',
+  draft_leverage: 'Leverage',
+  draft_margin: 'Margin',
+  draft_margin_isolated: 'Isolated',
+  draft_margin_cross: 'Cross',
+  draft_dismiss: 'Hatao',
+  draft_dismissed: 'Order draft hata diya',
+  draft_sent: 'BHEJ DIYA ✓',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -387,6 +445,20 @@ const ar: Catalog = {
   composer_placeholder_capacity: 'Hippo مشغول هذا الشهر',
   capacity_title: 'Hippo مشغول هذا الشهر',
   capacity_body: 'وصل Hippo إلى سعة هذا الشهر. محادثتك آمنة — يُرجى المحاولة لاحقًا.',
+  draft_pair: 'الزوج',
+  draft_order_type: 'نوع الأمر',
+  draft_type_market: 'سوق',
+  draft_type_limit: 'محدد',
+  draft_price: 'السعر',
+  draft_price_market: '≈ سعر السوق',
+  draft_size: 'الكمية',
+  draft_leverage: 'الرافعة المالية',
+  draft_margin: 'الهامش',
+  draft_margin_isolated: 'معزول',
+  draft_margin_cross: 'مشترك',
+  draft_dismiss: 'تجاهل',
+  draft_dismissed: 'تم تجاهل مسودة الأمر',
+  draft_sent: 'تم الإرسال ✓',
 }
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }

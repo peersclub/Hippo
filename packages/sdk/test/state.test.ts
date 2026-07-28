@@ -3,6 +3,7 @@ import {
   banners,
   learnedFacts,
   learnedMemoryOptIn,
+  livePrice,
   orders,
   pushFrame,
   thread,
@@ -180,6 +181,91 @@ describe('thread store', () => {
   })
 })
 
+describe('order_draft + price_tick routing', () => {
+  const draft = (id: string, extra: Record<string, unknown> = {}) => ({
+    ...base,
+    id,
+    type: 'order_draft' as const,
+    draftId: `d_${id}`,
+    capability: 'futures_perp' as const,
+    title: 'Set up your LONG BTC order',
+    instrument: 'BTC/USDT',
+    symbols: ['BTC/USDT', 'ETH/USDT'],
+    side: 'buy' as const,
+    direction: 'long' as const,
+    size: '0.05',
+    sizeAsset: 'BTC',
+    orderType: 'market' as const,
+    leverage: 13,
+    maxLeverage: 50,
+    marginMode: 'isolated' as const,
+    marginModes: ['isolated' as const, 'cross' as const],
+    cta: 'Review order →',
+    ...extra,
+  })
+  const tick = (id: string, extra: Record<string, unknown> = {}) => ({
+    ...base,
+    id,
+    type: 'price_tick' as const,
+    symbol: 'BTC/USDT',
+    last: 63631.63,
+    lastDisplay: '63,631.63',
+    changePct: -4.2,
+    asOfIso: '2026-07-28T09:00:00.000Z',
+    ...extra,
+  })
+
+  it('order_draft is a conversation card — it enters the thread', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: draft('od1') })
+    expect(thread.value).toHaveLength(1)
+    const item = thread.value[0]
+    expect(item?.kind === 'frame' && item.frame.type).toBe('order_draft')
+  })
+
+  it('order_draft is content — it clears the transient thinking card above it', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'th', type: 'thinking', lines: ['…'] } })
+    pushFrame({ kind: 'frame', frame: draft('od2') })
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(types).toEqual(['order_draft'])
+  })
+
+  it('price_tick feeds the livePrice signal and NEVER the thread (transient)', () => {
+    thread.value = []
+    livePrice.value = null
+    pushFrame({ kind: 'frame', frame: tick('pt1') })
+    expect(thread.value).toHaveLength(0)
+    expect(livePrice.value).toEqual({
+      symbol: 'BTC/USDT',
+      last: 63631.63,
+      lastDisplay: '63,631.63',
+      changePct: -4.2,
+      asOfIso: '2026-07-28T09:00:00.000Z',
+    })
+  })
+
+  it('the latest tick wins (one price surface, updated in place)', () => {
+    livePrice.value = null
+    pushFrame({ kind: 'frame', frame: tick('pt1') })
+    pushFrame({ kind: 'frame', frame: tick('pt2', { last: 63700, lastDisplay: '63,700.00' }) })
+    expect(livePrice.value).toMatchObject({ last: 63700 })
+  })
+
+  it('a tick between thinking and the answer cannot disturb the thread', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'th', type: 'thinking', lines: ['…'] } })
+    pushFrame({ kind: 'frame', frame: tick('pt3') })
+    // The tick must NOT count as content — the thinking card stays until real
+    // content lands (a tick clearing the spinner would strand the trader).
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(types).toEqual(['thinking'])
+    pushFrame({ kind: 'frame', frame: draft('od3') })
+    const after = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(after).toEqual(['order_draft'])
+  })
+})
+
 describe('banner routing', () => {
   it('routes banner frames to the pinned banners signal, never the thread', () => {
     thread.value = []
@@ -264,11 +350,15 @@ describe('learned_memory routing', () => {
     learnedFacts.value = []
     pushFrame({
       kind: 'frame',
-      frame: learned([{ label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' }]),
+      frame: learned([
+        { label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' },
+      ]),
     })
     pushFrame({
       kind: 'frame',
-      frame: learned([{ label: 'Follows SOL', type: 'followed_asset', value: 'SOL', scope: 'user' }]),
+      frame: learned([
+        { label: 'Follows SOL', type: 'followed_asset', value: 'SOL', scope: 'user' },
+      ]),
     })
     expect(learnedFacts.value.map((f) => f.label)).toEqual(['Follows SOL'])
   })
@@ -285,7 +375,9 @@ describe('learned_memory routing', () => {
     learnedMemoryOptIn.value = false
     pushFrame({
       kind: 'frame',
-      frame: learned([{ label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' }]),
+      frame: learned([
+        { label: 'Follows BTC', type: 'followed_asset', value: 'BTC', scope: 'user' },
+      ]),
     })
     expect(learnedMemoryOptIn.value).toBe(true)
   })
@@ -302,7 +394,9 @@ describe('learned_memory routing', () => {
     expect(learnedMemoryOptIn.value).toBe(false)
     pushFrame({
       kind: 'frame',
-      frame: learned([{ label: 'Follows SOL', type: 'followed_asset', value: 'SOL', scope: 'user' }]),
+      frame: learned([
+        { label: 'Follows SOL', type: 'followed_asset', value: 'SOL', scope: 'user' },
+      ]),
     })
     expect(learnedMemoryOptIn.value).toBe(true)
   })

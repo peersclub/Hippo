@@ -3,6 +3,7 @@ import type {
   Frame,
   LearnedMemory,
   OrdersSnapshot,
+  PriceTick,
   ResearchBrief,
   UnknownFrame,
 } from '@hippo/protocol'
@@ -32,6 +33,30 @@ export const dir = computed<'ltr' | 'rtl'>(() => (isRtl(locale.value) ? 'rtl' : 
 
 export const thread = signal<ThreadItem[]>([])
 export const orders = signal<OrdersSnapshot | null>(null)
+
+/**
+ * The latest live market price. TRANSIENT by protocol contract: `price_tick`
+ * frames (and the 'client'/'host' price sources) land here and NEVER in the
+ * thread — the price surface updates in place, the conversation doesn't grow.
+ * One symbol at a time (the page's market); consumers must check `symbol`
+ * before showing the number against a different instrument.
+ */
+export type LivePrice = {
+  symbol: string
+  last: number
+  lastDisplay: string
+  changePct?: number
+  asOfIso: string
+}
+export const livePrice = signal<LivePrice | null>(null)
+
+/**
+ * The market the HOST page is showing (data-hippo-symbol at mount, then
+ * hippo:context bridge messages). Null = the host declared nothing; the
+ * server falls back to its own default. Always the validated, uppercased
+ * "BASE/QUOTE" form — bridge.ts is the only writer besides mountPanel.
+ */
+export const pageSymbol = signal<string | null>(null)
 /** Where the panel sits on the page. `pill` = minimized launcher (panel
  * renders null). Full matrix + transitions live in posture.ts. */
 export const posture = signal<Posture>('pill')
@@ -256,6 +281,22 @@ export function pushFrame(item: ThreadItem) {
 
   if (t === 'orders_snapshot') {
     orders.value = (item as { frame: OrdersSnapshot }).frame
+    return
+  }
+  // Live price ticks are transient by contract — they feed the livePrice
+  // surface (order-draft price row, header pulse) and NEVER the thread. The
+  // gateway already keeps them out of the resume journal; keeping them out of
+  // the thread here means a tick can also never clear a thinking/skeleton
+  // card or bloat the conversation.
+  if (t === 'price_tick') {
+    const f = (item as { frame: PriceTick }).frame
+    livePrice.value = {
+      symbol: f.symbol,
+      last: f.last,
+      lastDisplay: f.lastDisplay,
+      changePct: f.changePct,
+      asOfIso: f.asOfIso,
+    }
     return
   }
   if (t === 'pulse') {

@@ -305,6 +305,57 @@ describe('session-mint status codes', () => {
   })
 })
 
+describe('page-symbol context on the mint (data-hippo-symbol)', () => {
+  it('includes the configured symbol in the mint body', async () => {
+    const bodies: string[] = []
+    stubFetch((url, init) => {
+      if (url.includes('/v1/session')) {
+        bodies.push(String(init?.body))
+        return sessionOk('s1')
+      }
+      return { ok: true, status: 200 }
+    })
+    const { connect } = await load()
+    await connect({ ...cfg, symbol: 'BTC/USDT' })
+    expect(JSON.parse(bodies[0] ?? '{}')).toEqual({ partnerKey: 'pk_x', symbol: 'BTC/USDT' })
+  })
+
+  it('omits the field entirely when no symbol is configured', async () => {
+    const bodies: string[] = []
+    stubFetch((url, init) => {
+      if (url.includes('/v1/session')) {
+        bodies.push(String(init?.body))
+        return sessionOk('s1')
+      }
+      return { ok: true, status: 200 }
+    })
+    const { connect } = await load()
+    await connect(cfg)
+    expect(JSON.parse(bodies[0] ?? '{}')).toEqual({ partnerKey: 'pk_x' })
+  })
+
+  it('re-mints after stream death still carry the symbol', async () => {
+    vi.useFakeTimers()
+    const bodies: string[] = []
+    let n = 0
+    stubFetch((url, init) => {
+      if (url.includes('/v1/session')) {
+        n++
+        bodies.push(String(init?.body))
+        return sessionOk(`s${n}`)
+      }
+      return { ok: true, status: 200 }
+    })
+    const { connect } = await load()
+    await connect({ ...cfg, symbol: 'ETH/USDT' })
+    mockEventSources[0]?.open()
+    mockEventSources[0]?.fail(MockEventSource.CLOSED)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(n).toBe(2)
+    expect(bodies[1]).toContain('"symbol":"ETH/USDT"')
+  })
+})
+
 describe('partner token mint (data-hippo-token-url)', () => {
   const tokenCfg = { ...cfg, tokenUrl: 'https://host.test/api/hippo-token' }
   const tokenOk: Resp = { ok: true, status: 200, json: async () => ({ token: 'jwt.abc.sig' }) }
