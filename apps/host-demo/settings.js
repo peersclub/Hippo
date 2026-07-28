@@ -27,6 +27,7 @@ const EMBED = [
   ['label', ''],
   ['open', ''],
   ['key', 'pk_assetworks'],
+  ['priceSource', 'server'],
 ]
 const getPref = (k, d) => {
   try {
@@ -49,6 +50,8 @@ function loadEmbed() {
   $('e-label').value = getPref('label', '')
   $('e-open').checked = getPref('open', '') === '1'
   $('e-key').value = getPref('key', 'pk_assetworks')
+  const src = getPref('priceSource', 'server')
+  for (const b of $('e-priceSource').children) b.classList.toggle('on', b.dataset.v === src)
 }
 for (const b of $('e-theme').children)
   b.onclick = () => {
@@ -59,6 +62,11 @@ $('e-locale').onchange = (e) => setPref('locale', e.target.value)
 $('e-label').onchange = (e) => setPref('label', e.target.value.trim())
 $('e-open').onchange = (e) => setPref('open', e.target.checked ? '1' : '')
 $('e-key').onchange = (e) => setPref('key', e.target.value.trim() || 'pk_assetworks')
+for (const b of $('e-priceSource').children)
+  b.onclick = () => {
+    setPref('priceSource', b.dataset.v)
+    loadEmbed()
+  }
 $('e-reset').onclick = () => {
   for (const [k] of EMBED) setPref(k, '')
   loadEmbed()
