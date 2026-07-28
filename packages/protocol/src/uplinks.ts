@@ -27,6 +27,44 @@ export const TicketActionUplink = z.object({
   action: z.enum(['confirm_handoff', 'cancel']),
 })
 
+/**
+ * Interactive order draft (additive, July 2026) — the trader edited the
+ * order_draft card's controls (leverage slider, price input, symbol /
+ * order-type / margin dropdowns) and submitted, or dismissed the card.
+ * `params` echoes the edited values on submit; the gateway NEVER trusts them
+ * blindly — it re-validates against venue capabilities (max leverage, margin
+ * modes, listed symbols) before running the normal prepare → ticket flow.
+ */
+export const DraftActionUplink = z.object({
+  ...base,
+  kind: z.literal('draft_action'),
+  draftId: z.string(),
+  action: z.enum(['submit', 'dismiss']),
+  params: z
+    .object({
+      instrument: z.string(),
+      orderType: z.enum(['market', 'limit']),
+      size: z.string().min(1),
+      limitPrice: z.string().optional(),
+      leverage: z.number().int().min(1).optional(),
+      marginMode: z.enum(['isolated', 'cross']).optional(),
+    })
+    .optional(),
+})
+
+/**
+ * Page context (additive, July 2026) — the host tells the embed which market
+ * the trader is looking at (via data-hippo-symbol / the postMessage bridge),
+ * and the SDK forwards it here. The gateway uses it as the session's default
+ * symbol: order drafts, research and the live price tick key off it instead
+ * of guessing BTC/USDT. Context, never a command — nothing executes from it.
+ */
+export const ContextUplink = z.object({
+  ...base,
+  kind: z.literal('context'),
+  symbol: z.string().min(3).max(20).optional(), // e.g. "BTC/USDT"
+})
+
 export const FeedbackUplink = z.object({
   ...base,
   kind: z.literal('feedback'),
@@ -75,6 +113,8 @@ export const Uplink = z.discriminatedUnion('kind', [
   UserTextUplink,
   ChipTapUplink,
   TicketActionUplink,
+  DraftActionUplink,
+  ContextUplink,
   FeedbackUplink,
   ConsentUplink,
   SettingsUplink,

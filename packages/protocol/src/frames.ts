@@ -81,6 +81,41 @@ export const OrderTicketFrame = z.object({
   footnote: z.string(), // restates the seam
 })
 
+/**
+ * Interactive order DRAFT (additive, July 2026) — the editable stage BEFORE a
+ * ticket. Where OrderTicketFrame is a display-only prepared quote, the draft
+ * carries NUMERIC fields + venue bounds so the SDK can render real controls:
+ * a leverage slider (bounded by maxLeverage), a price input (market/limit),
+ * and symbol / order-type / margin-mode dropdowns. The trader edits, then
+ * submits via the draft_action uplink; the gateway re-validates against venue
+ * capabilities and runs the normal prepare → order_ticket → confirm flow.
+ * Money/size stay strings (protocol law); bounds are numbers because they
+ * parameterize controls, not money. Old SDKs render this via FallbackCard.
+ */
+export const OrderDraftFrame = z.object({
+  ...base,
+  type: z.literal('order_draft'),
+  draftId: z.string(),
+  capability: z.enum(['spot', 'futures_perp']),
+  title: z.string(), // server-authored, e.g. "Set up your LONG BTC order"
+  instrument: z.string(), // "BTC/USDT" — current selection
+  /** Symbol dropdown options (includes `instrument`). Empty = no dropdown. */
+  symbols: z.array(z.string()).default([]),
+  side: z.enum(['buy', 'sell']),
+  direction: z.enum(['long', 'short']).optional(), // perp only
+  /** Prefill from the parsed text; '' = trader must fill it in. */
+  size: z.string().default(''),
+  sizeAsset: z.string(), // unit label for the size input, e.g. "BTC"
+  orderType: z.enum(['market', 'limit']).default('market'),
+  limitPrice: z.string().optional(),
+  leverage: z.number().int().min(1).optional(), // perp only — slider position
+  maxLeverage: z.number().int().min(1).optional(), // slider bound (venue caps)
+  marginMode: z.enum(['isolated', 'cross']).optional(),
+  marginModes: z.array(z.enum(['isolated', 'cross'])).default([]),
+  cta: z.string(), // e.g. "Review order →"
+  footnote: z.string().optional(),
+})
+
 export const LifecycleFrame = z.object({
   ...base,
   type: z.literal('lifecycle'),
@@ -186,6 +221,25 @@ export const PulseFrame = z.object({
   tag: z.string(), // e.g. "· BTC −4.2%"
 })
 
+/**
+ * Live market price tick (additive, July 2026) — realtime price for the
+ * embed's current symbol, kept in sync with the host page. TRANSIENT by
+ * contract: ticks update the panel's price surface (order-draft price, header
+ * pulse) and are never part of the conversation thread; the gateway emits
+ * them outside the resume journal (a reconnect just waits for the next tick)
+ * so they can never bloat a Last-Event-ID replay. `last` is a number because
+ * it drives a live display, not a money row the trader confirms.
+ */
+export const PriceTickFrame = z.object({
+  ...base,
+  type: z.literal('price_tick'),
+  symbol: z.string(), // "BTC/USDT"
+  last: z.number(),
+  lastDisplay: z.string(), // server-formatted, e.g. "63,631.63"
+  changePct: z.number().optional(), // 12h move, when known
+  asOfIso: z.string(),
+})
+
 export const OrdersSnapshotFrame = z.object({
   ...base,
   type: z.literal('orders_snapshot'),
@@ -256,6 +310,8 @@ export const LearnedMemoryFrame = z.object({
 export const Frame = z.discriminatedUnion('type', [
   ResearchBriefFrame,
   OrderTicketFrame,
+  OrderDraftFrame,
+  PriceTickFrame,
   LifecycleFrame,
   AdviceDeclineFrame,
   PositionsFrame,
@@ -285,6 +341,8 @@ export type RejectionTicket = z.infer<typeof RejectionTicketFrame>
 export type Thinking = z.infer<typeof ThinkingFrame>
 export type Interpretation = z.infer<typeof InterpretationFrame>
 export type LearnedMemory = z.infer<typeof LearnedMemoryFrame>
+export type OrderDraft = z.infer<typeof OrderDraftFrame>
+export type PriceTick = z.infer<typeof PriceTickFrame>
 export type Skeleton = z.infer<typeof SkeletonFrame>
 export type Banner = z.infer<typeof BannerFrame>
 export type Pulse = z.infer<typeof PulseFrame>
