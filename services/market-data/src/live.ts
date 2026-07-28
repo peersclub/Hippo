@@ -1,17 +1,35 @@
 /**
- * Live inputs via CCXT against Binance PUBLIC endpoints — no API keys, read
+ * Live inputs via CCXT against a PUBLIC exchange endpoint — no API keys, read
  * only (dev data-source decision, see Build Plan/10 BE Architecture).
+ *
+ * The exchange is env-configurable via MARKET_EXCHANGE (a CCXT exchange id).
+ * Default `binanceus`: Binance.com's public API geo-blocks datacenter IPs in
+ * the US region we deploy from (every fetch 401s → only the fixture BTC
+ * survived), whereas Binance.US serves US IPs, uses the same symbol format
+ * (BTC/USDT …), and covers the demo majors. Flip MARKET_EXCHANGE to any
+ * reachable CCXT venue (kraken, coinbase, bybit, …) without a code change if a
+ * region ever needs a different source. Funding is best-effort — a spot-only
+ * venue simply reports null and the snapshot degrades gracefully.
  */
-import { binance } from 'ccxt'
+import * as ccxt from 'ccxt'
 import type { SnapshotInputs } from './snapshot.js'
 
 /** 13 hourly candles = the 12h window (first close is "12 hours ago"). */
 const SPARK_CANDLES = 13
 
+const EXCHANGE_ID = process.env.MARKET_EXCHANGE ?? 'binanceus'
+const SOURCE_LABEL = `${EXCHANGE_ID.toUpperCase()} PUBLIC`
+
 // timeout: CCXT's default is 10s, but our slowest caller aborts at 2.5s
-// (gateway) / 3s (intelligence) — a slower Binance answer would burn sockets
-// for a response nobody is still waiting for.
-const exchange = new binance({ enableRateLimit: true, timeout: 2_000 })
+// (gateway) / 3s (intelligence) — a slower answer would burn sockets for a
+// response nobody is still waiting for.
+const ExchangeClass = (ccxt as unknown as Record<string, new (cfg: unknown) => ccxt.Exchange>)[
+  EXCHANGE_ID
+]
+if (!ExchangeClass) {
+  throw new Error(`MARKET_EXCHANGE="${EXCHANGE_ID}" is not a known CCXT exchange id`)
+}
+const exchange = new ExchangeClass({ enableRateLimit: true, timeout: 2_000 })
 
 /** "BTC/USDT" → "BTC/USDT:USDT" — funding only exists on the perp market. */
 function futuresSymbol(spot: string): string {
@@ -33,10 +51,10 @@ export async function fetchLiveInputs(symbol: string): Promise<SnapshotInputs> {
   const closes = ohlcv.map((candle) => Number(candle[4])).filter((close) => Number.isFinite(close))
   if (closes.length < 2) throw new Error(`not enough OHLCV closes for ${symbol}`)
 
-  // Funding is best-effort: spot-only symbols or venues without perps just
-  // report null and the snapshot degrades gracefully.
+  // Funding is best-effort: spot-only venues (e.g. Binance.US) or symbols with
+  // no perp market just report null and the snapshot degrades gracefully.
   let fundingRate: number | null = null
-  const sources = ['BINANCE PUBLIC']
+  const sources = [SOURCE_LABEL]
   if (exchange.has.fetchFundingRate) {
     try {
       const funding = await exchange.fetchFundingRate(futuresSymbol(symbol))
