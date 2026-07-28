@@ -39,6 +39,7 @@ for (const p of PAIRS) {
     pair = p
     for (const c of pairsel.children) c.classList.toggle('on', c.textContent === p)
     startMarket()
+    tellHippo({ symbol: pair }) // embed follows the host's pair switch
   }
   pairsel.appendChild(b)
 }
@@ -357,6 +358,22 @@ function onTicker(d) {
   el.style.color = chg >= 0 ? 'var(--up)' : 'var(--down)'
   el.style.background = chg >= 0 ? '#d1fae5' : '#fee2e2'
   document.title = `${fmtPx(+d.c)} ${pair} — Assetworks Exchange`
+  // Host→embed bridge: hand Hippo the exact number the host header shows, so
+  // the parasite's price is literally in sync with the page (its own server
+  // ticks keep flowing as a fallback; an explicit host price wins).
+  tellHippo({ symbol: pair, price: { last: +d.c, lastDisplay: fmtPx(+d.c) } })
+}
+
+// ── host→embed context bridge ───────────────────────────────────────────────
+// The embed listens for strictly-validated `hippo:context` messages on this
+// window. We tell it which pair the trader is looking at (so drafts/research
+// default to it) and forward the live ticker so panel price === header price.
+function tellHippo(msg) {
+  try {
+    window.postMessage({ type: 'hippo:context', ...msg }, location.origin)
+  } catch {
+    /* embed absent or origin quirk — the host never breaks over the parasite */
+  }
 }
 function onDepth(d) {
   const asks = d.asks.slice(0, 11).reverse()

@@ -214,6 +214,12 @@
       s.dataset.hippoGateway = real ? realGw : 'http://localhost:8787'
       s.dataset.hippoTheme = pref('theme', 'dark')
       s.dataset.hippoLocale = pref('locale', 'en')
+      // Page context: the market this URL shows (?pair=ETH/USDT) — drafts,
+      // research and the live price key off it. Server price ticks stay on as
+      // the fallback; the host bridge (exchange.js tellHippo) overrides with
+      // the exact header price, so panel and page always agree.
+      s.dataset.hippoSymbol = new URLSearchParams(location.search).get('pair') || 'BTC/USDT'
+      s.dataset.hippoPriceSource = pref('priceSource', 'server')
       if (pref('open', '') === '1') s.dataset.hippoOpen = 'auto'
       const label = pref('label', ''); if (label) s.dataset.hippoLabel = label
       // Cloud + real gateway: mint sessions through the demo token endpoint
