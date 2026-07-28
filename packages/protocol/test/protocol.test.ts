@@ -276,3 +276,115 @@ describe('Phase B — learned_memory frame + clearLearnedMemory (additive)', () 
     expect(up.success).toBe(true)
   })
 })
+
+describe('interactive order card — order_draft / price_tick / draft_action / context (additive)', () => {
+  it('parses a full perp order_draft with control bounds', () => {
+    const r = Frame.safeParse({
+      ...base,
+      type: 'order_draft',
+      draftId: 'd_1',
+      capability: 'futures_perp',
+      title: 'Set up your LONG BTC order',
+      instrument: 'BTC/USDT',
+      symbols: ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
+      side: 'buy',
+      direction: 'long',
+      size: '0.5',
+      sizeAsset: 'BTC',
+      orderType: 'market',
+      leverage: 10,
+      maxLeverage: 50,
+      marginMode: 'isolated',
+      marginModes: ['isolated', 'cross'],
+      cta: 'Review order →',
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('spot draft needs no perp fields; size defaults empty (trader fills it)', () => {
+    const r = Frame.safeParse({
+      ...base,
+      type: 'order_draft',
+      draftId: 'd_2',
+      capability: 'spot',
+      title: 'Set up your BUY BTC order',
+      instrument: 'BTC/USDT',
+      side: 'buy',
+      sizeAsset: 'BTC',
+      cta: 'Review order →',
+    })
+    expect(r.success && r.data.type === 'order_draft' && r.data.size).toBe('')
+  })
+
+  it('parses a price_tick and rejects a non-numeric last', () => {
+    const ok = Frame.safeParse({
+      ...base,
+      type: 'price_tick',
+      symbol: 'BTC/USDT',
+      last: 63631.63,
+      lastDisplay: '63,631.63',
+      asOfIso: '2026-07-28T09:00:00.000Z',
+    })
+    expect(ok.success).toBe(true)
+    const bad = Frame.safeParse({
+      ...base,
+      type: 'price_tick',
+      symbol: 'BTC/USDT',
+      last: '63631',
+      lastDisplay: '63,631',
+      asOfIso: '2026-07-28T09:00:00.000Z',
+    })
+    expect(bad.success).toBe(false)
+  })
+
+  it('draft_action submit carries edited params; dismiss needs none', () => {
+    const submit = Uplink.safeParse({
+      v: 1,
+      sessionId: 's_1',
+      ts: 1_752_480_000_000,
+      kind: 'draft_action',
+      draftId: 'd_1',
+      action: 'submit',
+      params: {
+        instrument: 'ETH/USDT',
+        orderType: 'limit',
+        size: '1.5',
+        limitPrice: '1850',
+        leverage: 20,
+        marginMode: 'cross',
+      },
+    })
+    expect(submit.success).toBe(true)
+    const dismiss = Uplink.safeParse({
+      v: 1,
+      sessionId: 's_1',
+      ts: 1_752_480_000_000,
+      kind: 'draft_action',
+      draftId: 'd_1',
+      action: 'dismiss',
+    })
+    expect(dismiss.success).toBe(true)
+    // empty size on submit params is rejected — the control enforces it too
+    const empty = Uplink.safeParse({
+      v: 1,
+      sessionId: 's_1',
+      ts: 1_752_480_000_000,
+      kind: 'draft_action',
+      draftId: 'd_1',
+      action: 'submit',
+      params: { instrument: 'BTC/USDT', orderType: 'market', size: '' },
+    })
+    expect(empty.success).toBe(false)
+  })
+
+  it('context uplink carries the host page symbol', () => {
+    const up = Uplink.safeParse({
+      v: 1,
+      sessionId: 's_1',
+      ts: 1_752_480_000_000,
+      kind: 'context',
+      symbol: 'ETH/USDT',
+    })
+    expect(up.success).toBe(true)
+  })
+})
