@@ -8,6 +8,7 @@
 import { useState } from 'preact/hooks'
 import { ApiError, get, put } from '../api.js'
 import { Busy, ErrorBanner, toast, useLoad } from '../ui.js'
+import { factLabel, type LearnedFact } from './users.js'
 
 type Scope = 'global' | 'host' | 'user' | 'session'
 type Doc = { body: string; updatedAt: number }
@@ -31,7 +32,8 @@ const SCOPES: { key: Scope; label: string; blurb: string }[] = [
   {
     key: 'session',
     label: 'Session (inspector)',
-    blurb: 'Read-only: the exact composed memory block that was sent for a session.',
+    blurb:
+      'Read-only: the exact composed memory block that was sent for a session, plus what was auto-learned in it.',
   },
 ]
 
@@ -57,6 +59,7 @@ export function MemoryConfigPage() {
   const [userId, setUserId] = useState('')
   const [sessionId, setSessionId] = useState('')
   const [body, setBody] = useState('')
+  const [sessionFacts, setSessionFacts] = useState<LearnedFact[]>([])
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -68,6 +71,13 @@ export function MemoryConfigPage() {
     if (!path) {
       setLoadedFrom(null)
       return
+    }
+    // The session inspector also lists what was auto-learned this session —
+    // read-only, degrades to an empty list if the facts fetch fails.
+    if (readOnly) {
+      void get<LearnedFact[]>(`/v1/learned-facts/session/${encodeURIComponent(sessionId.trim())}`)
+        .then((rows) => setSessionFacts(Array.isArray(rows) ? rows : []))
+        .catch(() => setSessionFacts([]))
     }
     // Session returns { composed, … }; the editable scopes return { body }.
     const doc = await get<Doc & { composed?: string }>(path)
@@ -177,6 +187,39 @@ export function MemoryConfigPage() {
             readOnly
           />
           <span class="dim mono">{body.length} chars · exactly what was sent to the model</span>
+
+          <h2>Learned this session</h2>
+          {sessionFacts.length === 0 ? (
+            <p class="dim">
+              No facts were auto-learned in this session — the composed block above is everything
+              that was sent.
+            </p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Fact</th>
+                  <th>Value</th>
+                  <th>Source</th>
+                  <th>Last observed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessionFacts.map((f) => (
+                  <tr key={`${f.type}:${f.value}`}>
+                    <td>{factLabel(f.type)}</td>
+                    <td class="mono">{f.value}</td>
+                    <td>
+                      <span class={`badge ${f.source === 'admin' ? 'plan' : 'none'}`}>
+                        {f.source}
+                      </span>
+                    </td>
+                    <td class="dim">{new Date(f.updatedAt).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       ) : (
         <form onSubmit={save} class="stack">

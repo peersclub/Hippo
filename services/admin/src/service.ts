@@ -9,6 +9,8 @@
  *   GET /v1/users    POST /v1/users/:partnerId/:userId/block|unblock
  *   GET /v1/memory   GET/PUT /v1/memory/:partnerId/:userId
  *   POST /v1/memory/:partnerId/:userId/clear DELETE .../purge
+ *   GET/DELETE /v1/learned-facts/user/:partnerId/:userId
+ *   GET /v1/learned-facts/session/:sessionId
  *   GET /v1/metrics  GET /v1/audit           GET /health
  *
  * Memory data stays owned by services/memory — this service proxies its
@@ -617,6 +619,65 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       return reply.code(502).send({ error: 'memory service unreachable' })
     }
   })
+
+  // ── auto-learned facts (proxied; memory service owns the data) ──────────
+  // The provenance-tracked facts Hippo auto-learns per trader (scope user) or
+  // per session — the operator's window into what the model is being told.
+  // Same owner-or-operator gate + 502 discipline as the /v1/memory proxies;
+  // the purge is destructive and therefore audited.
+  app.get<{ Params: UserParams }>(
+    '/v1/learned-facts/user/:partnerId/:userId',
+    async (req, reply) => {
+      const op = operator(req, reply)
+      if (!op) return reply
+      const { partnerId, userId } = req.params
+      try {
+        const res = await memoryFetch(
+          `/v1/scope/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/facts`,
+        )
+        return reply.code(res.status).send(await res.json())
+      } catch {
+        return reply.code(502).send({ error: 'memory service unreachable' })
+      }
+    },
+  )
+
+  app.delete<{ Params: UserParams }>(
+    '/v1/learned-facts/user/:partnerId/:userId',
+    async (req, reply) => {
+      const op = operator(req, reply)
+      if (!op) return reply
+      const { partnerId, userId } = req.params
+      try {
+        const res = await memoryFetch(
+          `/v1/scope/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/facts`,
+          { method: 'DELETE' },
+        )
+        void record(op, 'learned_facts.purge', `${partnerId}/${userId}`, { partnerId, userId })
+        return reply.code(res.status).send(await res.json())
+      } catch {
+        return reply.code(502).send({ error: 'memory service unreachable' })
+      }
+    },
+  )
+
+  // Session facts are read-only here: sessions are ephemeral and the clear
+  // path belongs to the trader's own settings surface, not the panel.
+  app.get<{ Params: { sessionId: string } }>(
+    '/v1/learned-facts/session/:sessionId',
+    async (req, reply) => {
+      const op = operator(req, reply)
+      if (!op) return reply
+      try {
+        const res = await memoryFetch(
+          `/v1/scope/session/${encodeURIComponent(req.params.sessionId)}/facts`,
+        )
+        return reply.code(res.status).send(await res.json())
+      } catch {
+        return reply.code(502).send({ error: 'memory service unreachable' })
+      }
+    },
+  )
 
   // ── memory-config: freeform scope documents (super-admin only) ─────────
   // The layered memory a super-admin curates (global/host/user) that the

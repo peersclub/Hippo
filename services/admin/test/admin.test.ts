@@ -866,6 +866,126 @@ describe('session cookie Secure flag', () => {
   })
 })
 
+describe('learned-facts proxy (auto-learned memory)', () => {
+  const stubFacts = [
+    {
+      type: 'followed_asset',
+      value: 'BTC',
+      confidence: 0.9,
+      source: 'auto',
+      createdAt: 1,
+      updatedAt: 2,
+    },
+  ]
+
+  it('GET user + session facts proxy to the memory service with the internal token', async () => {
+    const seen: Array<{ url: string; method: string; token: string | null }> = []
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      seen.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        token: headers.get('x-hippo-internal-token'),
+      })
+      return new Response(JSON.stringify(stubFacts), { status: 200 })
+    }) as typeof fetch
+
+    const { app } = await testAdmin({ fetchImpl, internalToken: 'itok', memoryUrl: 'http://mem' })
+    const cookie = await login(app)
+
+    const user = await app.inject({
+      method: 'GET',
+      url: '/v1/learned-facts/user/koinbx-dev/u1',
+      headers: { cookie },
+    })
+    expect(user.statusCode).toBe(200)
+    expect(user.json()).toEqual(stubFacts)
+
+    const session = await app.inject({
+      method: 'GET',
+      url: '/v1/learned-facts/session/s_1',
+      headers: { cookie },
+    })
+    expect(session.statusCode).toBe(200)
+    expect(session.json()).toEqual(stubFacts)
+
+    expect(seen.map((s) => s.url)).toEqual([
+      'http://mem/v1/scope/user/koinbx-dev/u1/facts',
+      'http://mem/v1/scope/session/s_1/facts',
+    ])
+    expect(seen.every((s) => s.token === 'itok' && s.method === 'GET')).toBe(true)
+    await app.close()
+  })
+
+  it('DELETE clears user facts, audits learned_facts.purge, and stays bodyless', async () => {
+    const seen: Array<{ url: string; method: string; contentType: string | null }> = []
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      seen.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        contentType: headers.get('content-type'),
+      })
+      return new Response('{"cleared":3}', { status: 200 })
+    }) as typeof fetch
+
+    const { app, audit } = await testAdmin({ fetchImpl, memoryUrl: 'http://mem' })
+    const cookie = await login(app)
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/learned-facts/user/koinbx-dev/u1',
+      headers: { cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ cleared: 3 })
+    expect(seen[0]?.url).toBe('http://mem/v1/scope/user/koinbx-dev/u1/facts')
+    expect(seen[0]?.method).toBe('DELETE')
+    // Regression guard: a bodyless DELETE must NOT claim a JSON content-type
+    // (Fastify 400s an empty body that claims JSON).
+    expect(seen[0]?.contentType).toBeNull()
+
+    const purge = (await audit.list({})).rows.find((r) => r.action === 'learned_facts.purge')
+    expect(purge).toMatchObject({
+      target: 'koinbx-dev/u1',
+      detail: { partnerId: 'koinbx-dev', userId: 'u1' },
+    })
+    await app.close()
+  })
+
+  it('401s every learned-facts route without a session', async () => {
+    const { app } = await testAdmin()
+    for (const [method, url] of [
+      ['GET', '/v1/learned-facts/user/koinbx-dev/u1'],
+      ['DELETE', '/v1/learned-facts/user/koinbx-dev/u1'],
+      ['GET', '/v1/learned-facts/session/s_1'],
+    ] as const) {
+      const res = await app.inject({ method, url })
+      expect(res.statusCode, `${method} ${url}`).toBe(401)
+    }
+    await app.close()
+  })
+
+  it('returns 502 "memory service unreachable" when the facts proxy fetch rejects', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('memory down')
+    }) as typeof fetch
+    const { app } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+
+    for (const [method, url] of [
+      ['GET', '/v1/learned-facts/user/koinbx-dev/u1'],
+      ['DELETE', '/v1/learned-facts/user/koinbx-dev/u1'],
+      ['GET', '/v1/learned-facts/session/s_1'],
+    ] as const) {
+      const res = await app.inject({ method, url, headers: { cookie } })
+      expect(res.statusCode, `${method} ${url}`).toBe(502)
+      expect(res.json().error, `${method} ${url}`).toBe('memory service unreachable')
+    }
+    await app.close()
+  })
+})
+
 describe('memory-config (super-admin scope documents)', () => {
   it('owner can PUT/GET a global doc; proxies with the internal token and audits the level', async () => {
     const seen: { url: string; init?: RequestInit }[] = []

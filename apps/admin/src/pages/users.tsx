@@ -14,6 +14,26 @@ type Persona = {
 
 type PersonaRow = { partnerId: string; userId: string; persona: Persona }
 
+/** Auto-learned fact (mirrors the memory service's scope-store shape). */
+export type LearnedFact = {
+  type: string
+  value: string
+  confidence: number
+  source: 'auto' | 'admin'
+  createdAt: number
+  updatedAt: number
+}
+
+/** Human labels for the allowlisted fact types; unknown types pass through. */
+const FACT_LABEL: Record<string, string> = {
+  followed_asset: 'Followed asset',
+  instrument_pref: 'Instrument preference',
+  leverage_pref: 'Leverage preference',
+  experience_level: 'Experience level',
+  answer_style: 'Answer style',
+}
+export const factLabel = (type: string) => FACT_LABEL[type] ?? type
+
 const fmt = (ts: number) => (ts ? new Date(ts).toLocaleString() : '—')
 
 /**
@@ -236,9 +256,17 @@ export function UsersPage({ mode }: { mode: 'users' | 'memory' }) {
 export function UserDetailPage({ partnerId, userId }: { partnerId: string; userId: string }) {
   const [user, setUser] = useState<(UserRecord & { persona: Persona | null }) | null>(null)
   const [persona, setPersona] = useState<Persona | null>(null)
+  const [facts, setFacts] = useState<LearnedFact[]>([])
   const [notFoundUser, setNotFoundUser] = useState(false)
 
   const state = useLoad(async () => {
+    // Durable auto-learned facts ride alongside the persona; a facts fetch
+    // failure degrades to an empty list, never blanks the whole page.
+    void get<LearnedFact[]>(
+      `/v1/learned-facts/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
+    )
+      .then((rows) => setFacts(Array.isArray(rows) ? rows : []))
+      .catch(() => setFacts([]))
     // The user row exists only for authenticated users; memory may exist for
     // anonymous session keys too — fetch both, render what's there.
     try {
@@ -299,6 +327,25 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
     try {
       await del(`/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`)
       toast('Memory record purged')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'purge failed', 'err')
+    }
+  }
+
+  async function purgeLearnedFacts() {
+    const ok = await confirmAction({
+      title: 'Purge learned facts',
+      body: 'Every auto-learned fact for this user is deleted — Hippo starts learning from scratch. Persona data and the opt-in choice are untouched.',
+      confirmLabel: 'Purge learned facts',
+      typedPhrase: userId,
+    })
+    if (!ok) return
+    try {
+      const res = await del<{ cleared: number }>(
+        `/v1/learned-facts/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
+      )
+      toast(`Learned facts purged (${res.cleared ?? 0} cleared)`)
       state.retry()
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'purge failed', 'err')
@@ -426,6 +473,46 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
         </>
       ) : (
         <div class="dim">No memory held for this user.</div>
+      )}
+
+      <h2>Learned facts</h2>
+      {facts.length === 0 ? (
+        <div class="dim">
+          Nothing learned yet — durable facts appear here as Hippo picks up this trader's
+          preferences from conversations.
+        </div>
+      ) : (
+        <>
+          <table>
+            <thead>
+              <tr>
+                <th>Fact</th>
+                <th>Value</th>
+                <th>Source</th>
+                <th>Last observed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {facts.map((f) => (
+                <tr key={`${f.type}:${f.value}`}>
+                  <td>{factLabel(f.type)}</td>
+                  <td class="mono">{f.value}</td>
+                  <td>
+                    <span class={`badge ${f.source === 'admin' ? 'plan' : 'none'}`}>
+                      {f.source}
+                    </span>
+                  </td>
+                  <td class="dim">{fmt(f.updatedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div class="actions" style="margin-top:14px">
+            <button class="btn danger sm" type="button" onClick={purgeLearnedFacts}>
+              Purge learned facts
+            </button>
+          </div>
+        </>
       )}
     </>
   )
