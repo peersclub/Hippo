@@ -26,7 +26,7 @@ import {
 import Fastify from 'fastify'
 import { createOrchestrator } from './orchestrator/index.js'
 import { createIntelligenceClient } from './orchestrator/intelligence.js'
-import { createMarketClient } from './orchestrator/market.js'
+import { createMarketClient, normalizeSymbol } from './orchestrator/market.js'
 import { createMemoryClient } from './orchestrator/memory.js'
 import { createSeamClient } from './orchestrator/seam.js'
 import { authenticate, createSessionStore, type SessionStore } from './plugins/auth.js'
@@ -154,7 +154,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
   }
 
   app.post('/v1/session', rateLimited, async (req, reply) => {
-    const body = (req.body ?? {}) as { partnerKey?: string }
+    const body = (req.body ?? {}) as { partnerKey?: string; symbol?: unknown }
     const auth = await authenticate(partners, req.headers.authorization, body.partnerKey, devMode)
     if (!auth.ok) {
       reply.code(401)
@@ -203,6 +203,11 @@ export async function buildApp(opts: GatewayOptions = {}) {
       ? { ...auth.partner, entitlements: plan.entitlements }
       : auth.partner
     const session = sessions.create(partnerWithEntitlements, auth.venueUserId)
+    // Host page's market ("BTC/USDT") — the session's default symbol for
+    // research, order drafts and price ticks. Invalid values are ignored
+    // silently (context is a hint, never a command).
+    const pageSymbol = normalizeSymbol(body.symbol)
+    if (pageSymbol) session.symbol = pageSymbol
     const userKey = auth.venueUserId ?? session.id
     telemetry.recordPartnerUser(auth.partner.partnerId, userKey)
     // Durable mirror (fire-and-forget) — feeds boot hydration + admin counts.

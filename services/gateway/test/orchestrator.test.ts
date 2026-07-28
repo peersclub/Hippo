@@ -12,6 +12,7 @@ import {
   stubIntel,
   stubMemory,
   stubSeam,
+  submitDraft,
   TEST_INTERNAL_TOKEN,
   testApp,
   ticketFixture,
@@ -389,7 +390,9 @@ describe('orchestrator: action route', () => {
     const { app, sessions } = await testApp({ intel: buyIntent, seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc at market' })
-    await waitForJournal(session, (t) => t.includes('order_ticket'))
+    // Draft era: the action turn emits an editable order_draft; submitting it
+    // (prefill echoed back) runs the classic prepare path.
+    await submitDraft(app, session)
 
     // The seam received the canonical prepare request…
     expect(seam.prepares[0]).toMatchObject({
@@ -417,8 +420,7 @@ describe('orchestrator: action route', () => {
     const { app, sessions, telemetry } = await testApp({ intel: buyIntent, seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-    await waitForJournal(session, (t) => t.includes('order_ticket'))
-    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    const { ticket } = await submitDraft(app, session)
 
     await sendTurn(app, session.id, {
       kind: 'ticket_action',
@@ -460,8 +462,7 @@ describe('orchestrator: action route', () => {
     const { app, sessions } = await testApp({ intel: buyIntent, seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-    await waitForJournal(session, (t) => t.includes('order_ticket'))
-    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    const { ticket } = await submitDraft(app, session)
 
     await sendTurn(app, session.id, {
       kind: 'ticket_action',
@@ -488,10 +489,24 @@ describe('orchestrator: action route', () => {
     await app.close()
   })
 
-  it('seam down → honest rejection ticket, nothing sent to the venue', async () => {
+  it('seam down → the draft still opens (spot fallback), submit → honest rejection', async () => {
     const { app, sessions } = await testApp({ intel: buyIntent, seam: deadSeam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    // Capabilities are down too — the draft degrades to spot, no perp bounds.
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    const draft = frameOfType<{ draftId: string; capability: string; maxLeverage?: number }>(
+      session,
+      'order_draft',
+    )
+    expect(draft.capability).toBe('spot')
+    expect(draft.maxLeverage).toBeUndefined()
+    await sendTurn(app, session.id, {
+      kind: 'draft_action',
+      draftId: draft.draftId,
+      action: 'submit',
+      params: { instrument: 'BTC/USDT', orderType: 'market', size: '0.05' },
+    })
     const types = await waitForJournal(session, (t) => t.includes('rejection_ticket'))
     expect(types).not.toContain('order_ticket')
     await app.close()
@@ -600,11 +615,13 @@ describe('orchestrator: degraded fallback (intelligence down)', () => {
     await app.close()
   })
 
-  it('regex fallback still routes "buy 0.05 btc" to a live order ticket', async () => {
+  it('regex fallback still routes "buy 0.05 btc" to a live draft → ticket', async () => {
     const { app, sessions } = await testApp({ intel: deadIntel })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-    const types = await waitForJournal(session, (t) => t.includes('order_ticket'))
+    // Orders stay fully live in degraded mode — the draft flow included.
+    await submitDraft(app, session)
+    const types = session.journal.after(0).map((e) => e.frame.type)
     expect(types).toContain('banner')
     const ticket = frameOfType<{ sideLabel: string }>(session, 'order_ticket')
     expect(ticket.sideLabel).toBe('BUY · MKT')
@@ -770,8 +787,7 @@ describe('orchestrator: venue-event backstop + post-confirm cancel truth', () =>
     const gw = await testApp({ intel: buyIntent(), seam })
     const session = await createSession(gw.app, gw.sessions)
     await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-    await waitForJournal(session, (t) => t.includes('order_ticket'))
-    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    const { ticket } = await submitDraft(gw.app, session)
     await sendTurn(gw.app, session.id, {
       kind: 'ticket_action',
       ticketId: ticket.ticketId,
@@ -869,8 +885,18 @@ describe('orchestrator: honest order journey (stage + side + order-shaped waitin
     const { app, sessions } = await testApp({ intel: buyIntent(), seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc at market' })
-    const types = await waitForJournal(session, (t) => t.includes('order_ticket'))
-    expect(types).toEqual(['user_echo', 'thinking', 'interpretation', 'skeleton', 'order_ticket'])
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    expect(session.journal.after(0).map((e) => e.frame.type)).toEqual([
+      'user_echo',
+      'thinking',
+      'interpretation',
+      'skeleton',
+      'order_draft',
+    ])
+    // Submitting the draft re-enters the classic flow: skeleton → ticket.
+    await submitDraft(app, session)
+    const types = session.journal.after(0).map((e) => e.frame.type)
+    expect(types.slice(-2)).toEqual(['skeleton', 'order_ticket'])
     const thinking = frameOfType<{ lines: string[] }>(session, 'thinking')
     expect(thinking.lines[0]).toBe('Constructing order…')
     expect(thinking.lines[1]).toContain('Checking balance on')
@@ -884,8 +910,7 @@ describe('orchestrator: honest order journey (stage + side + order-shaped waitin
     const { app, sessions } = await testApp({ intel: buyIntent(), seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-    await waitForJournal(session, (t) => t.includes('order_ticket'))
-    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    const { ticket } = await submitDraft(app, session)
     await sendTurn(app, session.id, {
       kind: 'ticket_action',
       ticketId: ticket.ticketId,
@@ -915,8 +940,7 @@ describe('orchestrator: honest order journey (stage + side + order-shaped waitin
     const { app, sessions } = await testApp({ intel: buyIntent(), seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-    await waitForJournal(session, (t) => t.includes('order_ticket'))
-    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    const { ticket } = await submitDraft(app, session)
     await sendTurn(app, session.id, {
       kind: 'ticket_action',
       ticketId: ticket.ticketId,
@@ -963,8 +987,7 @@ describe('orchestrator: honest order journey (stage + side + order-shaped waitin
     const { app, sessions } = await testApp({ intel: buyIntent(), seam })
     const session = await createSession(app, sessions)
     await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-    await waitForJournal(session, (t) => t.includes('order_ticket'))
-    const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+    const { ticket } = await submitDraft(app, session)
     await sendTurn(app, session.id, {
       kind: 'ticket_action',
       ticketId: ticket.ticketId,
@@ -993,8 +1016,7 @@ describe('orchestrator: honest order journey (stage + side + order-shaped waitin
       const { app, sessions } = await testApp({ intel: buyIntent(), seam })
       const session = await createSession(app, sessions)
       await sendTurn(app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
-      await waitForJournal(session, (t) => t.includes('order_ticket'))
-      const ticket = frameOfType<{ ticketId: string }>(session, 'order_ticket')
+      const { ticket } = await submitDraft(app, session)
       await sendTurn(app, session.id, {
         kind: 'ticket_action',
         ticketId: ticket.ticketId,
@@ -1364,8 +1386,8 @@ describe('orchestrator: durable memory (Phase B — promotion, cross-session, cl
     await until(
       () =>
         (memory.learnedFacts.get(`session:${session.id}`)?.length ?? 0) === 0 &&
-        (memory.learnedFacts.get(`user:${session.partner.partnerId}:${session.id}`)?.length ?? 0) ===
-          0,
+        (memory.learnedFacts.get(`user:${session.partner.partnerId}:${session.id}`)?.length ??
+          0) === 0,
     )
     const frame = frameOfType<{ facts: unknown[] }>(session, 'learned_memory')
     expect(frame.facts).toEqual([])
@@ -1478,7 +1500,9 @@ describe('orchestrator: auto-learning opt-OUT (Phase C — trader consent)', () 
     await waitForJournal(session, (t) => t.includes('learned_memory'))
     await until(() => memory.personas.get(pKey)?.learnOptOut === true)
     expect(memory.learnedFacts.get(`session:${session.id}`)).toBeUndefined()
-    expect(memory.learnedFacts.get(`user:${session.partner.partnerId}:${session.id}`)).toBeUndefined()
+    expect(
+      memory.learnedFacts.get(`user:${session.partner.partnerId}:${session.id}`),
+    ).toBeUndefined()
     const off = learnedFrames(session).at(-1)
     expect(off?.optIn).toBe(false)
     expect(off?.facts).toEqual([])

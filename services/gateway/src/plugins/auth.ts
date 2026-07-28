@@ -17,6 +17,7 @@
  * surface — see Build Plan/10 BE Architecture §4.
  */
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
+import type { Frame } from '@hippo/protocol'
 import { devPartner, type PartnerRecord, type PartnerStore } from '@hippo/stores'
 import { createRedisClient, type RedisClient } from './redis.js'
 import { InMemoryJournal, type Journal, type JournalEntry, RedisJournal } from './sse.js'
@@ -56,6 +57,18 @@ export type TicketQuote = {
   fillTimer?: ReturnType<typeof setTimeout>
 }
 
+/** Fixed (non-editable) fields of a pending interactive order draft — what
+ * the trader CANNOT change on the card. Submit correlates the edited params
+ * back against these; everything editable arrives on the draft_action uplink
+ * and is re-validated against venue capabilities. */
+export type DraftFields = {
+  capability: 'spot' | 'futures_perp'
+  side: 'buy' | 'sell'
+  direction?: 'long' | 'short'
+  /** The originating turn text — reused as the rejection "Try again" action. */
+  userText: string
+}
+
 export type Session = {
   id: string
   partner: PartnerConfig
@@ -64,13 +77,22 @@ export type Session = {
   seq: number
   journal: Journal
   live: ((entry: JournalEntry) => void) | null
+  /** Transient frame writer (set by streamSession): delivers to the live SSE
+   * socket ONLY — no journal append, no `id:` line — for frames that must
+   * never appear in a resume replay (price_tick). Null when disconnected. */
+  liveTransient?: ((frame: Frame) => void) | null
   expiresAt: number
   /** Preferred language from settings uplinks; passed to the intent service. */
   language?: string
+  /** The host page's market ("BTC/USDT") from session mint or a context
+   * uplink — the default symbol for research, drafts and price ticks. */
+  symbol?: string
   /** Degraded banner is emitted once per session per degradation episode. */
   degradedBannerShown: boolean
   /** Prepared tickets awaiting confirm/cancel. */
   tickets: Map<string, TicketQuote>
+  /** Pending interactive order drafts awaiting submit/dismiss (bounded). */
+  drafts: Map<string, DraftFields>
   /** Force-close the live SSE socket (set by streamSession) — admin revoke. */
   closeStream?: (() => void) | null
 }
@@ -135,6 +157,7 @@ export class InMemorySessionStore implements SessionStore {
       expiresAt: Date.now() + SESSION_TTL_MS,
       degradedBannerShown: false,
       tickets: new Map(),
+      drafts: new Map(),
     }
     this.sessions.set(session.id, session)
     return session
@@ -249,6 +272,7 @@ export class RedisSessionStore implements SessionStore {
       expiresAt: Date.now() + SESSION_TTL_MS,
       degradedBannerShown: false,
       tickets: new Map(),
+      drafts: new Map(),
     }
     this.local.set(id, session)
     this.persist(session)
@@ -296,6 +320,7 @@ export class RedisSessionStore implements SessionStore {
       ...(meta.language ? { language: meta.language } : {}),
       degradedBannerShown: Boolean(meta.degradedBannerShown),
       tickets: new Map(),
+      drafts: new Map(),
     }
     this.local.set(id, session)
     this.persist(session)
