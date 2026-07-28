@@ -45,7 +45,7 @@
   <div class="sub">How to test the full product — a conversational trading parasite embedded in a real exchange host, plus its operator admin and partner portal. Everything below is verified against the running local stack.</div>
   <div class="toc">
     <a href="#model">The model</a><a href="#run">Run it</a><a href="#where">Where to click</a>
-    <a href="#paths">Order paths</a><a href="#matrix">Order matrix</a><a href="#surfaces">Confirm surfaces</a>
+    <a href="#paths">Order paths</a><a href="#matrix">Order matrix</a><a href="#prompts">Order prompts</a><a href="#surfaces">Confirm surfaces</a>
     <a href="#ai">Conversational AI</a><a href="#memory">Layered memory</a><a href="#resilience">Resilience</a><a href="#admin">Admin</a><a href="#portal">Portal</a>
   </div>
 
@@ -103,9 +103,25 @@ pnpm dev</pre>
     <tr><td>Partial fill</td><td>Venue drawer → enable Partial fills, then a market order</td><td>Fills in two steps: PARTIAL (half) → SETTLED; the parasite lifecycle shows both</td></tr>
     <tr><td>Perp open</td><td>Perp · long/short · 5–10x · 0.1 BTC</td><td>Position with entry, leverage, margin locked, and a liquidation price</td></tr>
     <tr><td>Perp close</td><td>Opposite direction, reduce-only</td><td>Position clears; realized PnL credited to USDT, margin released</td></tr>
-    <tr><td>Portfolio read</td><td>Ask Hippo “what are my positions?”</td><td>Merges spot balances + perp positions + open orders from the host</td></tr>
+    <tr><td>Portfolio read</td><td>Ask Hippo “what are my positions?”</td><td>Your open perp positions + open orders from the host. Spot holdings are balances, not positions — they live in the Balances tab and aren’t counted as positions.</td></tr>
   </table>
   <div class="gotcha"><b>Non-obvious, by design:</b> a <b>market order is not instant</b> — it rests ~2.5–3s so the parasite's reconciler (polls every 2s) can observe it fill. <b>Liquidation price is display-only</b> — the engine never force-liquidates. The <b>balance figure includes reserved funds</b>, so it won't visibly drop when a resting/perp order locks margin.</div>
+
+  <h2 id="prompts">What to say to place each order <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— talk to Hippo; every order returns a ticket to confirm</span></h2>
+  <p>Hippo parses natural order phrasing into a ticket you confirm — leverage defaults to <code>10x</code> and margin to <code>isolated</code> when omitted, and any live symbol works (<code>BTC</code> / <code>ETH</code> / <code>SOL</code>). The numbers below are just examples.</p>
+  <table>
+    <tr><th>Order type</th><th>Say to Hippo</th><th>What happens</th></tr>
+    <tr><td>Spot market buy</td><td><code>buy 0.05 BTC</code></td><td>Buys at market — fills instantly, then shows in Positions/Balances</td></tr>
+    <tr><td>Spot market sell</td><td><code>sell 12 SOL</code></td><td>Sells at market</td></tr>
+    <tr><td>Spot limit</td><td><code>buy 0.05 BTC at 30000</code> <span style="color:var(--dim)">— also <code>@30000</code> or <code>limit 30000</code></span></td><td>Rests in Open orders; fills only when price crosses the limit</td></tr>
+    <tr><td>Perp — open long</td><td><code>long 0.5 BTC 10x</code></td><td>Opens a 10× isolated long (add <code>isolated</code>/<code>cross</code> to be explicit)</td></tr>
+    <tr><td>Perp — open short</td><td><code>short 1 ETH 20x cross</code></td><td>Opens a 20× cross-margin short</td></tr>
+    <tr><td>Perp — limit</td><td><code>long 0.5 BTC 10x @ 60000</code></td><td>Resting perp order at the limit price</td></tr>
+    <tr><td>Perp — close</td><td><code>close long 0.5 BTC</code> · <code>close short 1 ETH</code></td><td>Reduce-only close of an open position (needs one open)</td></tr>
+    <tr><td>Positions &amp; P&amp;L</td><td><code>what are my positions?</code></td><td>Your open perp positions + open orders</td></tr>
+    <tr><td>Cancel a resting order</td><td><span style="color:var(--dim)">tap <b>Cancel</b> on the order row (UI, not a prompt)</span></td><td>Cancels a working/limit order; reserved funds released</td></tr>
+  </table>
+  <div class="gotcha"><b>Grammar it recognizes:</b> <code>buy|sell &lt;qty&gt; &lt;asset&gt; [at market | at/@ &lt;price&gt; | limit &lt;price&gt;]</code> for spot; <code>[open|close] long|short &lt;qty&gt; &lt;asset&gt; [&lt;lev&gt;x] [isolated|cross] [reduce] [@ &lt;price&gt;]</code> for perps. Omit leverage → <code>10x</code>, omit margin → <code>isolated</code>. All verified live.</div>
 
   <h2 id="surfaces">Confirm surfaces — the admin switch <span class="badge para">Open Decision #6</span></h2>
   <p>Open the <b>gear → venue admin drawer</b> on the :4001 host and flip <b>Confirm surface</b> (it writes host-venue <code>/admin/config</code>; the parasite reads it live at confirm time — no restart). In local dev this endpoint is unauthenticated.</p>
