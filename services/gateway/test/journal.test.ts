@@ -54,7 +54,7 @@ describe('SSE resume (real socket)', () => {
     if (!reader) throw new Error('no body stream')
     const decoder = new TextDecoder()
     let buffer = ''
-    while ((buffer.match(/^data: /gm) ?? []).length < 3) {
+    while ((buffer.match(/"pulse"/g) ?? []).length < 3) {
       const { value, done } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
@@ -64,7 +64,11 @@ describe('SSE resume (real socket)', () => {
     const ids = [...buffer.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1]))
     expect(ids).toEqual([3, 4, 5])
 
-    const frames = [...buffer.matchAll(/^data: (.+)$/gm)].map((m) => JSON.parse(m[1] as string))
+    // Live transient frames (price_tick) may interleave on the socket but
+    // NEVER carry an id and never appear in the replayed journal window.
+    const frames = [...buffer.matchAll(/^data: (.+)$/gm)]
+      .map((m) => JSON.parse(m[1] as string))
+      .filter((f) => f.type !== 'price_tick')
     expect(frames.map((f) => f.tag)).toEqual(['· frame 3', '· frame 4', '· frame 5'])
     for (const frame of frames) expect(Frame.safeParse(frame).success).toBe(true)
 

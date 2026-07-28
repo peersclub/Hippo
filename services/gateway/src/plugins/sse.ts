@@ -161,6 +161,30 @@ export function createEmitter(opts: { strict: boolean; log: EmitterLog }): EmitF
   }
 }
 
+/**
+ * Transient frame delivery — the journal-BYPASSING path for frames that are
+ * transient by contract (price_tick). The frame is envelope-stamped and
+ * protocol-validated like any other, but it:
+ *   - is NEVER appended to the frame journal (so a Last-Event-ID resume can
+ *     never replay it — hundreds of ticks must not bloat the ring), and
+ *   - is written to the live SSE socket WITHOUT an `id:` line, so it never
+ *     advances the client's Last-Event-ID (a reconnect resumes from the last
+ *     JOURNALED frame; the next tick simply arrives live).
+ * No connected socket → dropped silently (a tick has no meaning later).
+ * Returns the validated frame, or null when dropped/invalid.
+ */
+export function emitTransient(session: Session, draft: FrameDraft): Frame | null {
+  const write = session.liveTransient
+  if (!write) return null
+  // Non-journal id namespace (`ft_`): distinct from journaled `f_` ids so a
+  // stray reference can never collide with a resumable frame.
+  const candidate = { v: 1, id: `ft_${session.id}_${Date.now()}`, ts: Date.now(), ...draft }
+  const parsed = Frame.safeParse(candidate)
+  if (!parsed.success) return null
+  write(parsed.data)
+  return parsed.data
+}
+
 const HEARTBEAT_MS = 15_000
 
 /**
@@ -193,6 +217,17 @@ export function streamSession(session: Session, req: FastifyRequest, reply: Fast
     writeEntry(entry)
   }
   session.live = writeEntry
+  // Transient frames (price_tick): straight to the socket, NO `id:` line —
+  // the client's Last-Event-ID stays pinned to the last journaled frame, so
+  // ticks can never appear in (or skew) a resume replay.
+  const writeTransient = (frame: Frame) => {
+    try {
+      reply.raw.write(`data: ${JSON.stringify(frame)}\n\n`)
+    } catch {
+      // Socket raced shut mid-write; the close handler detaches us.
+    }
+  }
+  session.liveTransient = writeTransient
   // Admin revoke needs a way to force this socket shut.
   const closeStream = () => {
     try {
@@ -215,6 +250,7 @@ export function streamSession(session: Session, req: FastifyRequest, reply: Fast
     clearInterval(heartbeat)
     // Only detach if a newer connection hasn't already replaced us.
     if (session.live === writeEntry) session.live = null
+    if (session.liveTransient === writeTransient) session.liveTransient = null
     if (session.closeStream === closeStream) session.closeStream = null
   })
 

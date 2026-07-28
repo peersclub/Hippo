@@ -7,7 +7,7 @@
  *
  *   research/concept → skeleton → intelligence /v1/respond → research_brief
  *   advice           → /v1/respond → advice_decline
- *   action           → market-data quote → order_ticket (seam stub)
+ *   action           → editable order_draft → (draft_action submit) → ticket
  *   portfolio        → positions frame (in-memory demo table, seam stub)
  *   smalltalk/low-χ  → short research_brief-style nudge
  *
@@ -20,8 +20,11 @@
  * market-data-only brief — degraded but truthful. Orders, prices and
  * portfolio never depend on the intelligence service and stay fully live.
  */
-import type { Session } from '../plugins/auth.js'
+import { randomUUID } from 'node:crypto'
+import type { VenueCapabilities } from '@hippo/protocol'
+import type { DraftFields, Session } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft } from '../plugins/sse.js'
+import { emitTransient } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
 import type {
   BriefResponse,
@@ -33,7 +36,7 @@ import type {
 } from './intelligence.js'
 import { guessIntent } from './intelligence.js'
 import type { MarketClient, MarketSnapshot } from './market.js'
-import { asOfDisplay, cacheAgeDisplay, symbolFromText } from './market.js'
+import { asOfDisplay, cacheAgeDisplay, normalizeSymbol, symbolFromText } from './market.js'
 import type { LearnedFact, MemoryClient, Persona } from './memory.js'
 import { composeMemory } from './memory-compose.js'
 import type { SeamClient } from './seam.js'
@@ -49,6 +52,17 @@ const STOPPED = Symbol('stream-stopped')
 
 /** brief frameId → originating turn, kept for REFRESH re-runs (FIFO cap). */
 const BRIEF_TURNS_CAP = 500
+
+/** Pending interactive drafts kept per session (oldest evicted beyond this). */
+const DRAFTS_CAP = 5
+
+/** Fallback market when neither the text nor the host page names one. */
+const DEFAULT_SYMBOL = 'BTC/USDT'
+
+/** Majors offered in the draft's symbol dropdown alongside the session symbol.
+ * There is no venue instrument list exposed to the gateway today — this is a
+ * deliberate, documented simplification until the seam advertises one. */
+const DRAFT_SYMBOL_MAJORS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'] as const
 
 /** Card actions ride the chip_tap uplink with reserved prefixes (v1 keeps
  * the uplink surface frozen). They are commands, not conversation: never
@@ -82,6 +96,14 @@ export type Orchestrator = {
 
 function userKey(session: Session): string {
   return session.venueUserId ?? session.id
+}
+
+/** The session's default market: the host page's symbol (mint body or a
+ * context uplink) when known, else BTC/USDT. Used wherever symbolFromText's
+ * fallback applies — research, drafts and ticks key off the page's market
+ * when the text names no symbol. */
+function defaultSymbol(session: Session): string {
+  return session.symbol ?? DEFAULT_SYMBOL
 }
 
 /** One-line USER-scope summary from the structured persona (opted-in only) —
@@ -432,7 +454,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     replaces?: string,
   ): Promise<void> {
     try {
-      const snap = await market.snapshot(symbolFromText(text))
+      const snap = await market.snapshot(symbolFromText(text, defaultSymbol(session)))
       const frame = emit(session, {
         ...marketOnlyBriefFrame(snap),
         ...(replaces ? { replaces } : {}),
@@ -554,7 +576,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const res = await intel.respond({
         text: origin.text,
         intent: origin.intent,
-        symbol: symbolFromText(origin.text),
+        symbol: symbolFromText(origin.text, defaultSymbol(session)),
       })
       if (res.kind === 'decline') {
         emit(session, declineFrame(res))
@@ -633,6 +655,205 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       cta: `Review & confirm in ${session.partner.venueName} →`,
       footnote: `Hippo prepared this order. ${session.partner.venueName} will ask you to confirm before anything executes.`,
     })
+  }
+
+  // ── interactive order drafts (order_draft → draft_action → prepare) ─────
+
+  /** Keep a pending draft's FIXED fields on the session, bounded (last 5). */
+  function rememberDraft(session: Session, draftId: string, fields: DraftFields): void {
+    session.drafts.set(draftId, fields)
+    while (session.drafts.size > DRAFTS_CAP) {
+      const oldest = session.drafts.keys().next().value
+      if (oldest === undefined) break
+      session.drafts.delete(oldest)
+    }
+  }
+
+  /**
+   * Emit the editable order_draft for an action turn. Prefilled from the
+   * parsed order when the intent service extracted one; defaulted (side buy,
+   * session-symbol instrument, empty size the trader fills in) when it
+   * didn't. Perp bounds (maxLeverage, marginModes) come from the seam's
+   * capabilities — fetched best-effort: a seam hiccup degrades the card to
+   * spot-only rather than blocking the turn.
+   */
+  async function emitOrderDraft(
+    session: Session,
+    order: OrderIntent | undefined,
+    text: string,
+  ): Promise<void> {
+    let caps: VenueCapabilities = { spot: {} }
+    try {
+      caps = await seam.capabilities()
+    } catch (err) {
+      log.warn({ err }, 'seam capabilities unavailable — draft falls back to spot, no perp bounds')
+    }
+    const perp = caps.futures_perp
+
+    // Direction hint for bare actions ("long btc" that parsed as action with
+    // no order object) — the draft should still open perp-shaped.
+    const hintMatch = /\b(long|short)\b/i.exec(text)?.[1]?.toLowerCase()
+    const hint = hintMatch === 'long' || hintMatch === 'short' ? hintMatch : undefined
+    const wantsPerp = order?.capability === 'futures_perp' || (!order && hint !== undefined)
+    const capability: 'spot' | 'futures_perp' = wantsPerp && perp ? 'futures_perp' : 'spot'
+
+    const direction =
+      capability === 'futures_perp'
+        ? (order?.direction ?? hint ?? (order?.side === 'sell' ? 'short' : 'long'))
+        : undefined
+    const side: 'buy' | 'sell' = order?.side ?? (direction === 'short' ? 'sell' : 'buy')
+    const instrument = normalizeSymbol(order?.instrument) ?? defaultSymbol(session)
+    const base = instrument.split('/')[0] ?? instrument
+    // Symbol dropdown: session/parsed symbol first, then the majors, deduped.
+    // No venue instrument list is exposed to the gateway today — a deliberate
+    // simplification until the seam advertises one.
+    const symbols = [...new Set([instrument, ...DRAFT_SYMBOL_MAJORS])]
+    const maxLeverage =
+      capability === 'futures_perp' && perp ? Math.max(1, Math.floor(perp.maxLeverage)) : undefined
+    const marginModes = capability === 'futures_perp' && perp ? perp.marginModes : []
+
+    const draftId = `d_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    rememberDraft(session, draftId, {
+      capability,
+      side,
+      ...(direction ? { direction } : {}),
+      userText: text,
+    })
+
+    emit(session, {
+      type: 'order_draft',
+      draftId,
+      capability,
+      title: `Set up your ${(direction ?? side).toUpperCase()} ${base} order`,
+      instrument,
+      symbols,
+      side,
+      ...(direction ? { direction } : {}),
+      size: order?.size ?? '',
+      sizeAsset: base,
+      orderType: order?.orderType ?? 'market',
+      ...(order?.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
+      ...(maxLeverage !== undefined
+        ? {
+            leverage: Math.min(Math.max(1, Math.floor(order?.leverage ?? 1)), maxLeverage),
+            maxLeverage,
+            marginMode:
+              order?.marginMode && marginModes.includes(order.marginMode)
+                ? order.marginMode
+                : (marginModes[0] ?? 'isolated'),
+            marginModes,
+          }
+        : {}),
+      cta: 'Review order →',
+      footnote: `Nothing is sent to ${session.partner.venueName} until you review and confirm.`,
+    })
+  }
+
+  /**
+   * draft_action submit: the SDK's edited params are UNTRUSTED — everything
+   * is re-validated here against the venue's capabilities (and the seam
+   * validates again downstream; it owns venue truth). A violation emits a
+   * crisp rejection_ticket and the seam is never called; success assembles an
+   * OrderIntent from the draft's fixed fields + the edited params and runs
+   * the EXISTING prepare → order_ticket → confirm → lifecycle flow unchanged.
+   */
+  async function submitDraft(
+    session: Session,
+    draftId: string,
+    fixed: DraftFields,
+    params: {
+      instrument: string
+      orderType: 'market' | 'limit'
+      size: string
+      limitPrice?: string
+      leverage?: number
+      marginMode?: 'isolated' | 'cross'
+    },
+  ): Promise<void> {
+    const reject = (reason: string): void => {
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason,
+        fix: { label: 'Try again', action: fixed.userText },
+      })
+    }
+
+    const instrument = normalizeSymbol(params.instrument)
+    if (!instrument) {
+      reject(
+        `"${params.instrument}" isn't a valid instrument — use the BASE/QUOTE form, like BTC/USDT.`,
+      )
+      return
+    }
+    const sizeNum = Number(params.size)
+    if (!Number.isFinite(sizeNum) || sizeNum <= 0) {
+      reject('Size must be a positive number.')
+      return
+    }
+    if (params.orderType === 'limit') {
+      const px = Number(params.limitPrice)
+      if (params.limitPrice === undefined || !Number.isFinite(px) || px <= 0) {
+        reject('Limit orders need a positive limit price.')
+        return
+      }
+    }
+
+    if (fixed.capability === 'futures_perp') {
+      // Perp bounds from the venue's advertised capabilities. Best-effort: if
+      // the seam can't answer right now, forward and let its own validation
+      // (authoritative) decide, rather than blocking the trader here.
+      let caps: VenueCapabilities | null = null
+      try {
+        caps = await seam.capabilities()
+      } catch (err) {
+        log.warn({ err }, 'seam capabilities unavailable at submit — deferring to seam validation')
+      }
+      const perp = caps?.futures_perp
+      if (caps && !perp) {
+        reject(`${session.partner.venueName} doesn't support perpetual futures.`)
+        return
+      }
+      if (perp) {
+        const lev = params.leverage ?? 1
+        if (lev < 1 || lev > perp.maxLeverage) {
+          reject(`Leverage ${lev}× is outside this venue's 1–${perp.maxLeverage}× range.`)
+          return
+        }
+        if (params.marginMode && !perp.marginModes.includes(params.marginMode)) {
+          reject(
+            `Margin mode "${params.marginMode}" isn't available here — use ${perp.marginModes.join(' or ')}.`,
+          )
+          return
+        }
+      }
+    }
+
+    // Validated — the draft is consumed; downstream is the classic flow.
+    session.drafts.delete(draftId)
+
+    const order: OrderIntent = {
+      ...(fixed.capability === 'futures_perp'
+        ? {
+            capability: 'futures_perp' as const,
+            direction: fixed.direction ?? (fixed.side === 'sell' ? 'short' : 'long'),
+            leverage: params.leverage ?? 1,
+            marginMode: params.marginMode ?? 'isolated',
+            action: 'open' as const,
+          }
+        : {}),
+      side: fixed.side,
+      size: params.size,
+      instrument,
+      orderType: params.orderType,
+      ...(params.orderType === 'limit' && params.limitPrice !== undefined
+        ? { limitPrice: params.limitPrice }
+        : {}),
+    }
+
+    // Ticket-shaped skeleton while the seam quotes — same as the classic flow.
+    emit(session, { type: 'skeleton', shape: 'ticket' })
+    await prepareTicket(session, order, fixed.userText)
   }
 
   function confirmHandoff(session: Session, ticketId: string): void {
@@ -761,6 +982,72 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return true
   }
 
+  // ── live price ticker (transient price_tick frames) ─────────────────────
+
+  /** Poll cadence per symbol. Env-tunable (tests shrink it); read per
+   * orchestrator so tests set it before buildApp. */
+  const tickIntervalMs = Number(process.env.PRICE_TICK_INTERVAL_MS ?? 4_000)
+
+  /** One shared poller per symbol while ≥1 CONNECTED session wants it. */
+  const tickers = new Map<
+    string,
+    { timer: ReturnType<typeof setInterval>; sessions: Set<Session> }
+  >()
+
+  /** Register the session's CURRENT symbol with the shared poller (starting
+   * one if this symbol had none). Called on stream connect and after a
+   * context symbol switch; the old symbol's poller sheds the session on its
+   * next poll and stops itself once nobody connected wants it. */
+  function watchTicker(session: Session): void {
+    const symbol = defaultSymbol(session)
+    let entry = tickers.get(symbol)
+    if (!entry) {
+      const timer = setInterval(() => void pollTicker(symbol), tickIntervalMs)
+      timer.unref?.()
+      entry = { timer, sessions: new Set() }
+      tickers.set(symbol, entry)
+      // Prompt first tick rather than a full interval later. setTimeout(0)
+      // runs after the connect handler's synchronous tail (streamSession)
+      // has attached the transient writer.
+      const kick = setTimeout(() => void pollTicker(symbol), 0)
+      kick.unref?.()
+    }
+    entry.sessions.add(session)
+  }
+
+  async function pollTicker(symbol: string): Promise<void> {
+    const entry = tickers.get(symbol)
+    if (!entry) return
+    // Prune BEFORE polling: disconnected sessions and sessions whose symbol
+    // moved elsewhere; an empty set stops this symbol's poller entirely.
+    for (const s of entry.sessions) {
+      if (!s.liveTransient || defaultSymbol(s) !== symbol) entry.sessions.delete(s)
+    }
+    if (entry.sessions.size === 0) {
+      clearInterval(entry.timer)
+      tickers.delete(symbol)
+      return
+    }
+    let snap: MarketSnapshot
+    try {
+      snap = await market.snapshot(symbol)
+    } catch {
+      return // snapshot errored — skip the beat, never a fake tick
+    }
+    for (const s of entry.sessions) {
+      // Transient by contract: emitTransient bypasses the frame journal and
+      // writes no SSE id, so a resume replay can never contain a tick.
+      emitTransient(s, {
+        type: 'price_tick',
+        symbol: snap.symbol,
+        last: snap.last,
+        lastDisplay: snap.lastDisplay,
+        changePct: snap.change12hPct,
+        asOfIso: snap.asOfIso,
+      })
+    }
+  }
+
   // ── per-turn routing ───────────────────────────────────────────────────
 
   async function processTurn(session: Session, text: string): Promise<void> {
@@ -875,7 +1162,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           return
         }
         // Persona asset/thread accrual — opted-in users only (read above).
-        const symbol = symbolFromText(text)
+        const symbol = symbolFromText(text, defaultSymbol(session))
         if (persona?.optIn) {
           memory
             .update(session.partner.partnerId, userKey(session), {
@@ -1035,7 +1322,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           const res = await intel.respond({
             text,
             intent: 'advice',
-            symbol: symbolFromText(text),
+            symbol: symbolFromText(text, defaultSymbol(session)),
           })
           const declined = res.kind === 'decline'
           telemetry.recordAdvice(declined)
@@ -1053,18 +1340,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
 
       case 'action': {
-        if (!intentRes.order) {
-          emit(session, {
-            type: 'rejection_ticket',
-            title: 'Order not prepared',
-            reason: 'Tell me the side, size and asset — for example "buy 0.05 BTC at market".',
-          })
-          return
-        }
-        // Ticket-shaped skeleton while the seam quotes — replaces the thinking
-        // card (pushFrame's ephemeral rule); the ticket or rejection replaces it.
+        // Interactive draft flow (replaces instant-prepare): every action turn
+        // gets an EDITABLE order_draft — prefilled when the order parsed fully,
+        // defaulted from the session's page-context symbol when it didn't (no
+        // more bare rejection for "long BTC"). The trader edits + submits via
+        // the draft_action uplink; submit re-validates against venue
+        // capabilities and runs the classic prepare → order_ticket flow.
+        // Ticket-shaped skeleton while capabilities are fetched — replaces the
+        // thinking card (pushFrame's ephemeral rule); the draft replaces it.
         emit(session, { type: 'skeleton', shape: 'ticket' })
-        await prepareTicket(session, intentRes.order, text)
+        await emitOrderDraft(session, intentRes.order, text)
         return
       }
 
@@ -1115,6 +1400,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // memoryLab; no-op otherwise). Fire-and-forget; the journal replay
       // re-delivers it on reconnect, the SDK keeps only the latest.
       void emitLearnedMemory(session)
+      // Live price ticker for the session's symbol — transient frames to the
+      // connected socket only, never the journal.
+      watchTicker(session)
     },
 
     onVenueEvent,
@@ -1167,6 +1455,47 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         case 'ticket_action': {
           if (uplink.action === 'confirm_handoff') confirmHandoff(session, uplink.ticketId)
           else cancelTicket(session, uplink.ticketId)
+          return
+        }
+        case 'draft_action': {
+          // Commands, not conversation: no echo, no thinking, no classify.
+          const fixed = session.drafts.get(uplink.draftId)
+          if (uplink.action === 'dismiss') {
+            // Drop the pending draft, no frame — the SDK already collapsed it.
+            session.drafts.delete(uplink.draftId)
+            return
+          }
+          if (!fixed) {
+            // Unknown/expired draft: never guess at an order — say so.
+            emit(session, {
+              type: 'rejection_ticket',
+              title: 'Order not prepared',
+              reason: 'This order card has expired — ask for the order again to get a fresh one.',
+            })
+            return
+          }
+          if (!uplink.params) {
+            emit(session, {
+              type: 'rejection_ticket',
+              title: 'Order not prepared',
+              reason: 'The order card sent no parameters — edit the order and submit again.',
+            })
+            return
+          }
+          submitDraft(session, uplink.draftId, fixed, uplink.params).catch((err) => {
+            log.error({ err, draftId: uplink.draftId }, 'draft submit failed')
+          })
+          return
+        }
+        case 'context': {
+          // The host page's market. Context, never a command: an invalid
+          // symbol is ignored silently; a valid one becomes the session's
+          // default (research/drafts/ticks) and retargets the live ticker.
+          const symbol = normalizeSymbol(uplink.symbol)
+          if (symbol) {
+            session.symbol = symbol
+            if (session.liveTransient) watchTicker(session)
+          }
           return
         }
         case 'settings': {

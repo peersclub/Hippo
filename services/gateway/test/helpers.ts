@@ -1,4 +1,5 @@
 /** Shared test scaffolding: stub intelligence/market clients + wait helpers. */
+import type { VenueCapabilities } from '@hippo/protocol'
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../src/app.js'
 import type {
@@ -229,8 +230,14 @@ export const portfolioFixture: SeamPortfolio = {
   openOrders: [{ orderId: 'o_btc', side: 'buy', summary: 'BUY 0.05 BTC · MKT', status: 'OPEN' }],
 }
 
+/** Default stubbed venue capabilities: spot + 20x perps, both margin modes. */
+export const capabilitiesFixture: VenueCapabilities = {
+  spot: {},
+  futures_perp: { maxLeverage: 20, marginModes: ['isolated', 'cross'] },
+}
+
 /** Call-recording seam client with fixture responses. */
-export function stubSeam(): SeamClient & {
+export function stubSeam(caps: VenueCapabilities = capabilitiesFixture): SeamClient & {
   prepares: unknown[]
   confirms: string[]
   cancels: string[]
@@ -246,6 +253,15 @@ export function stubSeam(): SeamClient & {
       prepares.push(req)
       return { ...ticketFixture, side: req.side, instrument: req.instrument }
     },
+    async prepareOrder(plan) {
+      prepares.push(plan)
+      const side = (plan as { direction?: string }).direction === 'short' ? 'sell' : 'buy'
+      return {
+        ...ticketFixture,
+        side: side as 'buy' | 'sell',
+        instrument: (plan as { instrument?: string }).instrument ?? ticketFixture.instrument,
+      }
+    },
     async confirm(ticketId) {
       confirms.push(ticketId)
     },
@@ -255,12 +271,18 @@ export function stubSeam(): SeamClient & {
     async portfolio() {
       return portfolioFixture
     },
+    async capabilities() {
+      return caps
+    },
   }
 }
 
 /** A seam client that is hard-down — every call rejects. */
 export const deadSeam: SeamClient = {
   prepare: async () => {
+    throw new Error('seam unreachable')
+  },
+  prepareOrder: async () => {
     throw new Error('seam unreachable')
   },
   confirm: async () => {
@@ -270,6 +292,9 @@ export const deadSeam: SeamClient = {
     throw new Error('seam unreachable')
   },
   portfolio: async () => {
+    throw new Error('seam unreachable')
+  },
+  capabilities: async () => {
     throw new Error('seam unreachable')
   },
 }
@@ -390,4 +415,54 @@ export function frameOfType<T = Record<string, unknown>>(session: Session, type:
   const entry = session.journal.after(0).find((e) => e.frame.type === type)
   if (!entry) throw new Error(`no ${type} frame in journal`)
   return entry.frame as unknown as T
+}
+
+/** The order_draft frame fields tests care about. */
+export type DraftFrame = {
+  draftId: string
+  capability: 'spot' | 'futures_perp'
+  instrument: string
+  side: 'buy' | 'sell'
+  direction?: 'long' | 'short'
+  size: string
+  sizeAsset: string
+  orderType: 'market' | 'limit'
+  limitPrice?: string
+  leverage?: number
+  maxLeverage?: number
+  marginMode?: 'isolated' | 'cross'
+  marginModes: Array<'isolated' | 'cross'>
+  symbols: string[]
+  title: string
+}
+
+/**
+ * Drive the interactive draft flow to a prepared ticket: wait for the
+ * order_draft, submit it back (echoing its prefill unless overridden), wait
+ * for the order_ticket. This is the draft-era equivalent of the old
+ * "text → order_ticket" shortcut the instant-prepare flow allowed.
+ */
+export async function submitDraft(
+  app: FastifyInstance,
+  session: Session,
+  overrides: Record<string, unknown> = {},
+): Promise<{ draft: DraftFrame; ticket: { ticketId: string } }> {
+  await waitForJournal(session, (t) => t.includes('order_draft'))
+  const draft = frameOfType<DraftFrame>(session, 'order_draft')
+  await sendTurn(app, session.id, {
+    kind: 'draft_action',
+    draftId: draft.draftId,
+    action: 'submit',
+    params: {
+      instrument: draft.instrument,
+      orderType: draft.orderType,
+      size: draft.size,
+      ...(draft.limitPrice !== undefined ? { limitPrice: draft.limitPrice } : {}),
+      ...(draft.leverage !== undefined ? { leverage: draft.leverage } : {}),
+      ...(draft.marginMode !== undefined ? { marginMode: draft.marginMode } : {}),
+      ...overrides,
+    },
+  })
+  await waitForJournal(session, (t) => t.includes('order_ticket'))
+  return { draft, ticket: frameOfType<{ ticketId: string }>(session, 'order_ticket') }
 }

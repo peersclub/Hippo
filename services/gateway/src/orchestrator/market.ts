@@ -97,12 +97,25 @@ const ASSET_ALIASES: ReadonlyArray<[RegExp, string]> = [
   ],
 ]
 
-/** Best-effort symbol from free text; BTC/USDT when nothing matches. */
-export function symbolFromText(text: string): string {
+/** Best-effort symbol from free text; the fallback (default BTC/USDT — pass
+ * the session's page-context symbol) when nothing in the text matches. */
+export function symbolFromText(text: string, fallback = 'BTC/USDT'): string {
   const t = text.toLowerCase()
   for (const [re, ticker] of ASSET_ALIASES) {
     const m = t.match(re)
     if (m) return `${(ticker || (m[1] ?? m[0])).toUpperCase()}/USDT`
   }
-  return 'BTC/USDT'
+  return fallback
+}
+
+/** "BASE/QUOTE" instrument shape (e.g. "BTC/USDT"), case-insensitive. */
+const SYMBOL_RE = /^[A-Z0-9]{2,10}\/[A-Z0-9]{2,10}$/i
+
+/** Validate + upper-case a host-supplied symbol ("btc/usdt" → "BTC/USDT").
+ * Anything that isn't a well-formed BASE/QUOTE string → null (callers ignore
+ * invalid symbols silently — context is a hint, never a command). */
+export function normalizeSymbol(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return SYMBOL_RE.test(trimmed) ? trimmed.toUpperCase() : null
 }

@@ -5,6 +5,7 @@
  * Lifecycle events arrive on POST /internal/venue-events (the callbackUrl
  * given at confirm time).
  */
+import type { VenueCapabilities } from '@hippo/protocol'
 
 const SEAM_URL = process.env.SEAM_URL ?? 'http://localhost:8793'
 /** Where the seam delivers venue events — this gateway's internal route. */
@@ -76,6 +77,9 @@ export interface SeamClient {
   cancel(ticketId: string): Promise<void>
   /** Rejects when the seam is down — portfolio is never served stale. */
   portfolio(partnerId: string, userId: string): Promise<SeamPortfolio>
+  /** What the venue supports per capability (GET /v1/capabilities). Cached
+   *  briefly client-side — capabilities change rarely, drafts are frequent. */
+  capabilities(): Promise<VenueCapabilities>
 }
 
 async function json<T>(url: string, init: RequestInit): Promise<T> {
@@ -91,10 +95,15 @@ async function json<T>(url: string, init: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+/** Client-side capabilities cache TTL — venue capabilities change rarely, so
+ * per-draft fetches must not hammer the seam. */
+const CAPABILITIES_TTL_MS = 60_000
+
 export function createSeamClient(
   baseUrl = SEAM_URL,
   callbackUrl = GATEWAY_CALLBACK_URL,
 ): SeamClient {
+  let capsCache: { value: VenueCapabilities; expiresAt: number } | null = null
   return {
     prepare: (req) =>
       json<PreparedTicket>(`${baseUrl}/v1/prepare`, {
@@ -123,5 +132,11 @@ export function createSeamClient(
         `${baseUrl}/v1/portfolio/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
         { method: 'GET' },
       ),
+    capabilities: async () => {
+      if (capsCache && capsCache.expiresAt > Date.now()) return capsCache.value
+      const value = await json<VenueCapabilities>(`${baseUrl}/v1/capabilities`, { method: 'GET' })
+      capsCache = { value, expiresAt: Date.now() + CAPABILITIES_TTL_MS }
+      return value
+    },
   }
 }
