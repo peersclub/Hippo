@@ -52,6 +52,48 @@ const bareActionIntent = () =>
     intent: (): IntentResult => ({ intent: 'action', confidence: 0.9, language: 'en' }),
   })
 
+/** Close-long perp intent ("close long 0.5 BTC") — sell to reduce. */
+const closeIntent = () =>
+  stubIntel({
+    intent: (): IntentResult => ({
+      intent: 'action',
+      confidence: 0.9,
+      language: 'en',
+      order: {
+        capability: 'futures_perp',
+        side: 'sell',
+        direction: 'long',
+        leverage: 10,
+        size: '0.5',
+        instrument: 'BTC/USDT',
+        orderType: 'market',
+        action: 'close',
+        reduceOnly: true,
+      },
+    }),
+  })
+
+/** Reduce-only WITHOUT action:'close' — reduceOnly alone must also bypass. */
+const reduceOnlyIntent = () =>
+  stubIntel({
+    intent: (): IntentResult => ({
+      intent: 'action',
+      confidence: 0.9,
+      language: 'en',
+      order: {
+        capability: 'futures_perp',
+        side: 'sell',
+        direction: 'long',
+        leverage: 10,
+        size: '0.5',
+        instrument: 'BTC/USDT',
+        orderType: 'market',
+        action: 'open',
+        reduceOnly: true,
+      },
+    }),
+  })
+
 describe('order_draft: action turns emit an editable draft, not an instant ticket', () => {
   it('fully-parsed perp order → draft with prefill + venue bounds, no order_ticket', async () => {
     const seam = stubSeam()
@@ -115,6 +157,56 @@ describe('order_draft: action turns emit an editable draft, not an instant ticke
     expect(draft.direction).toBe('long')
     expect(draft.size).toBe('')
     expect(draft.maxLeverage).toBe(20)
+    await app.close()
+  })
+})
+
+describe('close/reduce-only orders bypass the draft — straight to prepare', () => {
+  it('"close long 0.5 BTC" → NO draft; seam receives action:close + reduceOnly → order_ticket', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: closeIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'close long 0.5 btc' })
+    await waitForJournal(session, (t) => t.includes('order_ticket'))
+
+    // The close never became an editable card — a draft would resubmit it
+    // as an OPEN (drafts are open-only) and double exposure.
+    const types = session.journal.after(0).map((e) => e.frame.type)
+    expect(types).not.toContain('order_draft')
+    expect(session.drafts.size).toBe(0)
+    expect(types).not.toContain('rejection_ticket')
+
+    // The seam got the intent VERBATIM: a closing, reduce-only order.
+    expect(seam.prepares).toHaveLength(1)
+    expect(seam.prepares[0]).toMatchObject({
+      capability: 'futures_perp',
+      instrument: 'BTC/USDT',
+      direction: 'long',
+      action: 'close',
+      reduceOnly: true,
+      size: '0.5',
+      orderType: 'market',
+    })
+    await app.close()
+  })
+
+  it('reduceOnly without action:close also bypasses the draft (reduceOnly is a trigger)', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: reduceOnlyIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'reduce my long by 0.5 btc' })
+    await waitForJournal(session, (t) => t.includes('order_ticket'))
+
+    const types = session.journal.after(0).map((e) => e.frame.type)
+    expect(types).not.toContain('order_draft')
+    expect(session.drafts.size).toBe(0)
+    expect(seam.prepares).toHaveLength(1)
+    expect(seam.prepares[0]).toMatchObject({
+      capability: 'futures_perp',
+      instrument: 'BTC/USDT',
+      action: 'open',
+      reduceOnly: true,
+    })
     await app.close()
   })
 })
