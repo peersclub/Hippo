@@ -223,7 +223,7 @@ describe('AssetworksVenueAdapter', () => {
     expect(partials[1]?.fillPct).toBe(40)
   })
 
-  it('portfolio merges spot balances, perp positions and open orders', async () => {
+  it('portfolio returns open perp positions + orders only — NOT spot balances', async () => {
     const fetchImpl = vi.fn(async (url: string | URL) => {
       const u = String(url)
       if (u.endsWith('/balance'))
@@ -256,8 +256,11 @@ describe('AssetworksVenueAdapter', () => {
     }) as unknown as typeof fetch
     const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
     const pf = await adapter.portfolio('p', 'u1')
-    expect(pf.positions.some((p) => p.instrument.includes('10x LONG'))).toBe(true)
-    expect(pf.positions.some((p) => p.instrument === 'BTC')).toBe(true)
+    // Only the actual (perp) position — spot balances are holdings, not
+    // positions, so a fresh wallet's cash/seed BTC must NOT appear here.
+    expect(pf.positions).toHaveLength(1)
+    expect(pf.positions[0].instrument).toContain('10x LONG')
+    expect(pf.positions.some((p) => p.instrument === 'BTC')).toBe(false)
     expect(pf.openOrders).toHaveLength(1)
   })
 })
