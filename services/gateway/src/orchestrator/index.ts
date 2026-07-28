@@ -7,7 +7,9 @@
  *
  *   research/concept → skeleton → intelligence /v1/respond → research_brief
  *   advice           → /v1/respond → advice_decline
- *   action           → editable order_draft → (draft_action submit) → ticket
+ *   action (open)    → editable order_draft → (draft_action submit) → ticket
+ *   action (close/reduce-only) → direct prepare → ticket (no draft: terms
+ *                      come from the position; drafts are open-only)
  *   portfolio        → positions frame (in-memory demo table, seam stub)
  *   smalltalk/low-χ  → short research_brief-style nudge
  *
@@ -839,6 +841,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             direction: fixed.direction ?? (fixed.side === 'sell' ? 'short' : 'long'),
             leverage: params.leverage ?? 1,
             marginMode: params.marginMode ?? 'isolated',
+            // INVARIANT: drafts are open-only by construction. Close/
+            // reduce-only intents never enter the draft flow — the action
+            // branch routes them straight to prepareTicket — so 'open' here
+            // is deliberate, not a default. If drafts ever carry closes,
+            // DraftFields must capture action/reduceOnly and this must
+            // forward them.
             action: 'open' as const,
           }
         : {}),
@@ -1340,12 +1348,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
 
       case 'action': {
-        // Interactive draft flow (replaces instant-prepare): every action turn
-        // gets an EDITABLE order_draft — prefilled when the order parsed fully,
-        // defaulted from the session's page-context symbol when it didn't (no
-        // more bare rejection for "long BTC"). The trader edits + submits via
-        // the draft_action uplink; submit re-validates against venue
-        // capabilities and runs the classic prepare → order_ticket flow.
+        // Close/reduce-only orders BYPASS the draft flow: their terms come
+        // from the position being closed, so an editable card (symbol/
+        // leverage controls) is the wrong surface — and the draft frame
+        // carries no action/reduceOnly fields by design, so routing a close
+        // through it would resubmit as an OPEN and double exposure instead
+        // of reducing it. Guarded here, BEFORE any draft is remembered:
+        // closes go straight down the classic prepare → order_ticket path.
+        if (intentRes.order && (intentRes.order.action === 'close' || intentRes.order.reduceOnly === true)) {
+          emit(session, { type: 'skeleton', shape: 'ticket' })
+          await prepareTicket(session, intentRes.order, text)
+          return
+        }
+        // Interactive draft flow (replaces instant-prepare): every OPEN
+        // action turn gets an EDITABLE order_draft — prefilled when the order
+        // parsed fully, defaulted from the session's page-context symbol when
+        // it didn't (no more bare rejection for "long BTC"). The trader edits
+        // + submits via the draft_action uplink; submit re-validates against
+        // venue capabilities and runs the classic prepare → order_ticket flow.
         // Ticket-shaped skeleton while capabilities are fetched — replaces the
         // thinking card (pushFrame's ephemeral rule); the draft replaces it.
         emit(session, { type: 'skeleton', shape: 'ticket' })
