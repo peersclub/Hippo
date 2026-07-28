@@ -45,7 +45,7 @@
   <div class="sub">How to test the full product — a conversational trading parasite embedded in a real exchange host, plus its operator admin and partner portal. Everything below is verified against the running local stack.</div>
   <div class="toc">
     <a href="#model">The model</a><a href="#run">Run it</a><a href="#where">Where to click</a>
-    <a href="#paths">Order paths</a><a href="#matrix">Order matrix</a><a href="#prompts">Order prompts</a><a href="#surfaces">Confirm surfaces</a>
+    <a href="#paths">Order paths</a><a href="#matrix">Order matrix</a><a href="#prompts">Order prompts</a><a href="#draftcard">Order card</a><a href="#surfaces">Confirm surfaces</a>
     <a href="#ai">Conversational AI</a><a href="#memory">Layered memory</a><a href="#resilience">Resilience</a><a href="#admin">Admin</a><a href="#portal">Portal</a>
   </div>
 
@@ -107,7 +107,7 @@ pnpm dev</pre>
   </table>
   <div class="gotcha"><b>Non-obvious, by design:</b> a <b>market order is not instant</b> — it rests ~2.5–3s so the parasite's reconciler (polls every 2s) can observe it fill. <b>Liquidation price is display-only</b> — the engine never force-liquidates. The <b>balance figure includes reserved funds</b>, so it won't visibly drop when a resting/perp order locks margin.</div>
 
-  <h2 id="prompts">What to say to place each order <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— talk to Hippo; every order returns a ticket to confirm</span></h2>
+  <h2 id="prompts">What to say to place each order <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— talk to Hippo; every order opens an editable draft card, then a ticket to confirm</span></h2>
   <p>Hippo parses natural order phrasing into a ticket you confirm — leverage defaults to <code>10x</code> and margin to <code>isolated</code> when omitted, and any live symbol works (<code>BTC</code> / <code>ETH</code> / <code>SOL</code>). The numbers below are just examples.</p>
   <table>
     <tr><th>Order type</th><th>Say to Hippo</th><th>What happens</th></tr>
@@ -122,6 +122,23 @@ pnpm dev</pre>
     <tr><td>Cancel a resting order</td><td><span style="color:var(--dim)">tap <b>Cancel</b> on the order row (UI, not a prompt)</span></td><td>Cancels a working/limit order; reserved funds released</td></tr>
   </table>
   <div class="gotcha"><b>Grammar it recognizes:</b> <code>buy|sell &lt;qty&gt; &lt;asset&gt; [at market | at/@ &lt;price&gt; | limit &lt;price&gt;]</code> for spot; <code>[open|close] long|short &lt;qty&gt; &lt;asset&gt; [&lt;lev&gt;x] [isolated|cross] [reduce] [@ &lt;price&gt;]</code> for perps. Omit leverage → <code>10x</code>, omit margin → <code>isolated</code>. All verified live.</div>
+
+  <h2 id="draftcard">Interactive order card &amp; live price <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— slider, price input, dropdowns · price synced with the host</span></h2>
+  <p>Order intents no longer jump straight to a prepared ticket — Hippo first shows an <b>editable draft card</b> with real controls, pre-filled from whatever you typed. The card shows the <b>live market price</b> for its symbol, kept in sync with the host page. Submit re-validates everything server-side against the venue's capabilities before the normal ticket → confirm → lifecycle flow.</p>
+  <ol class="steps">
+    <li>Say just <code>long BTC</code> — no size.
+      <span class="expect">an editable draft card (not a rejection): leverage slider, size input (empty — fill it), market/limit dropdown, margin dropdown, symbol dropdown, and a live price row ticking in real time</span></li>
+    <li>Drag the <b>leverage slider</b>.
+      <span class="expect">it's bounded by the venue's max leverage (from <code>/v1/capabilities</code>) — you can't slide past what the venue allows</span></li>
+    <li>Switch the order-type dropdown to <b>Limit</b>.
+      <span class="expect">the price input becomes editable, pre-filled from the live price; on Market it's read-only ("≈ market")</span></li>
+    <li>Fill a size and tap <b>Review order →</b>.
+      <span class="expect">the familiar prepared ticket appears (your edited leverage/price/margin on it) → confirm → PLACED · WORKING → FILLED, exactly as before</span></li>
+    <li>Try to cheat: submit is disabled until size &gt; 0; and if a tampered client sent leverage over the venue max, the server rejects it — validation is server-side, the card only echoes edits.</li>
+    <li><b>Price sync:</b> open the panel on <code>?pair=ETH/USDT</code> (or switch the host's pair selector).
+      <span class="expect">the draft card and research default to that symbol, and the panel's price matches the host header — the host forwards its exact ticker over a <code>postMessage</code> bridge, with server price ticks (every ~4s) as the always-on fallback</span></li>
+  </ol>
+  <div class="gotcha"><b>Three price-sync modes</b> via <code>data-hippo-price-source</code>: <code>server</code> (default — the gateway streams transient <code>price_tick</code>s for the page's symbol; they never enter the resume journal), <code>client</code> (the SDK subscribes to the same public ticker feed the host uses), <code>host</code> (bridge only). The host bridge is always listened to regardless — an explicit host price wins, so panel price ≡ page price. Embed context: <code>data-hippo-symbol="BTC/USDT"</code> at mount; live pair switches flow over the bridge.</div>
 
   <h2 id="surfaces">Confirm surfaces — the admin switch <span class="badge para">Open Decision #6</span></h2>
   <p>Open the <b>gear → venue admin drawer</b> on the :4001 host and flip <b>Confirm surface</b> (it writes host-venue <code>/admin/config</code>; the parasite reads it live at confirm time — no restart). In local dev this endpoint is unauthenticated.</p>
