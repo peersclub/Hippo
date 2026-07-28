@@ -102,7 +102,6 @@ type OpenOrderRow = {
   status: number
   orderType: number
 }
-type BalanceRow = { currencyName: string; amount: string | number }
 type PositionRow = {
   pairName: string
   direction: 'long' | 'short'
@@ -597,24 +596,15 @@ export class AssetworksVenueAdapter implements VenueAdapter {
   }
 
   async portfolio(_partnerId: string, _userId: string): Promise<Portfolio> {
-    // Merge spot balances + open perp positions + open orders — so a perp
-    // opened in the host UI is visible when the parasite reads the portfolio.
-    const [balance, positions, open] = await Promise.all([
-      this.signedPost<BalanceRow[]>('/api/v1/trade/balance', {}),
+    // Positions = ACTUAL open positions (perps) only — matching the sim
+    // adapter's real-fills semantics. Spot BALANCES are holdings, not
+    // positions: they live in the venue's Balances view. Folding them in here
+    // (incl. USDT cash + seed holdings) produced a bogus "POSITIONS · N" badge
+    // with zero real positions — so a fresh wallet read 3.
+    const [positions, open] = await Promise.all([
       this.signedPost<PositionRow[]>('/api/v1/trade/positions', {}),
       this.fetchOpenOrders(),
     ])
-
-    const spot = (balance.data ?? [])
-      .filter((b) => Number(b.amount) > 0)
-      .map((b) => ({
-        instrument: b.currencyName,
-        size: `${b.amount} ${b.currencyName}`,
-        entry: '—',
-        mark: '—',
-        pnl: '—',
-        tone: 'neutral' as const,
-      }))
 
     const perps = (positions.data ?? []).map((p) => ({
       instrument: `${p.pairName} ${p.leverage}x ${p.direction.toUpperCase()}`,
@@ -632,7 +622,7 @@ export class AssetworksVenueAdapter implements VenueAdapter {
       status: String(o.status),
     }))
 
-    return { positions: [...perps, ...spot], openOrders }
+    return { positions: perps, openOrders }
   }
 }
 
