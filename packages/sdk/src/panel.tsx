@@ -7,6 +7,7 @@
 import type { OrdersSnapshot } from '@hippo/protocol'
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { installHostBridge, SYMBOL_RE } from './bridge.js'
 import { FallbackCard, renderFrame } from './cards.js'
 import { LONG_PRESS_MS, PRESS_MOVE_SLOP_PX, roveIndex } from './chips.js'
 import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js'
@@ -16,6 +17,7 @@ import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './o
 import { dispatch, outbox } from './outbox.js'
 import { OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
 import { clampToViewport, cyclePosture, isMobileViewport, openPosture } from './posture.js'
+import { initPriceSource, normalizePriceSource } from './price.js'
 import { isNearBottom } from './scroll.js'
 import {
   activeChips,
@@ -30,6 +32,7 @@ import {
   locale,
   openOrderCount,
   orders,
+  pageSymbol,
   persistFloatPos,
   posture,
   prefillComposer,
@@ -51,7 +54,15 @@ import { connect, send } from './transport.js'
 type MountOpts = {
   shadow: ShadowRoot
   pill: HTMLButtonElement
-  config: { key: string; gateway: string; panelUrl: string; locale?: string; tokenUrl?: string }
+  config: {
+    key: string
+    gateway: string
+    panelUrl: string
+    locale?: string
+    tokenUrl?: string
+    symbol?: string
+    priceSource?: string
+  }
 }
 
 /** The Hippo mark, served from the SDK's own dist (same origin as panel.js).
@@ -503,7 +514,7 @@ function Chips() {
   const chips = activeChips.value
   const [focusIdx, setFocusIdx] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
-  const chipsKey = chips.join(' ')
+  const chipsKey = chips.join('\u0000')
   // Reset the roving focus whenever the chip set itself changes.
   useEffect(() => setFocusIdx(0), [chipsKey])
   if (chips.length === 0) return null
@@ -824,10 +835,23 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
   })
 
   pill.addEventListener('hippo:open', open)
+
+  // Page context: the host may declare the market under the trader's eyes
+  // (data-hippo-symbol) — validated with the same rule as the bridge, then
+  // carried on the session mint. The bridge listens in EVERY mode (an
+  // explicit host price is the most authoritative "same number as the
+  // host"); priceSource only decides who else feeds livePrice.
+  if (config.symbol && SYMBOL_RE.test(config.symbol)) {
+    pageSymbol.value = config.symbol.toUpperCase()
+  }
+  installHostBridge()
+  initPriceSource(normalizePriceSource(config.priceSource))
+
   // Connect eagerly (hover-preload warms the session too) — but only a click opens.
   void connect({
     gateway: config.gateway,
     key: config.key,
     tokenUrl: config.tokenUrl || undefined,
+    symbol: pageSymbol.value ?? undefined,
   })
 }

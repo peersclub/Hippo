@@ -14,6 +14,8 @@ type LoaderConfig = {
   panelUrl: string
   locale: string
   tokenUrl: string
+  symbol: string
+  priceSource: string
 }
 
 /** Pill label per locale — inlined (the loader stays zero-dep and under its
@@ -51,6 +53,12 @@ function normalizeLocale(raw: string): string {
       // backend holds the secret — it never reaches this script). Unset =
       // bare-key mint, which only dev-mode gateways accept.
       tokenUrl: script.dataset.hippoTokenUrl ?? '',
+      // Page context: the market under the trader's eyes (e.g. "BTC/USDT")
+      // and who feeds the live price. Validation lives in the panel chunk
+      // (price.ts / bridge.ts) — the loader only carries the strings, same
+      // minimal-inline pattern as normalizeLocale above.
+      symbol: script.dataset.hippoSymbol ?? '',
+      priceSource: script.dataset.hippoPriceSource ?? '',
     }
     if (!config.key) return
 

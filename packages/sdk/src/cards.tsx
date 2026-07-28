@@ -9,6 +9,7 @@ import type {
   Frame,
   Interpretation,
   Lifecycle,
+  OrderDraft,
   OrderTicket,
   Positions,
   RejectionTicket,
@@ -20,6 +21,7 @@ import type {
 } from '@hippo/protocol'
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { assembleDraftParams, initialLeverage, maxLeverageOf, sizeValid } from './draft.js'
 import {
   FEEDBACK_REASONS,
   type FeedbackEvent,
@@ -38,7 +40,7 @@ import {
 } from './lifecycle-view.js'
 import { dispatch } from './outbox.js'
 import { briefClipboardText, COPIED_FLASH_MS } from './share.js'
-import { connection, feedbackMap, locale, shareFrame, thread } from './state.js'
+import { connection, feedbackMap, livePrice, locale, shareFrame, thread } from './state.js'
 import { interruptedStreamIds } from './streaming.js'
 import { send } from './transport.js'
 
@@ -328,6 +330,239 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
       </button>
       {failed && <div class="action-failed">{t(locale.value, 'action_failed')}</div>}
       <div class="tfoot">{frame.footnote}</div>
+    </div>
+  )
+}
+
+/**
+ * Interactive order DRAFT — the editable stage BEFORE a ticket. The controls
+ * are seeded from the server's frame and the card only ever ECHOES the
+ * trader's edits back (draft_action → gateway re-validation → the normal
+ * prepare → order_ticket flow). The SDK never invents an order.
+ *
+ * The price row draws from the transient livePrice signal — and only when the
+ * tick's symbol matches the card's currently selected instrument; otherwise
+ * an honest dash. Like ticket confirm, submit is never queued offline: a
+ * trading action fired minutes later without the trader present is
+ * unacceptable, so the button simply disables until the stream is live.
+ */
+function OrderDraftCard({ frame }: { frame: OrderDraft }) {
+  const L = locale.value
+  const perp = frame.capability === 'futures_perp'
+  const maxLev = maxLeverageOf(frame)
+  // Local edit state, seeded from the frame (thin client: server proposes,
+  // trader edits, server re-validates).
+  const [instrument, setInstrument] = useState(frame.instrument)
+  const [orderType, setOrderType] = useState<'market' | 'limit'>(frame.orderType)
+  const [size, setSize] = useState(frame.size)
+  const [limitPrice, setLimitPrice] = useState(frame.limitPrice ?? '')
+  const [leverage, setLeverage] = useState(() => initialLeverage(frame))
+  const [marginMode, setMarginMode] = useState(frame.marginMode ?? frame.marginModes[0])
+  const [phase, setPhase] = useState<'editing' | 'busy' | 'sent' | 'dismissed'>('editing')
+  const [failed, setFailed] = useState(false)
+
+  // Live price for the card's CURRENT selection — dash when the tick belongs
+  // to a different symbol (or none arrived yet). Flash briefly on change so
+  // the update registers; CSS drops the transition under reduced motion.
+  const lp = livePrice.value
+  const price = lp && lp.symbol === instrument ? lp : null
+  const [flash, setFlash] = useState(false)
+  const lastSeen = useRef<number | null>(null)
+  useEffect(() => {
+    const cur = price?.last ?? null
+    if (cur !== null && lastSeen.current !== null && cur !== lastSeen.current) {
+      setFlash(true)
+      const t = setTimeout(() => setFlash(false), 600)
+      lastSeen.current = cur
+      return () => clearTimeout(t)
+    }
+    lastSeen.current = cur
+  }, [price?.last])
+
+  const submit = async () => {
+    if (phase !== 'editing' || !sizeValid(size) || connection.value !== 'live') return
+    setFailed(false)
+    setPhase('busy') // exactly once — disabled the instant it's tapped
+    const ok = await send({
+      kind: 'draft_action',
+      draftId: frame.draftId,
+      action: 'submit',
+      params: assembleDraftParams({
+        capability: frame.capability,
+        instrument,
+        orderType,
+        size,
+        limitPrice,
+        leverage,
+        maxLeverage: maxLev,
+        marginMode,
+      }),
+    })
+    // Success stays disabled — the server's ticket/rejection is the response.
+    // Failure fails loud and re-arms (nothing reached the venue).
+    if (ok) setPhase('sent')
+    else {
+      setPhase('editing')
+      setFailed(true)
+    }
+  }
+  const dismiss = () => {
+    if (phase === 'busy' || phase === 'sent') return
+    setPhase('dismissed')
+    // Quiet by design: the collapse is immediate; the uplink just informs the
+    // server (a lost dismiss is inconsequential — nothing trades).
+    void send({ kind: 'draft_action', draftId: frame.draftId, action: 'dismiss' }).catch(() => {})
+  }
+
+  if (phase === 'dismissed') {
+    return (
+      <div class="draft-gone" role="status">
+        {t(L, 'draft_dismissed')}
+      </div>
+    )
+  }
+
+  const live = connection.value === 'live'
+  const canSubmit = phase === 'editing' && live && sizeValid(size)
+  const sideLabel = (frame.direction ?? frame.side).toUpperCase()
+  const busyOrSent = phase === 'busy' || phase === 'sent'
+  return (
+    <div class="ticket draft">
+      <div class="th">
+        <span class="tt">{frame.title}</span>
+        <span class={`side ${frame.side}`}>{sideLabel}</span>
+      </div>
+      <div class="dpx" aria-live="off">
+        <span class="dpsym">{instrument}</span>
+        <span class={`dplast${flash ? ' tick' : ''}`}>{price ? price.lastDisplay : '—'}</span>
+        {price?.changePct !== undefined && (
+          <span class={`dpchg ${price.changePct >= 0 ? 'pos' : 'neg'}`}>
+            {price.changePct >= 0 ? '+' : ''}
+            {price.changePct.toFixed(2)}%
+          </span>
+        )}
+      </div>
+      <div class="dgrid">
+        {frame.symbols.length > 1 && (
+          <label class="dfield">
+            <span class="dlab">{t(L, 'draft_pair')}</span>
+            <select
+              value={instrument}
+              disabled={busyOrSent}
+              onChange={(e) => setInstrument((e.target as HTMLSelectElement).value)}
+            >
+              {frame.symbols.map((s) => (
+                <option value={s} key={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div class="drow">
+          <label class="dfield">
+            <span class="dlab">{t(L, 'draft_order_type')}</span>
+            <select
+              value={orderType}
+              disabled={busyOrSent}
+              onChange={(e) => {
+                const v = (e.target as HTMLSelectElement).value as 'market' | 'limit'
+                setOrderType(v)
+                // Switching to limit with no price yet: prefill from the live
+                // price (raw number — the echo must stay server-parseable).
+                if (v === 'limit' && limitPrice.trim() === '' && price) {
+                  setLimitPrice(String(price.last))
+                }
+              }}
+            >
+              <option value="market">{t(L, 'draft_type_market')}</option>
+              <option value="limit">{t(L, 'draft_type_limit')}</option>
+            </select>
+          </label>
+          <label class="dfield">
+            <span class="dlab">
+              {t(L, 'draft_price')}
+              {orderType === 'market' && <span class="dnote"> {t(L, 'draft_price_market')}</span>}
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              readOnly={orderType === 'market'}
+              disabled={busyOrSent}
+              value={orderType === 'market' ? (price ? `≈ ${price.lastDisplay}` : '—') : limitPrice}
+              onInput={(e) => setLimitPrice((e.target as HTMLInputElement).value)}
+              aria-label={t(L, 'draft_price')}
+            />
+          </label>
+        </div>
+        <label class="dfield">
+          <span class="dlab">
+            {t(L, 'draft_size')}
+            <span class="dnote"> · {frame.sizeAsset}</span>
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={size}
+            disabled={busyOrSent}
+            onInput={(e) => setSize((e.target as HTMLInputElement).value)}
+            aria-label={`${t(L, 'draft_size')} (${frame.sizeAsset})`}
+          />
+        </label>
+        {perp && (
+          <label class="dfield">
+            <span class="dlab">
+              {t(L, 'draft_leverage')}
+              <output class="dlevout">{leverage}×</output>
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={maxLev}
+              step={1}
+              value={leverage}
+              disabled={busyOrSent}
+              onInput={(e) => setLeverage(Number((e.target as HTMLInputElement).value))}
+              aria-label={t(L, 'draft_leverage')}
+            />
+          </label>
+        )}
+        {perp && frame.marginModes.length > 1 && (
+          <label class="dfield">
+            <span class="dlab">{t(L, 'draft_margin')}</span>
+            <select
+              value={marginMode}
+              disabled={busyOrSent}
+              onChange={(e) =>
+                setMarginMode((e.target as HTMLSelectElement).value as 'isolated' | 'cross')
+              }
+            >
+              {frame.marginModes.map((m) => (
+                <option value={m} key={m}>
+                  {t(L, m === 'isolated' ? 'draft_margin_isolated' : 'draft_margin_cross')}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      <button
+        type="button"
+        class="cta"
+        disabled={!canSubmit}
+        aria-busy={phase === 'busy'}
+        title={!live && phase === 'editing' ? t(L, 'ticket_offline_hint') : undefined}
+        onClick={() => void submit()}
+      >
+        {phase === 'sent' ? t(L, 'draft_sent') : phase === 'busy' ? t(L, 'confirming') : frame.cta}
+      </button>
+      {failed && <div class="action-failed">{t(L, 'action_failed')}</div>}
+      {phase === 'editing' && (
+        <button type="button" class="ddismiss" onClick={dismiss}>
+          {t(L, 'draft_dismiss')}
+        </button>
+      )}
+      {frame.footnote && <div class="tfoot">{frame.footnote}</div>}
     </div>
   )
 }
@@ -660,6 +895,8 @@ export function renderFrame(frame: Frame): JSX.Element | null {
       return <ResearchBriefCard frame={frame} />
     case 'order_ticket':
       return <OrderTicketCard frame={frame} />
+    case 'order_draft':
+      return <OrderDraftCard frame={frame} />
     case 'lifecycle':
       return <LifecycleCard frame={frame} />
     case 'advice_decline':
@@ -681,6 +918,6 @@ export function renderFrame(frame: Frame): JSX.Element | null {
     case 'user_echo':
       return <UserEchoCard frame={frame} />
     default:
-      return null // orders_snapshot & pulse are handled by stores, never rendered in-thread
+      return null // orders_snapshot, pulse & price_tick are handled by stores, never rendered in-thread
   }
 }

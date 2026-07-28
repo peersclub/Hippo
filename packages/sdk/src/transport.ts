@@ -8,7 +8,7 @@ import {
   venueName,
 } from './state.js'
 
-export type TransportConfig = { gateway: string; key: string; tokenUrl?: string }
+export type TransportConfig = { gateway: string; key: string; tokenUrl?: string; symbol?: string }
 
 let cfg: TransportConfig | null = null
 let es: EventSource | null = null
@@ -83,7 +83,14 @@ async function mint(config: TransportConfig): Promise<MintResult> {
     res = await fetch(`${config.gateway}/v1/session`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ partnerKey: config.key }),
+      // The embed's page symbol (data-hippo-symbol) rides along when set, so
+      // the session starts scoped to the market the trader is looking at.
+      // Context, never a command — the gateway validates and may ignore it.
+      body: JSON.stringify(
+        config.symbol
+          ? { partnerKey: config.key, symbol: config.symbol }
+          : { partnerKey: config.key },
+      ),
     })
   } catch {
     return 'retry'
