@@ -514,7 +514,7 @@ function Chips() {
   const chips = activeChips.value
   const [focusIdx, setFocusIdx] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
-  const chipsKey = chips.join(' ')
+  const chipsKey = chips.join('\u0000')
   // Reset the roving focus whenever the chip set itself changes.
   useEffect(() => setFocusIdx(0), [chipsKey])
   if (chips.length === 0) return null
