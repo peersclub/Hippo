@@ -2,20 +2,24 @@
  * Stage 4a of `hippo init` (Build Plan/05) — the `mapping.ts` generator.
  *
  * Every data-returning op the draft config flagged `needsMappingCode` gets a
- * typed function stub that transforms a venue API response into the CTI
- * display shape the SDK renders (PreparedTicket, LifecycleEvent, Portfolio,
- * …). This module emits the DETERMINISTIC scaffolding only: a self-contained,
- * compilable TypeScript module with one stub per op, each carrying a `// TODO`
- * and a pointer at the hand-built Assetworks adapter as the reference pattern.
+ * typed function that transforms a venue API response into the CTI display
+ * shape the SDK renders (PreparedTicket, LifecycleEvent, Portfolio, …).
  *
- * The actual synthesis of a mapping BODY is Open Decision #3 (frontier
- * codegen, needs model access) and is deliberately NOT done here. It sits
- * behind the `synthesizeMappingBody()` seam below, which today returns a
- * throwing stub so the generated module typechecks and fails loudly if it is
- * ever shipped unimplemented. Wiring a model into that one function is the
- * whole of the remaining stage-4 work.
+ * Two paths produce the file:
+ *   - DETERMINISTIC (`draftMapping` + `renderMappingTs`): a self-contained,
+ *     compilable module of throwing stubs, each carrying a `// TODO` and a
+ *     pointer at the hand-built Assetworks adapter as the reference pattern.
+ *   - MODEL-DRIVEN (`synthesizeMappingModule`, resolving Open Decision #3):
+ *     per op, a frontier model is shown the venue's documented response shape
+ *     next to the exact CTI target declaration and asked for the function
+ *     BODY only. Every candidate is validated by rendering the full module
+ *     and strict-typechecking it (`typecheckModule`); a failing candidate
+ *     gets ONE retry with the diagnostics appended, then falls back to the
+ *     throwing stub. Unconfigured or failing model → byte-identical stubs.
  */
 import type { CapabilityId } from '../scan/types.js'
+import type { LlmClient } from './llm.js'
+import { typecheckModule } from './typecheck.js'
 import type { AdapterConfig } from './types.js'
 
 /** One CTI display shape the generated module can target. */
@@ -91,6 +95,12 @@ export interface MappingOp {
   fn: string
   returnType: string
   referenceHint: string
+  /**
+   * Compact documented success-response shape of the endpoint (threaded from
+   * the scan via AdapterOperation). Absent → the venue documents no schema
+   * and the synthesized mapping must be written defensively.
+   */
+  responseShape?: string
 }
 
 export interface MappingModule {
@@ -131,6 +141,7 @@ export function draftMapping(config: AdapterConfig): MappingModule {
       fn: target.fn,
       returnType: target.returnType,
       referenceHint: target.referenceHint,
+      ...(op.responseShape !== undefined ? { responseShape: op.responseShape } : {}),
     })
     for (const t of target.needs) targets.add(t)
   }
@@ -144,13 +155,12 @@ export function draftMapping(config: AdapterConfig): MappingModule {
 
 // ── The frontier-codegen seam (Open Decision #3) ──────────────────────────
 /**
- * SEAM: where a frontier model eventually synthesizes the transform body.
- *
- * Given the venue response schema and the CTI target shape, a model call would
- * return the body of the mapping function. We do NOT call a model here — this
- * batch is deterministic and testable. Until that lands, we emit a stub that
- * throws, so the generated module compiles yet fails loudly rather than
- * silently returning a wrong shape if shipped unimplemented.
+ * The DETERMINISTIC fallback body: a stub that throws, so the generated
+ * module compiles yet fails loudly rather than silently returning a wrong
+ * shape if shipped unimplemented. This is what every op gets when no model is
+ * configured, when the model call fails, and when a synthesized body fails
+ * the strict typecheck twice. The model-driven path that resolves Open
+ * Decision #3 lives in `synthesizeMappingModule` below.
  *
  * Returns the function body only (indented two spaces), without braces.
  */
@@ -214,9 +224,26 @@ const TARGET_DECLS: Record<TargetName, string> = {
 }`,
 }
 
-export function renderMappingTs(module: MappingModule): string {
+/**
+ * A function body to embed instead of the deterministic throwing stub, keyed
+ * by function name in `renderMappingTs`. `synthesized: true` marks a
+ * model-written, typecheck-validated body (the doc comment says so instead of
+ * carrying a TODO); `false` keeps the stub doc comment — used when a failed
+ * synthesis falls back to the stub with a note line prepended.
+ */
+export interface RenderedBody {
+  /** Function body statements only, two-space indented, no braces. */
+  body: string
+  synthesized: boolean
+}
+
+export function renderMappingTs(
+  module: MappingModule,
+  bodies?: ReadonlyMap<string, RenderedBody>,
+): string {
   const lines: string[] = []
   const push = (...ls: string[]) => lines.push(...ls)
+  const anySynthesized = module.ops.some((op) => bodies?.get(op.fn)?.synthesized)
 
   push(
     `/**`,
@@ -224,11 +251,20 @@ export function renderMappingTs(module: MappingModule): string {
     ` *`,
     ` * Generated by \`hippo init\` (stage 4). One function per data-returning op`,
     ` * whose venue response shape diverges from the Canonical Trading Interface.`,
-    ` * Each is a compilable stub that THROWS until implemented — reference the`,
-    ` * hand-built adapter at services/seam/src/koinbx-venue.ts for the pattern.`,
-    ` */`,
-    '',
   )
+  if (anySynthesized) {
+    push(
+      ` * Bodies marked "synthesized" were model-written and strict-typechecked;`,
+      ` * review them before shipping. Any remaining stub THROWS until implemented`,
+      ` * — reference the hand-built adapter at services/seam/src/assetworks-venue.ts.`,
+    )
+  } else {
+    push(
+      ` * Each is a compilable stub that THROWS until implemented — reference the`,
+      ` * hand-built adapter at services/seam/src/assetworks-venue.ts for the pattern.`,
+    )
+  }
+  push(` */`, '')
 
   if (module.ops.length === 0) {
     push(
@@ -254,21 +290,230 @@ export function renderMappingTs(module: MappingModule): string {
   )
 
   for (const op of module.ops) {
+    const override = bodies?.get(op.fn)
     push(
       '',
       '/**',
       ` * ${op.label} — venue endpoint: ${op.endpoint}`,
       ` * Transforms the venue response into the CTI \`${op.returnType}\` shape.`,
       ' *',
-      ' * TODO(hippo:stage4): implement. Reference pattern —',
-      ` * services/seam/src/koinbx-venue.ts (${op.referenceHint}).`,
+    )
+    if (override?.synthesized) {
+      push(
+        ' * Body synthesized by `hippo init` stage 4 (model) and validated by a',
+        ' * strict standalone typecheck. Review before shipping; reference pattern —',
+        ` * services/seam/src/assetworks-venue.ts (${op.referenceHint}).`,
+      )
+    } else {
+      push(
+        ' * TODO(hippo:stage4): implement. Reference pattern —',
+        ` * services/seam/src/assetworks-venue.ts (${op.referenceHint}).`,
+      )
+    }
+    push(
       ' */',
       `export function ${op.fn}(raw: VenueResponse): ${op.returnType} {`,
-      synthesizeMappingBody(op),
+      override?.body ?? synthesizeMappingBody(op),
       '}',
     )
   }
 
   push('')
   return lines.join('\n')
+}
+
+// ── Model-driven synthesis (resolves Open Decision #3) ─────────────────────
+
+/** A failed attempt fed back to the model on the single retry. */
+export interface PreviousAttempt {
+  body: string
+  diagnostics: string[]
+}
+
+/**
+ * The surgical per-op prompt: capability + endpoint + the venue's documented
+ * response shape (or an explicit "undocumented — map defensively" note) +
+ * the exact CTI declarations the generated module inlines + the fixed
+ * function signature, then the hard rules. The model returns body STATEMENTS
+ * only; everything structural is already fixed by the renderer.
+ */
+export function buildMappingPrompt(op: MappingOp, previous?: PreviousAttempt): string {
+  const target = CAPABILITY_TARGETS[op.capability]
+  const decls = (target?.needs ?? []).map((t) => TARGET_DECLS[t]).join('\n\n')
+
+  const shape = op.responseShape
+    ? `Documented venue response shape (from the venue's OpenAPI spec):\n${op.responseShape}`
+    : 'The venue documents NO response schema for this endpoint. Write a defensive ' +
+      'mapping: narrow `raw` step by step with typeof/optional checks and throw a ' +
+      'descriptive Error naming the missing field when an expected field is absent.'
+
+  const lines = [
+    'You are completing one TypeScript function inside a generated venue-adapter mapping module for Hippo.',
+    '',
+    `Capability: ${op.capability} (${op.label})`,
+    `Venue endpoint: ${op.endpoint}`,
+    '',
+    shape,
+    '',
+    'The module already declares (do NOT redeclare any of these):',
+    'export type VenueResponse = unknown',
+    '',
+    decls,
+    '',
+    'Complete exactly this function by providing its body:',
+    `export function ${op.fn}(raw: VenueResponse): ${op.returnType} {`,
+    '  // your statements here',
+    '}',
+    '',
+    'Hard rules:',
+    '- Return ONLY the statements of the function body — no function signature, no surrounding braces, no imports, no new dependencies, no markdown fences, no prose.',
+    '- `raw` is `unknown`: narrow it defensively (typeof checks, optional access) before reading any field. Do not use `any`.',
+    '- Monetary and quantity values are strings in the CTI shapes — carry venue numbers through as strings (e.g. String(x)); never parse money to float.',
+    `- When \`raw\` is missing what the mapping needs, throw new Error('${op.fn}: <what was wrong>') — never fabricate placeholder values.`,
+    '- The body must compile under strict TypeScript with zero diagnostics.',
+  ]
+
+  if (previous) {
+    lines.push(
+      '',
+      'A previous attempt failed the strict typecheck.',
+      'Previous body:',
+      previous.body,
+      '',
+      'TypeScript diagnostics:',
+      ...previous.diagnostics.map((d) => `- ${d}`),
+      '',
+      'Fix the errors and return the corrected function body statements only.',
+    )
+  }
+
+  return lines.join('\n')
+}
+
+/**
+ * Normalize a model completion into embeddable body statements: strip
+ * markdown fences and control bytes, unwrap an (unrequested) full function,
+ * re-indent to the renderer's two-space base. Null when nothing usable
+ * remains.
+ */
+export function extractBody(completion: string): string | null {
+  let text = completion.replace(/\r/g, '')
+  // Never let raw control bytes into generated source.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+  text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+
+  // Prefer the first fenced block when the model wrapped the answer anyway.
+  const fence = /```(?:[a-zA-Z]*)?\n([\s\S]*?)```/.exec(text)
+  if (fence?.[1]) text = fence[1]
+  text = text.trim()
+
+  // Unwrap a full function definition down to its body statements.
+  if (/^(export\s+)?function\b/.test(text)) {
+    const open = text.indexOf('{')
+    const close = text.lastIndexOf('}')
+    if (open === -1 || close <= open) return null
+    text = text.slice(open + 1, close).replace(/^\n+|\n+$/g, '')
+  }
+  if (text.length === 0) return null
+
+  // Re-indent: strip the common leading indent, then apply the two-space base.
+  const rawLines = text.split('\n')
+  const indents = rawLines
+    .filter((l) => l.trim().length > 0)
+    .map((l) => l.match(/^[ \t]*/)?.[0].length ?? 0)
+  const common = indents.length > 0 ? Math.min(...indents) : 0
+  const body = rawLines.map((l) => (l.trim().length === 0 ? '' : `  ${l.slice(common)}`)).join('\n')
+  return body.trim().length > 0 ? body : null
+}
+
+/** Per-op result of the synthesize→validate→retry→fallback loop. */
+export interface SynthesisOutcome {
+  fn: string
+  capability: CapabilityId
+  outcome: 'synthesized' | 'stubbed'
+  /** Plain-words reason, e.g. "typechecked on first attempt". */
+  detail: string
+}
+
+export interface SynthesizedMapping {
+  module: MappingModule
+  /** The rendered mapping.ts source (synthesized bodies where accepted). */
+  source: string
+  outcomes: SynthesisOutcome[]
+}
+
+const STUB_FALLBACK_NOTE = '  // stage4: model synthesis failed typecheck — stub kept'
+
+/**
+ * The async stage-4 path: per `needsMappingCode` op, ask the model for a
+ * mapping body, validate by rendering the FULL module and running the same
+ * strict standalone typecheck the test suite uses, retry once with the
+ * diagnostics on failure, and fall back to the deterministic throwing stub
+ * otherwise. With `client: null` (model unconfigured) the output is
+ * byte-identical to the deterministic `renderMappingTs(draftMapping(config))`.
+ *
+ * `typecheck` is injectable for hermetic tests; production uses the real
+ * `typecheckModule`.
+ */
+export async function synthesizeMappingModule(
+  config: AdapterConfig,
+  client: LlmClient | null,
+  typecheck: (source: string) => string[] = typecheckModule,
+): Promise<SynthesizedMapping> {
+  const module = draftMapping(config)
+  const bodies = new Map<string, RenderedBody>()
+  const outcomes: SynthesisOutcome[] = []
+  const stubbed = (op: MappingOp, detail: string) =>
+    outcomes.push({ fn: op.fn, capability: op.capability, outcome: 'stubbed', detail })
+
+  for (const op of module.ops) {
+    if (!client) {
+      stubbed(op, 'model not configured (set LLM_BASE_URL and LLM_MODEL)')
+      continue
+    }
+
+    /** Validate a candidate inside the full module; empty array = accepted. */
+    const validate = (body: string): string[] => {
+      bodies.set(op.fn, { body, synthesized: true })
+      const diagnostics = typecheck(renderMappingTs(module, bodies))
+      if (diagnostics.length > 0) bodies.delete(op.fn)
+      return diagnostics
+    }
+
+    const first = extractBody((await client.complete(buildMappingPrompt(op))) ?? '')
+    if (first === null) {
+      stubbed(op, 'model returned no usable body')
+      continue
+    }
+    const firstDiagnostics = validate(first)
+    if (firstDiagnostics.length === 0) {
+      outcomes.push({
+        fn: op.fn,
+        capability: op.capability,
+        outcome: 'synthesized',
+        detail: 'typechecked on first attempt',
+      })
+      continue
+    }
+
+    const retryPrompt = buildMappingPrompt(op, { body: first, diagnostics: firstDiagnostics })
+    const second = extractBody((await client.complete(retryPrompt)) ?? '')
+    if (second !== null && validate(second).length === 0) {
+      outcomes.push({
+        fn: op.fn,
+        capability: op.capability,
+        outcome: 'synthesized',
+        detail: 'typechecked after one retry',
+      })
+      continue
+    }
+
+    bodies.set(op.fn, {
+      body: `${STUB_FALLBACK_NOTE}\n${synthesizeMappingBody(op)}`,
+      synthesized: false,
+    })
+    stubbed(op, 'model synthesis failed typecheck twice — throwing stub kept')
+  }
+
+  return { module, source: renderMappingTs(module, bodies), outcomes }
 }

@@ -151,4 +151,11 @@ export interface ScanResult {
    * found or no trade features matched.
    */
   tradeFeatures?: VenueCapabilitiesShape
+  /**
+   * Compact documented success-response shape per endpoint ("METHOD /path"),
+   * extracted from the spec — the venue-side input to stage-4 mapping
+   * synthesis. Optional: absent for scans made before the field existed;
+   * endpoints with no documented schema are simply missing from the record.
+   */
+  responseShapes?: Record<string, string>
 }

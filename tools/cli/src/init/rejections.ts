@@ -33,7 +33,7 @@ const CANONICAL: Record<CanonicalReason, ReasonCopy> = {
   },
   auth_failed: {
     reason: 'The venue rejected the credentials or request signature.',
-    fix: 'Re-check the API key and HMAC signing — see signedPost() in services/seam/src/koinbx-venue.ts.',
+    fix: 'Re-check the API key and HMAC signing — see signedPost() in services/seam/src/assetworks-venue.ts.',
   },
   insufficient_funds: {
     reason: 'The account did not have enough balance to place the order.',

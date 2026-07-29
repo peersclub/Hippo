@@ -44,6 +44,7 @@ export function draftAdapterConfig(scan: ScanResult): AdapterConfig {
   const operations: AdapterOperation[] = scan.capabilities.map((cap) => {
     const [endpoint, ...alternates] = cap.endpoints
     const mapped = cap.status === 'found' && typeof endpoint === 'string'
+    const responseShape = mapped ? scan.responseShapes?.[endpoint] : undefined
     return {
       capability: cap.id,
       label: cap.label,
@@ -52,6 +53,7 @@ export function draftAdapterConfig(scan: ScanResult): AdapterConfig {
       alternates: mapped ? alternates.filter((a) => !a.startsWith('…')) : [],
       needsMappingCode: mapped && DATA_RETURNING.has(cap.id),
       note: mapped ? 'confirm request/response shape against the CTI' : cap.consequence,
+      ...(responseShape !== undefined ? { responseShape } : {}),
     }
   })
 
