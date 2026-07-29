@@ -54,8 +54,15 @@ export type TicketQuote = {
   sizeNum: number
   price: number
   feeRate: number
+  /** Set at confirm handoff — mirrors the orchestrator's confirmedTickets set
+   * into durable state, so a cold resume restores post-confirm routing truth
+   * (cancel copy must never claim "nothing was sent" for a confirmed order). */
+  confirmed?: boolean
   fillTimer?: ReturnType<typeof setTimeout>
 }
+
+/** TicketQuote minus its in-process timer — what `session:{id}:meta` carries. */
+type SerializedTicketQuote = Omit<TicketQuote, 'fillTimer'>
 
 /** Fixed (non-editable) fields of a pending interactive order draft — what
  * the trader CANNOT change on the card. Submit correlates the edited params
@@ -136,6 +143,17 @@ export interface SessionStore {
   revoke(id: string): boolean
   /** Durable cold-start resume (Redis only); undefined for in-memory. */
   resume?(id: string): Promise<Session | null>
+  /** Durable ticket→session routing for venue events (Redis only): mirror a
+   * live ticket to `session:ticket:{ticketId}` (TTL'd) and re-snapshot the
+   * session meta, so a restarted pod can still route the ticket's events.
+   * All three are optional — absent on the in-memory store, whose behaviour
+   * stays exactly as before. */
+  registerTicket?(session: Session, ticketId: string, ttlMs: number): void
+  /** Drop the durable mapping and re-snapshot the meta. Callers delete the
+   * ticket from `session.tickets` FIRST so the snapshot reflects it. */
+  releaseTicket?(session: Session, ticketId: string): void
+  /** ticketId → sessionId from the durable mapping; null when unknown. */
+  resolveTicket?(ticketId: string): Promise<string | null>
 }
 
 export class InMemorySessionStore implements SessionStore {
@@ -224,6 +242,10 @@ type SessionMeta = {
   seq: number
   language: string | null
   degradedBannerShown: boolean
+  /** Live (non-terminal) prepared tickets so venue events still route after a
+   * durable resume. Small by construction: terminal phases delete entries, so
+   * only in-flight orders are ever serialized. Absent when none are live. */
+  tickets?: Record<string, SerializedTicketQuote>
 }
 
 /**
@@ -258,6 +280,10 @@ export class RedisSessionStore implements SessionStore {
 
   private framesKey(id: string): string {
     return `session:${id}:frames`
+  }
+
+  private ticketKey(ticketId: string): string {
+    return `session:ticket:${ticketId}`
   }
 
   create(partner: PartnerConfig, venueUserId: string | null): Session {
@@ -319,7 +345,9 @@ export class RedisSessionStore implements SessionStore {
       expiresAt: Date.now() + SESSION_TTL_MS,
       ...(meta.language ? { language: meta.language } : {}),
       degradedBannerShown: Boolean(meta.degradedBannerShown),
-      tickets: new Map(),
+      // In-flight tickets survive the restart — the orchestrator's durable
+      // ticket mapping resolves back to this session and reads them here.
+      tickets: new Map(Object.entries(meta.tickets ?? {})),
       drafts: new Map(),
     }
     this.local.set(id, session)
@@ -354,6 +382,27 @@ export class RedisSessionStore implements SessionStore {
     return true
   }
 
+  /** Mirror a live ticket to a TTL'd `session:ticket:{id}` key (and refresh
+   * the meta snapshot, which serializes `session.tickets`). Re-registering an
+   * existing ticket just refreshes both — callers do so at confirm and every
+   * backstop re-arm so durable state tracks the live routing window. */
+  registerTicket(session: Session, ticketId: string, ttlMs: number): void {
+    this.persist(session)
+    this.enqueue(() => this.redis.set(this.ticketKey(ticketId), session.id, 'PX', ttlMs))
+  }
+
+  /** Drop the durable ticket mapping (terminal phase / cancel / backstop
+   * expiry). The caller already removed it from `session.tickets`, so the
+   * refreshed meta snapshot no longer carries it either. */
+  releaseTicket(session: Session, ticketId: string): void {
+    this.persist(session)
+    this.enqueue(() => this.redis.del(this.ticketKey(ticketId)))
+  }
+
+  async resolveTicket(ticketId: string): Promise<string | null> {
+    return this.redis.get(this.ticketKey(ticketId))
+  }
+
   /** Await all pending metadata + journal writes (resume + tests need this). */
   async flush(): Promise<void> {
     await this.pending
@@ -363,12 +412,19 @@ export class RedisSessionStore implements SessionStore {
   }
 
   private persist(session: Session): void {
+    // Serialize live tickets without their in-process timers (unserializable
+    // and pod-local by nature — the resuming pod re-arms its own backstop).
+    const tickets: Record<string, SerializedTicketQuote> = {}
+    for (const [ticketId, { fillTimer: _timer, ...quote }] of session.tickets) {
+      tickets[ticketId] = quote
+    }
     const meta: SessionMeta = {
       partnerId: session.partner.partnerId,
       venueUserId: session.venueUserId,
       seq: session.seq,
       language: session.language ?? null,
       degradedBannerShown: session.degradedBannerShown,
+      ...(session.tickets.size > 0 ? { tickets } : {}),
     }
     this.enqueue(() =>
       this.redis.set(this.metaKey(session.id), JSON.stringify(meta), 'PX', SESSION_TTL_MS),
@@ -384,7 +440,11 @@ export class RedisSessionStore implements SessionStore {
   private evict(session: Session): void {
     clearTicketTimers(session)
     this.local.delete(session.id)
-    this.enqueue(() => this.redis.del(this.metaKey(session.id), this.framesKey(session.id)))
+    // Take the session's durable ticket mappings down with it (revoke must
+    // not leave keys that could route venue events into a dead session).
+    const keys = [this.metaKey(session.id), this.framesKey(session.id)]
+    for (const ticketId of session.tickets.keys()) keys.push(this.ticketKey(ticketId))
+    this.enqueue(() => this.redis.del(...keys))
   }
 
   private sweep(): void {

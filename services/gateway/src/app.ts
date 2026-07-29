@@ -128,6 +128,9 @@ export async function buildApp(opts: GatewayOptions = {}) {
     emit,
     telemetry,
     log: app.log,
+    // Durable ticket→session routing rides the session store: a no-op on the
+    // in-memory store, restart-proof on Redis (see orchestrator/index.ts).
+    sessions,
   })
 
   // Shared guard for internal routes: INTERNAL_API_TOKEN, timing-safe and
@@ -288,7 +291,9 @@ export async function buildApp(opts: GatewayOptions = {}) {
       reply.code(400)
       return { error: 'invalid venue event' }
     }
-    const routed = orchestrator.onVenueEvent(event)
+    // Async: a routing miss may consult the durable ticket mapping and
+    // cold-resume the owning session (Redis-backed stores) before routing.
+    const routed = await orchestrator.onVenueEvent(event)
     return { ok: true, routed }
   })
 

@@ -24,7 +24,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { VenueCapabilities } from '@hippo/protocol'
-import type { DraftFields, Session } from '../plugins/auth.js'
+import type { DraftFields, Session, SessionStore } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft } from '../plugins/sse.js'
 import { emitTransient } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
@@ -87,13 +87,20 @@ export type OrchestratorDeps = {
   emit: EmitFrame
   telemetry: Telemetry
   log: Log
+  /** The gateway's session store. On a Redis-backed store the orchestrator
+   * mirrors ticket→session routing durably (registerTicket/resolveTicket),
+   * so in-flight orders survive a restart; the in-memory store exposes none
+   * of those hooks and behaves exactly as before. */
+  sessions: SessionStore
 }
 
 export type Orchestrator = {
   onStreamConnect(session: Session): void
   handleUplink(session: Session, uplink: Uplink): void
-  /** Venue lifecycle event from the seam callback. false = unknown ticket. */
-  onVenueEvent(event: import('./seam.js').VenueEvent): boolean
+  /** Venue lifecycle event from the seam callback. false = unknown ticket.
+   * Async: a miss on the live routing map may consult the durable (Redis)
+   * ticket mapping and cold-resume the owning session before routing. */
+  onVenueEvent(event: import('./seam.js').VenueEvent): Promise<boolean>
 }
 
 function userKey(session: Session): string {
@@ -174,7 +181,7 @@ function defaultInterpretation(intent: string): string {
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
-  const { intel, market, memory, seam, emit, telemetry, log } = deps
+  const { intel, market, memory, seam, emit, telemetry, log, sessions } = deps
 
   /**
    * Post-turn auto-learning (PRE-PROD, gated by `memoryLab`): extract durable
@@ -501,6 +508,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   /** Per-ticket backstop timers (see ticketTimeoutMs). */
   const ticketTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+  /** Durable ticket-key TTL slack past the backstop window: the key must
+   * outlive the timer that ends the ticket, never the other way round. */
+  const TICKET_KEY_TTL_SLACK_MS = 30_000
+
+  /** Mirror the ticket→session mapping durably (Redis-backed stores only —
+   * `?.` makes this a no-op on the in-memory store, keeping that path
+   * byte-identical). Also re-snapshots the session meta, so the serialized
+   * `session.tickets` (incl. confirm state) stays current. */
+  function persistTicket(session: Session, ticketId: string): void {
+    sessions.registerTicket?.(session, ticketId, ticketTimeoutMs + TICKET_KEY_TTL_SLACK_MS)
+  }
+
+  /** Drop the durable mapping — call AFTER deleting from `session.tickets`
+   * so the refreshed meta snapshot no longer carries the ticket. */
+  function releaseTicket(session: Session, ticketId: string): void {
+    sessions.releaseTicket?.(session, ticketId)
+  }
+
   function clearTicketTimeout(ticketId: string): void {
     const timer = ticketTimers.get(ticketId)
     if (timer !== undefined) {
@@ -510,8 +535,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   }
 
   /** (Re)arm the no-venue-event backstop: past the window, close the card
-   * with an honest terminal frame instead of leaving it waiting forever. */
+   * with an honest terminal frame instead of leaving it waiting forever.
+   * Every (re)arm also refreshes the durable ticket mapping, so its TTL
+   * tracks the live backstop window. */
   function armTicketTimeout(session: Session, ticketId: string): void {
+    persistTicket(session, ticketId)
     clearTicketTimeout(ticketId)
     const timer = setTimeout(() => {
       ticketTimers.delete(ticketId)
@@ -521,6 +549,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ticketSessions.delete(ticketId)
       session.tickets.delete(ticketId)
       confirmedTickets.delete(ticketId)
+      releaseTicket(session, ticketId)
       log.warn({ ticketId }, 'no venue event within the backstop window')
       emit(session, {
         type: 'lifecycle',
@@ -646,6 +675,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       price: 0, // actuals come back on venue events; the gateway holds no math
       feeRate: 0,
     })
+    // Durable mirror of the routing entry above (Redis-backed stores only):
+    // a restarted pod resolves the ticket back to this session, so the venue
+    // FILL still lands in the trader's thread instead of being dropped.
+    persistTicket(session, ticket.ticketId)
 
     emit(session, {
       type: 'order_ticket',
@@ -885,6 +918,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // NO event ever arrives (lost callback), the armed backstop closes the
     // card honestly instead of waiting forever.
     confirmedTickets.add(ticketId)
+    // Mirror the confirm into the durable ticket state (persisted by the
+    // armTicketTimeout refresh below): a post-restart resume must restore
+    // this, or cancel/routing copy would lie about what reached the venue.
+    const quote = session.tickets.get(ticketId)
+    if (quote) quote.confirmed = true
     armTicketTimeout(session, ticketId)
     seam.confirm(ticketId).catch((err) => {
       log.error({ err, ticketId }, 'seam confirm failed')
@@ -892,6 +930,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       session.tickets.delete(ticketId)
       confirmedTickets.delete(ticketId)
       clearTicketTimeout(ticketId)
+      releaseTicket(session, ticketId)
       emit(session, {
         type: 'lifecycle',
         ticketId,
@@ -910,6 +949,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ticketSessions.delete(ticketId)
       session.tickets.delete(ticketId)
       clearTicketTimeout(ticketId)
+      releaseTicket(session, ticketId)
       // Fire-and-forget: locally the ticket is gone either way; the seam call
       // stops the venue-side lifecycle.
       seam.cancel(ticketId).catch((err) => log.warn({ err, ticketId }, 'seam cancel failed'))
@@ -954,12 +994,41 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     )
   }
 
+  /** Cold-restart fallback for venue-event routing: the in-process
+   * `ticketSessions` map died with the old pod, but a Redis-backed store
+   * holds the durable `session:ticket:{id}` → sessionId mapping. Resolve it,
+   * cold-resume the session (frame journal replayed, `session.tickets`
+   * rehydrated from meta), re-register the live routing entry, restore the
+   * confirm state, and re-arm the backstop. Returns null — the audit-only
+   * path — when the store isn't durable, the ticket is unknown/expired, or
+   * Redis is unreachable (never an error into the webhook). */
+  async function resolveTicketSession(ticketId: string): Promise<Session | null> {
+    if (!sessions.resolveTicket || !sessions.resume) return null
+    try {
+      const sessionId = await sessions.resolveTicket(ticketId)
+      if (!sessionId) return null
+      const session = await sessions.resume(sessionId)
+      if (!session) return null
+      ticketSessions.set(ticketId, session)
+      if (session.tickets.get(ticketId)?.confirmed) confirmedTickets.add(ticketId)
+      armTicketTimeout(session, ticketId)
+      log.info({ ticketId, sessionId }, 'venue-event routing restored from durable ticket mapping')
+      return session
+    } catch (err) {
+      log.warn({ err, ticketId }, 'durable ticket resolve failed — treating as unknown ticket')
+      return null
+    }
+  }
+
   /** Venue lifecycle event (from the seam's callback webhook) → frame.
    * This is the mechanism behind "status changes made elsewhere still arrive
    * in the thread": the frame journal + SSE resume deliver it even if the
-   * trader reconnects later. */
-  function onVenueEvent(event: import('./seam.js').VenueEvent): boolean {
-    const session = ticketSessions.get(event.ticketId)
+   * trader reconnects later. A miss on the live map falls back to the durable
+   * ticket mapping (Redis-backed stores), so a gateway restart no longer
+   * drops an in-flight order's fill. */
+  async function onVenueEvent(event: import('./seam.js').VenueEvent): Promise<boolean> {
+    const session =
+      ticketSessions.get(event.ticketId) ?? (await resolveTicketSession(event.ticketId))
     if (!session) return false // unknown/expired ticket — audit-only
     const side = session.tickets.get(event.ticketId)?.side
     emit(session, {
@@ -986,6 +1055,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       session.tickets.delete(event.ticketId)
       confirmedTickets.delete(event.ticketId)
       clearTicketTimeout(event.ticketId)
+      releaseTicket(session, event.ticketId)
     }
     return true
   }
