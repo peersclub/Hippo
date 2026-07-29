@@ -201,6 +201,9 @@ importers:
 
   services/host-venue:
     dependencies:
+      '@hippo/stores':
+        specifier: workspace:*
+        version: link:../../packages/stores
       fastify:
         specifier: ^5.4.0
         version: 5.10.0

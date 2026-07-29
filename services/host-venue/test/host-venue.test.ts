@@ -220,7 +220,15 @@ describe('host-venue signed trade wire', () => {
 })
 
 describe('host-venue realism & policy levers', () => {
-  const spot = (o = {}) => ({ market: 'spot' as const, pairName: 'BTC-USDT', side: 'buy' as const, kind: 'market' as const, qty: 0.1, rate: 60_000, ...o })
+  const spot = (o = {}) => ({
+    market: 'spot' as const,
+    pairName: 'BTC-USDT',
+    side: 'buy' as const,
+    kind: 'market' as const,
+    qty: 0.1,
+    rate: 60_000,
+    ...o,
+  })
 
   it('maintenance mode rejects every placement', () => {
     const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, maintenance: true })
@@ -233,14 +241,28 @@ describe('host-venue realism & policy levers', () => {
   })
 
   it('enforces min/max order size and disabled capabilities', () => {
-    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, minOrderSize: 0.5, maxOrderSize: 2, capsPerp: false })
+    const store = new VenueStore(async () => 60_000, {
+      ...BASE_CONFIG,
+      minOrderSize: 0.5,
+      maxOrderSize: 2,
+      capsPerp: false,
+    })
     expect(() => store.place(USER, spot({ qty: 0.1 }))).toThrow(/minimum/i)
     expect(() => store.place(USER, spot({ qty: 5 }))).toThrow(/maximum/i)
-    expect(() => store.place(USER, spot({ market: 'perp', qty: 1, direction: 'long', leverage: 5, marginMode: 'isolated' }))).toThrow(/perp trading is disabled/i)
+    expect(() =>
+      store.place(
+        USER,
+        spot({ market: 'perp', qty: 1, direction: 'long', leverage: 5, marginMode: 'isolated' }),
+      ),
+    ).toThrow(/perp trading is disabled/i)
   })
 
   it('applies market slippage against the taker', async () => {
-    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG, feeRate: 0, slippagePct: 0.01 })
+    const store = new VenueStore(async () => 60_000, {
+      ...BASE_CONFIG,
+      feeRate: 0,
+      slippagePct: 0.01,
+    })
     const o = store.place(USER, spot({ qty: 0.1 }))
     await store.sweep()
     // buy fills 1% above 60000 = 60600

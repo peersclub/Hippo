@@ -12,8 +12,10 @@
  * Both drive the SAME VenueStore, so an order the conversational parasite
  * places shows up in the host's native blotter and moves the same balances.
  */
+import { getPool, type HostVenueStateStore, PostgresHostVenueStateStore } from '@hippo/stores'
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import { type ApiKeyRecord, verifySignature } from './hmac.js'
+import { SnapshotPersister } from './persistence.js'
 import type { VenueStore } from './store.js'
 import {
   type AdminConfig,
@@ -36,6 +38,18 @@ export type BuildOptions = {
   uiUserId?: string
   /** Instruments advertised to the parasite via /v1/capabilities. */
   instruments?: string[]
+  /**
+   * Durable book of record (host_venue_state, stores migration 014).
+   * Defaults to Postgres when DATABASE_URL is set (and not under test);
+   * unset with no DATABASE_URL, the venue is memory-only exactly as before —
+   * no pg connection is ever opened. Tests inject a shared store to prove
+   * the book survives a restart.
+   */
+  stateStore?: HostVenueStateStore
+  /** Row key in host_venue_state — one row per venue instance. */
+  venueId?: string
+  /** Coalescing window for debounced snapshot saves (ms). */
+  persistDebounceMs?: number
 }
 
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v))
@@ -89,6 +103,39 @@ export function buildService(opts: BuildOptions) {
   const app = Fastify({
     logger: process.env.NODE_ENV !== 'test' && { level: process.env.LOG_LEVEL ?? 'info' },
   })
+
+  // ── durable book of record ────────────────────────────────────────────────
+  // Same store-resolution shape as the seam's audit trail: Postgres when
+  // DATABASE_URL is set (never under NODE_ENV=test), injected store for
+  // tests, and nothing at all otherwise — a venue without a database keeps
+  // today's in-memory behaviour byte for byte.
+  const usePg = Boolean(process.env.DATABASE_URL) && process.env.NODE_ENV !== 'test'
+  const stateStore =
+    opts.stateStore ?? (usePg ? new PostgresHostVenueStateStore(getPool()) : undefined)
+  if (stateStore) {
+    const venueId = opts.venueId ?? 'assetworks'
+    const persister = new SnapshotPersister(
+      () => stateStore.save(venueId, store.snapshot(), Date.now()),
+      (err) => app.log.error({ err }, 'host-venue state save failed'),
+      opts.persistDebounceMs ?? 1_000,
+    )
+    // Boot: restore the persisted book BEFORE serving (app.listen/inject wait
+    // on onReady). A failed load is deliberately fatal — serving a blank book
+    // would clobber the durable one on the next debounced save.
+    app.addHook('onReady', async () => {
+      const snap = await stateStore.load(venueId)
+      if (snap !== null) {
+        store.restore(snap)
+        app.log.info({ venueId }, 'host-venue state restored')
+      }
+    })
+    // Every mutation (order/fill/balances/positions/config/handoff — incl.
+    // resetWallet and sweep-driven fills) funnels through the store's emit,
+    // so one subscription is the single persistence choke point.
+    store.subscribe(() => persister.schedule())
+    // Graceful shutdown: push any pending snapshot before the process goes.
+    app.addHook('onClose', () => persister.flush())
+  }
 
   // Preserve the RAW body so the HMAC verifies against the exact bytes signed.
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
@@ -387,7 +434,7 @@ export function buildService(opts: BuildOptions) {
       'access-control-allow-origin': '*',
     })
     const send = (e: unknown) => reply.raw.write(`data: ${JSON.stringify(e)}\n\n`)
-    send(store.snapshot(userId))
+    send(store.uiSnapshot(userId))
     const unsub = store.subscribe(send)
     const keepAlive = setInterval(() => reply.raw.write(': ping\n\n'), 15_000)
     req.raw.on('close', () => {
