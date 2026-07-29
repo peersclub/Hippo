@@ -1,3 +1,4 @@
+import { InMemorySeamAuditStore } from '@hippo/stores'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildService } from '../src/service.js'
 import { SimVenueAdapter } from '../src/sim-venue.js'
@@ -133,6 +134,14 @@ describe('seam service HTTP surface', () => {
     expect(kinds.filter((k) => k === 'confirm')).toHaveLength(1)
     expect(kinds.filter((k) => k === 'event_delivered')).toHaveLength(2)
     expect(app.audit.every((a) => a.idempotencyKey.startsWith('idem_'))).toBe(true)
+
+    // GET /internal/audit serves the same trail from the store, in the same
+    // backward-compatible shape: an array of entries, oldest first.
+    const served = await app.inject({ method: 'GET', url: '/internal/audit', headers: HDR })
+    expect(served.statusCode).toBe(200)
+    const rows = served.json() as Array<{ kind: string; idempotencyKey: string }>
+    expect(rows.map((r) => r.kind)).toEqual(kinds)
+    expect(rows.every((r) => r.idempotencyKey.startsWith('idem_'))).toBe(true)
     await app.close()
   })
 
@@ -302,6 +311,53 @@ describe('seam trust boundary — INTERNAL_API_TOKEN guard', () => {
     })
     expect(portfolio.statusCode).toBe(200)
     await app.close()
+  })
+})
+
+describe('durable seam audit store', () => {
+  it('two instances sharing one injected store: entries recorded by the first are listable by the second (pod-swap durability)', async () => {
+    const store = new InMemorySeamAuditStore()
+    const build = () =>
+      buildService(new SimVenueAdapter({ fillDelayMs: 10 }), {
+        internalToken: TOKEN,
+        callbackAllowedOrigins: 'http://gateway.test',
+        auditStore: store,
+      })
+
+    // "Pod 1" records a prepare + confirm through the shared store…
+    const first = build()
+    const prep = await first.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
+    const { ticketId } = prep.json() as { ticketId: string }
+    await first.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
+    })
+    await new Promise((r) => setTimeout(r, 60))
+    await first.close()
+
+    // …and "pod 2" (fresh process state, empty in-process tail) still serves
+    // the full trail — the audit record survived the restart.
+    const second = build()
+    expect(second.audit).toHaveLength(0)
+    const res = await second.inject({ method: 'GET', url: '/internal/audit', headers: HDR })
+    expect(res.statusCode).toBe(200)
+    const rows = res.json() as Array<{ kind: string; ticketId: string; idempotencyKey: string }>
+    expect(rows.map((r) => r.kind)).toContain('prepare')
+    expect(rows.map((r) => r.kind)).toContain('confirm')
+    expect(rows.every((r) => r.ticketId === ticketId)).toBe(true)
+    expect(rows.every((r) => r.idempotencyKey.startsWith('idem_'))).toBe(true)
+    // Oldest-first: the prepare precedes its confirm.
+    expect(rows.findIndex((r) => r.kind === 'prepare')).toBeLessThan(
+      rows.findIndex((r) => r.kind === 'confirm'),
+    )
+    await second.close()
   })
 })
 
