@@ -29,5 +29,10 @@ export {
 } from './partner-store.js'
 export { hashPassword, tokenHash, verifyPassword } from './password.js'
 export { InMemoryPlanStore, type PlanStore, PostgresPlanStore } from './plan-store.js'
+export {
+  InMemorySeamAuditStore,
+  PostgresSeamAuditStore,
+  type SeamAuditStore,
+} from './seam-audit-store.js'
 export * from './types.js'
 export { InMemoryUserStore, PostgresUserStore, type UserStore } from './user-store.js'

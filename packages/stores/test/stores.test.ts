@@ -5,6 +5,7 @@ import {
   InMemoryOperatorStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
+  InMemorySeamAuditStore,
   InMemoryUserStore,
 } from '../src/index.js'
 import { signJwtHS256, verifyJwtHS256 } from '../src/jwt.js'
@@ -177,6 +178,55 @@ describe('operator + audit stores', () => {
     const page = await audit.list({})
     expect(page.total).toBe(2)
     expect(page.rows[0]?.action).toBe('partner.suspend')
+  })
+})
+
+describe('InMemorySeamAuditStore', () => {
+  const entry = (ts: number, kind: 'prepare' | 'confirm', ticketId = 't_1') => ({
+    ts,
+    kind,
+    ticketId,
+    idempotencyKey: `idem_${ts}_${kind}`,
+  })
+
+  it('appends verbatim (seam-minted ts + key) and lists newest first', async () => {
+    const store = new InMemorySeamAuditStore()
+    await store.append(entry(1000, 'prepare'))
+    await store.append(entry(2000, 'confirm'))
+    // Same-millisecond entries tie-break on id, like Postgres (ts DESC, id DESC).
+    await store.append({ ...entry(2000, 'prepare', 't_2'), detail: 'buy 0.05 BTC/USDT' })
+
+    const page = await store.list({})
+    expect(page.total).toBe(3)
+    expect(page.rows.map((r) => r.ticketId)).toEqual(['t_2', 't_1', 't_1'])
+    expect(page.rows[0]?.detail).toBe('buy 0.05 BTC/USDT')
+    expect(page.rows[0]?.idempotencyKey).toBe('idem_2000_prepare')
+  })
+
+  it('filters by ticketId and pages', async () => {
+    const store = new InMemorySeamAuditStore()
+    await store.append(entry(1, 'prepare', 't_a'))
+    await store.append(entry(2, 'prepare', 't_b'))
+    await store.append(entry(3, 'confirm', 't_a'))
+
+    const forA = await store.list({ ticketId: 't_a' })
+    expect(forA.total).toBe(2)
+    expect(forA.rows.map((r) => r.kind)).toEqual(['confirm', 'prepare'])
+
+    const paged = await store.list({ offset: 1, limit: 1 })
+    expect(paged.total).toBe(3)
+    expect(paged.rows).toHaveLength(1)
+    expect(paged.rows[0]?.ticketId).toBe('t_b')
+  })
+
+  it('bounds the tail at 5,000 entries, dropping the oldest', async () => {
+    const store = new InMemorySeamAuditStore()
+    for (let i = 1; i <= 5_010; i++) await store.append(entry(i, 'prepare', `t_${i}`))
+    const page = await store.list({ limit: 6_000 })
+    expect(page.total).toBe(5_000)
+    // The 10 oldest entries were shifted out; the newest survives.
+    expect(page.rows[0]?.ticketId).toBe('t_5010')
+    expect(page.rows.at(-1)?.ticketId).toBe('t_11')
   })
 })
 

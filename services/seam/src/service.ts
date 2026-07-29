@@ -14,6 +14,13 @@
  * failure — the gateway's poll reconciler is the production backstop.
  */
 import { randomUUID, timingSafeEqual } from 'node:crypto'
+import {
+  getPool,
+  InMemorySeamAuditStore,
+  PostgresSeamAuditStore,
+  type SeamAuditEntry,
+  type SeamAuditStore,
+} from '@hippo/stores'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { SimVenueAdapter } from './sim-venue.js'
 import type {
@@ -25,15 +32,11 @@ import type {
   VenueAdapter,
 } from './types.js'
 
-type AuditEntry = {
-  ts: number
-  kind: 'prepare' | 'confirm' | 'cancel' | 'event_delivered' | 'event_delivery_failed'
-  ticketId: string
-  idempotencyKey: string
-  detail?: string
-}
+/** In-process view of a trail row — the durable store adds the serial `id`. */
+type AuditEntry = Omit<SeamAuditEntry, 'id'>
 
-/** In-memory audit tail cap; the logger (below) retains the full trail. */
+/** In-process audit tail cap — also the page size served by /internal/audit;
+ * the durable store (and the logger) retain the full trail. */
 const MAX_AUDIT_ENTRIES = 5_000
 
 const SIDES = new Set(['buy', 'sell'])
@@ -53,6 +56,13 @@ export type ServiceOptions = {
    * the gateway's own callback/base origin.
    */
   callbackAllowedOrigins?: string
+  /**
+   * Durable audit trail (seam_audit, migration 013). Defaults to Postgres
+   * when DATABASE_URL is set (and not under test), else in-memory — the
+   * seam stays zero-dependency without a database. Tests inject a shared
+   * store to prove entries survive a pod swap.
+   */
+  auditStore?: SeamAuditStore
 }
 
 /**
@@ -197,10 +207,21 @@ export function buildService(
   // logger is how those failures stay visible to operators.
   adapter.setLogger?.(app.log)
 
-  // In-memory tail of the audit trail (bounded — a steady-state pod must not
-  // grow with order flow). Every entry is ALSO written through the logger, so
-  // the log pipeline retains the full compliance record across restarts; the
-  // durable telemetry_events store (BE doc §7) is the production home.
+  // Durable audit trail (seam_audit, migration 013 — BE doc §7): Postgres
+  // when DATABASE_URL is set, in-memory otherwise so the seam keeps working
+  // with zero DB dependencies. Writes are fire-and-forget — an audit write
+  // must never block or fail a trade path (same stance as the gateway's
+  // memory/MAU writes); every entry is ALSO written through the logger so
+  // the log pipeline retains the record even if a store write is lost.
+  const usePg = Boolean(process.env.DATABASE_URL) && process.env.NODE_ENV !== 'test'
+  const auditStore =
+    opts.auditStore ??
+    (usePg ? new PostgresSeamAuditStore(getPool()) : new InMemorySeamAuditStore())
+
+  // In-process tail of the trail (bounded — a steady-state pod must not grow
+  // with order flow). Kept alongside the store so `app.audit` stays a cheap
+  // synchronous view for tests and diagnostics; the store is the read surface
+  // for GET /internal/audit.
   const audit: AuditEntry[] = []
   let auditedTotal = 0
   app.audit = audit
@@ -213,6 +234,9 @@ export function buildService(
     audit.push(full)
     auditedTotal += 1
     if (audit.length > MAX_AUDIT_ENTRIES) audit.shift()
+    auditStore
+      .append(full)
+      .catch((err) => app.log.error({ err, audit: full }, 'seam audit store write failed'))
     app.log.info({ audit: full }, 'seam audit')
   }
 
@@ -388,9 +412,13 @@ export function buildService(
     },
   )
 
+  // Reads the durable store, not the in-process tail — after a restart (with
+  // DATABASE_URL) the trail is still here. Response shape is unchanged: an
+  // array of entries, oldest first / newest last, capped at the tail bound.
   app.get('/internal/audit', async (req, reply) => {
     if (!internalGuard(req, reply)) return reply
-    return audit
+    const page = await auditStore.list({ limit: MAX_AUDIT_ENTRIES })
+    return page.rows.reverse()
   })
 
   app.get('/health', async () => ({ ok: true, service: 'seam', audited: auditedTotal }))

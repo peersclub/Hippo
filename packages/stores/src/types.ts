@@ -86,6 +86,29 @@ export type AuditEntry = {
   ts: number
 }
 
+/** Every audit-worthy moment on the seam's trading surface. */
+export type SeamAuditKind =
+  | 'prepare'
+  | 'confirm'
+  | 'cancel'
+  | 'event_delivered'
+  | 'event_delivery_failed'
+
+/**
+ * One row of the seam's compliance trail (BE doc §7). Unlike admin AuditEntry,
+ * `ts` and `idempotencyKey` are minted by the seam AT RECORD TIME on the trade
+ * path — the store persists them verbatim so the in-process tail and the
+ * durable row always agree.
+ */
+export type SeamAuditEntry = {
+  id: number
+  ts: number
+  kind: SeamAuditKind
+  ticketId: string
+  idempotencyKey: string
+  detail?: string
+}
+
 /** 'admin' can mutate (integration, users, plan requests); 'viewer' is
  * reserved for a read-only seat — schema carries it from day one, the
  * portal UI doesn't manage roles yet. */
