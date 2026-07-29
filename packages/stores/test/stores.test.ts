@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   devPartner,
   InMemoryAuditStore,
+  InMemoryHostVenueStateStore,
   InMemoryOperatorStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
@@ -227,6 +228,30 @@ describe('InMemorySeamAuditStore', () => {
     // The 10 oldest entries were shifted out; the newest survives.
     expect(page.rows[0]?.ticketId).toBe('t_5010')
     expect(page.rows.at(-1)?.ticketId).toBe('t_11')
+  })
+})
+
+describe('InMemoryHostVenueStateStore', () => {
+  it('round-trips a snapshot per venue and upserts on re-save', async () => {
+    const store = new InMemoryHostVenueStateStore()
+    expect(await store.load('assetworks')).toBeNull()
+
+    await store.save('assetworks', { v: 1, nextOrderId: 10_001 }, 1000)
+    expect(await store.load('assetworks')).toEqual({ v: 1, nextOrderId: 10_001 })
+
+    // Re-save overwrites (ON CONFLICT DO UPDATE semantics), other venues untouched.
+    await store.save('assetworks', { v: 1, nextOrderId: 10_002 }, 2000)
+    await store.save('other-venue', { v: 1, nextOrderId: 50 }, 2000)
+    expect(await store.load('assetworks')).toEqual({ v: 1, nextOrderId: 10_002 })
+    expect(await store.load('other-venue')).toEqual({ v: 1, nextOrderId: 50 })
+  })
+
+  it('stores a deep copy — later mutation of the live object does not leak in', async () => {
+    const store = new InMemoryHostVenueStateStore()
+    const state = { orders: [{ id: 1 }] }
+    await store.save('assetworks', state, 1000)
+    state.orders.push({ id: 2 })
+    expect(await store.load('assetworks')).toEqual({ orders: [{ id: 1 }] })
   })
 })
 

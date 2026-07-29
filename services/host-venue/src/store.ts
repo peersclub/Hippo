@@ -35,6 +35,27 @@ export type PriceProvider = (pairName: string) => Promise<number>
 const HANDOFF_TTL_MS = 90_000
 const QUOTE_CCY = 'USDT'
 
+/**
+ * Plain-JSON image of the venue's entire book of record — everything a
+ * restart must not lose: orders (incl. terminal ones the reconciler still
+ * reads), positions, wallets with reserves, pending handoffs, the admin
+ * drawer config, and the monotonic order-id counter (without it, two orders
+ * minted across restarts would collide on the same id — observed live).
+ * Runtime-only bits (the SSE EventEmitter, the sweep-reentrancy flag, the
+ * price provider) are deliberately NOT part of the snapshot.
+ */
+export type VenueSnapshot = {
+  /** Snapshot schema version — bump when the shape changes. */
+  v: 1
+  nextOrderId: number
+  orders: Order[]
+  positions: Position[]
+  handoffs: Handoff[]
+  /** userId → currency → slot (the nested wallet Maps, flattened). */
+  wallets: Record<string, Record<string, { total: number; reserved: number }>>
+  config: AdminConfig
+}
+
 /** "BTC-USDT" → "BTC" / "USDT". */
 function split(pairName: string): [string, string] {
   const [base, quote] = pairName.split('-')
@@ -457,7 +478,8 @@ export class VenueStore {
     this.emit({ type: 'handoff', handoff: h })
   }
 
-  snapshot(userId: string): Extract<StreamEvent, { type: 'snapshot' }> {
+  /** Per-user snapshot event for a freshly connected SSE client (host UI). */
+  uiSnapshot(userId: string): Extract<StreamEvent, { type: 'snapshot' }> {
     return {
       type: 'snapshot',
       balances: this.balances(userId),
@@ -465,6 +487,85 @@ export class VenueStore {
       positions: [...this.positions.values()].filter((p) => p.userId === userId),
       config: this.config,
     }
+  }
+
+  // ── persistence (host_venue_state, stores migration 014) ─────────────────
+  /** Whole-book image for the durable state store. Plain JSON only — safe to
+   *  `JSON.stringify` and hand to Postgres. */
+  snapshot(): VenueSnapshot {
+    const wallets: VenueSnapshot['wallets'] = {}
+    for (const [userId, w] of this.wallets) {
+      const flat: Record<string, { total: number; reserved: number }> = {}
+      for (const [ccy, s] of w) flat[ccy] = { total: s.total, reserved: s.reserved }
+      wallets[userId] = flat
+    }
+    return {
+      v: 1,
+      nextOrderId: this.nextOrderId,
+      orders: [...this.orders.values()].map((o) => ({ ...o })),
+      positions: [...this.positions.values()].map((p) => ({ ...p })),
+      handoffs: [...this.handoffs.values()].map((h) => ({ ...h, place: { ...h.place } })),
+      wallets,
+      config: { ...this.config },
+    }
+  }
+
+  /** Rebuild the book from a persisted snapshot (boot path — runs before the
+   *  service accepts traffic, so nothing is emitted; SSE clients get a fresh
+   *  uiSnapshot on connect anyway). Throws on an unrecognized shape so the
+   *  boot wiring can refuse to serve a blank book over a durable one.
+   *
+   *  Re-arm semantics for in-flight work:
+   *   • ACTIVE/PARTIAL **market** orders get a FRESH working window from
+   *     restore time. Their old `settleAfter` is almost certainly in the past
+   *     after a restart, so without re-arming they'd fill on the very first
+   *     sweep — faster than the parasite reconciler's poll, breaking the
+   *     observed open→absent lifecycle contract. A fresh window is the
+   *     conservative choice: the order never settles EARLIER than promised.
+   *   • Resting **limit** orders keep their original `settleAfter` (absolute
+   *     epoch ms — still meaningful after a restart) and simply re-enter the
+   *     normal sweep price-check path: past-window + marketable fills, not
+   *     marketable keeps resting. Exactly how a resting maker order behaves.
+   *   • Pending **handoffs** keep their `createdAt`; the sweep's TTL check
+   *     expires any that outlived the restart, which is correct — the host's
+   *     confirm modal did not survive the restart either. */
+  restore(raw: unknown): void {
+    const snap = raw as VenueSnapshot
+    if (typeof snap !== 'object' || snap === null || snap.v !== 1)
+      throw new Error('unrecognized host-venue snapshot (want v=1)')
+    this.orders.clear()
+    this.positions.clear()
+    this.handoffs.clear()
+    this.wallets.clear()
+
+    // Config first — the re-arm below reads the PERSISTED workingWindowMs.
+    // Merge over boot defaults so a snapshot written before a new admin knob
+    // existed still gets that knob's default.
+    this.config = { ...this.config, ...snap.config }
+
+    const now = Date.now()
+    for (const o of snap.orders ?? []) {
+      const order: Order = { ...o }
+      if (
+        order.kind === 'market' &&
+        (order.status === ORDER_STATUS.ACTIVE || order.status === ORDER_STATUS.PARTIAL)
+      )
+        order.settleAfter = now + this.config.workingWindowMs
+      this.orders.set(order.id, order)
+    }
+    for (const p of snap.positions ?? []) this.positions.set(`${p.userId}:${p.pairName}`, { ...p })
+    for (const h of snap.handoffs ?? []) this.handoffs.set(h.clientOrderId, { ...h })
+    for (const [userId, flat] of Object.entries(snap.wallets ?? {})) {
+      const w: Wallet = new Map()
+      for (const [ccy, s] of Object.entries(flat))
+        w.set(ccy, { total: s.total, reserved: s.reserved })
+      this.wallets.set(userId, w)
+    }
+    // Never move the counter backwards: take the max of the persisted value,
+    // anything visible on the restored book, and the boot default.
+    let maxId = 0
+    for (const id of this.orders.keys()) if (id > maxId) maxId = id
+    this.nextOrderId = Math.max(snap.nextOrderId ?? 0, maxId + 1, this.nextOrderId)
   }
 
   setConfig(patch: Partial<AdminConfig>): AdminConfig {
