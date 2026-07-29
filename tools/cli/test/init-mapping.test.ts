@@ -1,11 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { draftAdapterConfig } from '../src/init/config.js'
 import { draftMapping, renderMappingTs, synthesizeMappingBody } from '../src/init/mapping.js'
-import { extractAuthSchemes, extractErrorResponses, mapToCti } from '../src/scan/cti.js'
+import { typecheckModule } from '../src/init/typecheck.js'
+import {
+  extractAuthSchemes,
+  extractErrorResponses,
+  extractResponseShapes,
+  mapToCti,
+} from '../src/scan/cti.js'
 import type { ScanResult } from '../src/scan/types.js'
 import { exchangeSpec } from './fixtures/exchange-openapi.js'
 
@@ -35,26 +37,7 @@ function scanFromFixture(): ScanResult {
     capabilities: mapToCti(exchangeSpec),
     authSchemes: extractAuthSchemes(exchangeSpec),
     errorResponses: extractErrorResponses(exchangeSpec),
-  }
-}
-
-/** Typecheck a generated module in isolation via the TypeScript compiler API. */
-function typecheck(source: string): ts.Diagnostic[] {
-  const dir = mkdtempSync(join(tmpdir(), 'hippo-mapping-'))
-  const file = join(dir, 'mapping.ts')
-  try {
-    writeFileSync(file, source, 'utf8')
-    const program = ts.createProgram([file], {
-      noEmit: true,
-      strict: true,
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-    })
-    return [...ts.getPreEmitDiagnostics(program)]
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
+    responseShapes: extractResponseShapes(exchangeSpec),
   }
 }
 
@@ -85,6 +68,13 @@ describe('draftMapping — from a drafted adapter config', () => {
     expect(fnFor('orderPlacement')?.endpoint).toBe('POST /api/v3/order')
   })
 
+  it('threads the documented venue response shape onto ops that have one', () => {
+    expect(fnFor('quote')?.responseShape).toBe('{ symbol: string; price: string }')
+    expect(fnFor('orderPlacement')?.responseShape).toContain('orderId: number')
+    // /api/v3/account documents no schema → the op honestly has no shape.
+    expect(fnFor('balances')?.responseShape).toBeUndefined()
+  })
+
   it('collects only the CTI shapes the emitted ops reference, in canonical order', () => {
     expect(mapping.targets).toEqual([
       'Quote',
@@ -110,7 +100,7 @@ describe('renderMappingTs — generated module', () => {
   })
 
   it('points every stub at the Assetworks reference pattern with a TODO', () => {
-    expect(source).toContain('services/seam/src/koinbx-venue.ts')
+    expect(source).toContain('services/seam/src/assetworks-venue.ts')
     expect(source).toContain('TODO(hippo:stage4)')
   })
 
@@ -124,8 +114,7 @@ describe('renderMappingTs — generated module', () => {
   // vitest timeout made this the repo's standing flake. Generous budget: the
   // assertion is about diagnostics, not speed.
   it('TYPECHECKS as a standalone strict TypeScript module', { timeout: 30_000 }, () => {
-    const diagnostics = typecheck(source)
-    const messages = diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'))
+    const messages = typecheckModule(source)
     expect(messages, messages.join('\n')).toHaveLength(0)
   })
 })
@@ -135,7 +124,7 @@ describe('renderMappingTs — no mapping needed', () => {
     const empty = renderMappingTs({ venue: 'nomap.exchange', ops: [], targets: [] })
     expect(empty).toContain('No data-returning ops need response mapping')
     expect(empty).toContain('export {}')
-    expect(typecheck(empty)).toHaveLength(0)
+    expect(typecheckModule(empty)).toHaveLength(0)
   })
 })
 

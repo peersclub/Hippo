@@ -12,10 +12,39 @@ export const exchangeSpec: OpenApiDoc = {
       apiKey: { type: 'apiKey', in: 'header', name: 'X-ACME-APIKEY' },
       hmacSignature: { type: 'apiKey', in: 'query', name: 'signature' },
     },
+    schemas: {
+      OrderAck: {
+        type: 'object',
+        required: ['orderId', 'status'],
+        properties: {
+          orderId: { type: 'integer' },
+          clientOrderId: { type: 'string' },
+          status: { type: 'string', enum: ['NEW', 'PARTIALLY_FILLED', 'FILLED'] },
+          executedQty: { type: 'string' },
+        },
+      },
+    },
   },
   paths: {
     '/api/v3/ticker/price': {
-      get: { summary: 'Symbol price ticker', tags: ['Market Data'] },
+      get: {
+        summary: 'Symbol price ticker',
+        tags: ['Market Data'],
+        responses: {
+          '200': {
+            description: 'Latest price for a symbol',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['symbol', 'price'],
+                  properties: { symbol: { type: 'string' }, price: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
     },
     '/api/v3/depth': {
       get: { summary: 'Order book depth', tags: ['Market Data'] },
@@ -29,7 +58,12 @@ export const exchangeSpec: OpenApiDoc = {
         operationId: 'createOrder',
         tags: ['Trade'],
         responses: {
-          '200': { description: 'Order accepted' },
+          '200': {
+            description: 'Order accepted',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderAck' } },
+            },
+          },
           '400': { description: 'Invalid order parameters (symbol, quantity, or price)' },
           '401': { description: 'Invalid API key or request signature' },
           '429': { description: 'Rate limit exceeded' },

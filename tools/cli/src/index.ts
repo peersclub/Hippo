@@ -21,7 +21,8 @@ import { runConformance } from './conform/suite.js'
 import type { ConformanceReport } from './conform/types.js'
 import { draftAdapterConfig, renderAdapterConfigYaml } from './init/config.js'
 import { draftEmbed, injectEmbedTag, renderEmbedMd, renderEmbedSummary } from './init/embed.js'
-import { draftMapping, renderMappingTs } from './init/mapping.js'
+import { llmFromEnv } from './init/llm.js'
+import { synthesizeMappingModule } from './init/mapping.js'
 import { draftRejections, renderRejectionsYaml } from './init/rejections.js'
 import type { AdapterConfig } from './init/types.js'
 import {
@@ -112,14 +113,26 @@ program
       `hippo-rejections-${outcome.result.domain}.yaml`,
     )
     const config = draftAdapterConfig(outcome.result)
+    // Stage 4: model-driven mapping synthesis. Unconfigured or failing model
+    // → deterministic throwing stubs, never a crash.
+    const llm = llmFromEnv()
+    const mapping = await synthesizeMappingModule(config, llm)
     await writeFile(reportPath, renderReport(outcome.result), 'utf8')
     await writeFile(configPath, renderAdapterConfigYaml(config), 'utf8')
-    await writeFile(mappingPath, renderMappingTs(draftMapping(config)), 'utf8')
+    await writeFile(mappingPath, mapping.source, 'utf8')
     await writeFile(rejectionsPath, renderRejectionsYaml(draftRejections(outcome.result)), 'utf8')
     console.log(renderSummary(outcome.result))
+    if (mapping.outcomes.length > 0) {
+      console.log(
+        `\nMapping synthesis (${llm ? `model: ${llm.describe()}` : 'model not configured — deterministic stubs'}):`,
+      )
+      for (const o of mapping.outcomes) {
+        console.log(`  ${o.fn} (${o.capability}): ${o.outcome} — ${o.detail}`)
+      }
+    }
     console.log(`\nReport written:       ${reportPath}`)
     console.log(`Draft adapter config: ${configPath}`)
-    console.log(`Mapping stubs:        ${mappingPath}`)
+    console.log(`Mapping module:       ${mappingPath}`)
     console.log(`Rejection map:        ${rejectionsPath}`)
     if (opts.json) {
       const scanJsonPath = path.resolve(process.cwd(), `hippo-scan-${outcome.result.domain}.json`)

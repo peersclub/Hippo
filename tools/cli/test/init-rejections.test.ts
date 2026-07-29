@@ -70,7 +70,7 @@ describe('draftRejections — from the scanned error responses', () => {
   })
 
   it('attaches plain-words reason + fix, pointing auth at the Assetworks pattern', () => {
-    expect(entry('auth_failed')?.fix).toContain('koinbx-venue.ts')
+    expect(entry('auth_failed')?.fix).toContain('assetworks-venue.ts')
     expect(entry('invalid_request')?.reason.length).toBeGreaterThan(0)
   })
 

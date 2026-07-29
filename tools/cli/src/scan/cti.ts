@@ -29,8 +29,12 @@ export interface OpenApiDoc {
   webhooks?: Record<string, unknown>
   components?: {
     securitySchemes?: Record<string, { type?: string; scheme?: string; in?: string; name?: string }>
+    /** v3 shared schemas — resolved when rendering response shapes. */
+    schemas?: Record<string, unknown>
   }
   securityDefinitions?: Record<string, { type?: string; in?: string; name?: string }>
+  /** v2 shared schemas — resolved when rendering response shapes. */
+  definitions?: Record<string, unknown>
 }
 
 interface Endpoint {
@@ -208,6 +212,107 @@ export function extractErrorResponses(doc: OpenApiDoc): ErrorResponseFinding[] {
     }
   }
   return findings
+}
+
+// ── Response-shape extraction ──────────────────────────────────────────────
+// Compact success-response shapes per endpoint, the venue-side input to the
+// stage-4 mapping synthesis: the model needs to see what the venue actually
+// returns before it can transform it into a CTI shape. Rendered as a compact
+// TypeScript-ish type expression, depth-limited, with local $refs resolved.
+
+const SUCCESS_STATUS = /^2\d\d$/
+const MAX_SHAPE_DEPTH = 5
+const MAX_SHAPE_FIELDS = 24
+
+interface SchemaNode {
+  $ref?: string
+  type?: string
+  enum?: unknown[]
+  properties?: Record<string, unknown>
+  required?: string[]
+  items?: unknown
+}
+
+/** Resolve a LOCAL $ref ("#/components/schemas/X" v3, "#/definitions/X" v2). */
+function resolveRef(doc: OpenApiDoc, ref: string): unknown {
+  const match = /^#\/(?:components\/schemas|definitions)\/(.+)$/.exec(ref)
+  const name = match?.[1]
+  if (!name) return undefined
+  return doc.components?.schemas?.[name] ?? doc.definitions?.[name]
+}
+
+function renderSchema(doc: OpenApiDoc, node: unknown, depth: number, seen: Set<string>): string {
+  if (typeof node !== 'object' || node === null) return 'unknown'
+  const schema = node as SchemaNode
+  if (typeof schema.$ref === 'string') {
+    if (depth <= 0 || seen.has(schema.$ref)) return 'unknown /* recursive */'
+    const next = new Set(seen)
+    next.add(schema.$ref)
+    return renderSchema(doc, resolveRef(doc, schema.$ref), depth - 1, next)
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    return schema.enum.map((v) => JSON.stringify(v)).join(' | ')
+  }
+  if (schema.type === 'array') {
+    return `Array<${renderSchema(doc, schema.items, depth - 1, seen)}>`
+  }
+  if (schema.type === 'object' || schema.properties) {
+    const props = Object.entries(schema.properties ?? {})
+    if (depth <= 0 || props.length === 0) return 'object'
+    const required = new Set(schema.required ?? [])
+    const fields = props
+      .slice(0, MAX_SHAPE_FIELDS)
+      .map(
+        ([name, sub]) =>
+          `${name}${required.has(name) ? '' : '?'}: ${renderSchema(doc, sub, depth - 1, seen)}`,
+      )
+    if (props.length > MAX_SHAPE_FIELDS)
+      fields.push(`/* +${props.length - MAX_SHAPE_FIELDS} more */`)
+    return `{ ${fields.join('; ')} }`
+  }
+  if (schema.type === 'integer') return 'number'
+  if (typeof schema.type === 'string') return schema.type
+  return 'unknown'
+}
+
+/**
+ * The documented SUCCESS response shape of every operation, keyed by
+ * "METHOD /path". v3 reads `responses.2xx.content[application/json].schema`
+ * (falling back to the first media type, then an inline `example`); v2 reads
+ * `responses.2xx.schema`. Endpoints with no documented schema are simply
+ * absent — the mapping synthesizer treats absence as "undocumented, map
+ * defensively" rather than inventing a shape.
+ */
+export function extractResponseShapes(doc: OpenApiDoc): Record<string, string> {
+  const shapes: Record<string, string> = {}
+  for (const [path, item] of Object.entries(doc.paths ?? {})) {
+    if (typeof item !== 'object' || item === null) continue
+    for (const method of HTTP_METHODS) {
+      const op = (item as Record<string, unknown>)[method]
+      if (typeof op !== 'object' || op === null) continue
+      const responses = (op as OpenApiOperation).responses
+      if (!responses) continue
+      const statusKey =
+        Object.keys(responses)
+          .filter((s) => SUCCESS_STATUS.test(s))
+          .sort()[0] ?? ('default' in responses ? 'default' : undefined)
+      if (!statusKey) continue
+      const res = responses[statusKey]
+      if (typeof res !== 'object' || res === null) continue
+      const content = (res as { content?: Record<string, { schema?: unknown; example?: unknown }> })
+        .content
+      const media = content ? (content['application/json'] ?? Object.values(content)[0]) : undefined
+      const schema = media?.schema ?? (res as { schema?: unknown }).schema
+      const key = `${method.toUpperCase()} ${path}`
+      if (schema !== undefined) {
+        const rendered = renderSchema(doc, schema, MAX_SHAPE_DEPTH, new Set())
+        if (rendered !== 'unknown') shapes[key] = rendered
+      } else if (media?.example !== undefined) {
+        shapes[key] = `example: ${JSON.stringify(media.example).slice(0, 600)}`
+      }
+    }
+  }
+  return shapes
 }
 
 /** Declared auth schemes: v3 components.securitySchemes or v2 securityDefinitions. */

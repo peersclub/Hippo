@@ -7,6 +7,7 @@ import type { OpenApiDoc } from './cti.js'
 import {
   extractAuthSchemes,
   extractErrorResponses,
+  extractResponseShapes,
   isOpenApiDoc,
   mapToCti,
   specVersion,
@@ -137,6 +138,7 @@ export async function runScan(rawDomain: string): Promise<ScanOutcome> {
     authSchemes: specDoc ? extractAuthSchemes(specDoc) : [],
     errorResponses: specDoc ? extractErrorResponses(specDoc) : [],
     tradeFeatures: detectTradeFeatures(specDoc ?? {}),
+    responseShapes: specDoc ? extractResponseShapes(specDoc) : {},
   }
   return { reachable: true, result }
 }

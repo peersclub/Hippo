@@ -21,6 +21,12 @@ export interface AdapterOperation {
   needsMappingCode: boolean
   /** Consequence copy for a gap; a short hint for a mapped op. */
   note: string
+  /**
+   * Compact documented success-response shape of the endpoint (from the
+   * scan's `responseShapes`) — what stage-4 mapping synthesis shows the model
+   * next to the CTI target. Absent when the venue documents no schema.
+   */
+  responseShape?: string
 }
 
 export interface AdapterConfig {
