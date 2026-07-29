@@ -12,6 +12,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { InMemorySessionStore, PARTNERS, RedisSessionStore } from '../src/plugins/auth.js'
 import type { RedisClient } from '../src/plugins/redis.js'
 import { createEmitter, InMemoryJournal, RedisJournal } from '../src/plugins/sse.js'
+import {
+  createSession,
+  sendTurn,
+  stubIntel,
+  submitDraft,
+  TEST_INTERNAL_TOKEN,
+  testApp,
+  waitForJournal,
+} from './helpers.js'
 
 const partner = PARTNERS[0]
 if (!partner) throw new Error('no dev partner configured')
@@ -114,5 +123,176 @@ describe('SessionStore: Redis vs in-memory', () => {
   it('resume returns null for an unknown session', async () => {
     const red = new RedisSessionStore(redis, silentLog)
     expect(await red.resume('s_never_existed')).toBeNull()
+  })
+})
+
+describe('durable ticket routing (Tier-2): venue events survive a gateway restart', () => {
+  const buyIntent = () =>
+    stubIntel({
+      intent: () => ({
+        intent: 'action',
+        confidence: 0.9,
+        language: 'en',
+        order: { side: 'buy', size: '0.05', instrument: 'BTC/USDT', orderType: 'market' },
+      }),
+    })
+
+  /** A gateway over a Redis-backed session store sharing `redis`. Building a
+   * second one over the same client simulates a restart: fresh app, fresh
+   * orchestrator (empty ticketSessions), same durable Redis state. */
+  async function redisGateway(redis: RedisClient) {
+    const store = new RedisSessionStore(redis, silentLog)
+    const gw = await testApp({ sessions: store, intel: buyIntent() })
+    return { ...gw, store }
+  }
+
+  /** Drive prepare (draft → ticket) + confirm on a fresh session. */
+  async function prepareAndConfirm(gw: Awaited<ReturnType<typeof redisGateway>>) {
+    const session = await createSession(gw.app, gw.store)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    const { ticket } = await submitDraft(gw.app, session)
+    await sendTurn(gw.app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'confirm_handoff',
+    })
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+    return { session, ticket }
+  }
+
+  function lifecyclePhases(session: { journal: { after(seq: number): { frame: unknown }[] } }) {
+    return session.journal
+      .after(0)
+      .map((e) => e.frame as { type: string; phase?: string })
+      .filter((f) => f.type === 'lifecycle')
+      .map((f) => f.phase)
+  }
+
+  it('THE HEADLINE: a venue FILL after a restart is routed and journaled, not dropped', async () => {
+    const redis = freshRedis()
+
+    // Pod A: prepare + confirm an order, then "crash" (close the app).
+    const gwA = await redisGateway(redis)
+    const { session, ticket } = await prepareAndConfirm(gwA)
+    await gwA.store.flush()
+    await gwA.app.close()
+
+    // Pod B: a brand-new gateway + orchestrator over the same Redis. Its
+    // in-process ticketSessions map is empty — pre-fix this fill dropped.
+    const gwB = await redisGateway(redis)
+    const res = await gwB.app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+      payload: {
+        ticketId: ticket.ticketId,
+        phase: 'filled',
+        statusLine: 'FILLED',
+        venueOrderId: 'SIM-9000',
+      },
+    })
+    expect(res.json()).toEqual({ ok: true, routed: true })
+
+    // The resumed session's journal carries the full lifecycle — the
+    // pre-restart awaiting_confirm AND the post-restart fill — so a
+    // reconnecting SSE client replays both.
+    const resumed = gwB.store.get(session.id)
+    expect(resumed).not.toBeNull()
+    expect(lifecyclePhases(resumed as NonNullable<typeof resumed>)).toEqual([
+      'awaiting_confirm',
+      'filled',
+    ])
+    // Side is enriched from the rehydrated session.tickets map.
+    const fill = resumed?.journal
+      .after(0)
+      .map((e) => e.frame as { type: string; phase?: string; side?: string })
+      .find((f) => f.type === 'lifecycle' && f.phase === 'filled')
+    expect(fill?.side).toBe('buy')
+
+    // Terminal phase tears the durable state down: ticket key gone, and the
+    // rehydrated tickets map is empty again.
+    await gwB.store.flush()
+    expect(await redis.get(`session:ticket:${ticket.ticketId}`)).toBeNull()
+    expect(resumed?.tickets.size).toBe(0)
+    await gwB.app.close()
+  })
+
+  it('ticket key lifecycle: written at prepare with a TTL, deleted at the terminal phase', async () => {
+    const redis = freshRedis()
+    const gw = await redisGateway(redis)
+    const session = await createSession(gw.app, gw.store)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    const { ticket } = await submitDraft(gw.app, session)
+    await gw.store.flush()
+
+    const key = `session:ticket:${ticket.ticketId}`
+    expect(await redis.get(key)).toBe(session.id)
+    // TTL ≈ the backstop window (default 10 min) + slack — never unbounded.
+    const pttl = await (redis as unknown as { pttl(k: string): Promise<number> }).pttl(key)
+    expect(pttl).toBeGreaterThan(0)
+    expect(pttl).toBeLessThanOrEqual(10 * 60_000 + 30_000)
+
+    // Confirm, then the venue's terminal event → the key is gone.
+    await sendTurn(gw.app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'confirm_handoff',
+    })
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+    await gw.app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+      payload: { ticketId: ticket.ticketId, phase: 'filled', statusLine: 'FILLED' },
+    })
+    await gw.store.flush()
+    expect(await redis.get(key)).toBeNull()
+    await gw.app.close()
+  })
+
+  it('session.tickets round-trips through the meta snapshot, confirm state included', async () => {
+    const redis = freshRedis()
+    const gwA = await redisGateway(redis)
+    const { session, ticket } = await prepareAndConfirm(gwA)
+    await gwA.store.flush()
+    await gwA.app.close()
+
+    const podB = new RedisSessionStore(redis, silentLog)
+    const resumed = await podB.resume(session.id)
+    expect(resumed).not.toBeNull()
+    const quote = resumed?.tickets.get(ticket.ticketId)
+    expect(quote).toMatchObject({
+      side: 'buy',
+      instrument: 'BTC/USDT',
+      sizeDisplay: '0.05',
+      confirmed: true,
+    })
+  })
+
+  it('a ticket cancelled before restart stays dead: the straggler event is audit-only', async () => {
+    const redis = freshRedis()
+    const gwA = await redisGateway(redis)
+    const session = await createSession(gwA.app, gwA.store)
+    await sendTurn(gwA.app, session.id, { kind: 'user_text', text: 'buy 0.05 btc' })
+    const { ticket } = await submitDraft(gwA.app, session)
+    // Pre-confirm cancel: nothing reached the venue; the durable key is dropped.
+    await sendTurn(gwA.app, session.id, {
+      kind: 'ticket_action',
+      ticketId: ticket.ticketId,
+      action: 'cancel',
+    })
+    await waitForJournal(session, (t) => t.includes('lifecycle'))
+    await gwA.store.flush()
+    await gwA.app.close()
+
+    const gwB = await redisGateway(redis)
+    const res = await gwB.app.inject({
+      method: 'POST',
+      url: '/internal/venue-events',
+      headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+      payload: { ticketId: ticket.ticketId, phase: 'filled', statusLine: 'FILLED' },
+    })
+    expect(res.json()).toEqual({ ok: true, routed: false })
+    await gwB.app.close()
   })
 })
