@@ -307,6 +307,43 @@ export const LearnedMemoryFrame = z.object({
   optIn: z.boolean().default(true),
 })
 
+/**
+ * Panel identity (additive, July 2026) — the demo-grade in-panel username +
+ * 4-digit-PIN identity. The gateway emits this after an identity_claim uplink
+ * (and on stream connect when a session is already claimed) so the panel can
+ * show "signed in as …" and key memory to the person, not the browser. PINs
+ * are demo-grade by design (scrypt-hashed, rate-limited, per-partner) — a
+ * partner in production owns identity via its own token endpoint instead.
+ */
+export const IdentityFrame = z.object({
+  ...base,
+  type: z.literal('identity'),
+  status: z.enum(['ok', 'taken', 'wrong_pin', 'invalid', 'rate_limited', 'signed_out']),
+  /** Present when status is ok — the display username now bound to the session. */
+  username: z.string().optional(),
+  /** Server-authored one-line detail for non-ok states. */
+  note: z.string().optional(),
+})
+
+/**
+ * File upload lifecycle (additive, July 2026) — server-side phases of an
+ * uploaded file (the client renders its own byte-progress bar during the HTTP
+ * upload; these frames take over once the gateway has the bytes). `done` has
+ * no phase of its own: the analysis lands as a normal research_brief right
+ * after `analyzing`, so the result card is the same trusted shape as every
+ * other answer (guardrail included).
+ */
+export const UploadStatusFrame = z.object({
+  ...base,
+  type: z.literal('upload_status'),
+  fileId: z.string(),
+  name: z.string(), // display filename, server-sanitized
+  sizeDisplay: z.string(), // e.g. "184 KB"
+  phase: z.enum(['received', 'analyzing', 'failed']),
+  /** Server-authored reason when phase is failed (too large, unsupported…). */
+  reason: z.string().optional(),
+})
+
 export const Frame = z.discriminatedUnion('type', [
   ResearchBriefFrame,
   OrderTicketFrame,
@@ -325,6 +362,8 @@ export const Frame = z.discriminatedUnion('type', [
   UserEchoFrame,
   BriefDeltaFrame,
   LearnedMemoryFrame,
+  IdentityFrame,
+  UploadStatusFrame,
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
@@ -341,6 +380,8 @@ export type RejectionTicket = z.infer<typeof RejectionTicketFrame>
 export type Thinking = z.infer<typeof ThinkingFrame>
 export type Interpretation = z.infer<typeof InterpretationFrame>
 export type LearnedMemory = z.infer<typeof LearnedMemoryFrame>
+export type Identity = z.infer<typeof IdentityFrame>
+export type UploadStatus = z.infer<typeof UploadStatusFrame>
 export type OrderDraft = z.infer<typeof OrderDraftFrame>
 export type PriceTick = z.infer<typeof PriceTickFrame>
 export type Skeleton = z.infer<typeof SkeletonFrame>

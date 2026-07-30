@@ -35,6 +35,28 @@ export const TicketActionUplink = z.object({
  * blindly — it re-validates against venue capabilities (max leverage, margin
  * modes, listed symbols) before running the normal prepare → ticket flow.
  */
+/**
+ * In-panel identity claim (additive, July 2026) — demo-grade username +
+ * 4-digit PIN so a trader is identified across browsers/devices and memory
+ * follows the person. `create` registers, `signin` verifies, `signout`
+ * reverts the session to its anonymous host-minted identity. The gateway
+ * validates per-mode (username/pin required except for signout), hashes PINs
+ * (scrypt), and rate-limits attempts. Responds with an `identity` frame.
+ */
+export const IdentityClaimUplink = z.object({
+  ...base,
+  kind: z.literal('identity_claim'),
+  mode: z.enum(['create', 'signin', 'signout']),
+  username: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{3,24}$/)
+    .optional(),
+  pin: z
+    .string()
+    .regex(/^\d{4}$/)
+    .optional(),
+})
+
 export const DraftActionUplink = z.object({
   ...base,
   kind: z.literal('draft_action'),
@@ -115,6 +137,7 @@ export const Uplink = z.discriminatedUnion('kind', [
   TicketActionUplink,
   DraftActionUplink,
   ContextUplink,
+  IdentityClaimUplink,
   FeedbackUplink,
   ConsentUplink,
   SettingsUplink,
