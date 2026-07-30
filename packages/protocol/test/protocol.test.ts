@@ -388,3 +388,44 @@ describe('interactive order card — order_draft / price_tick / draft_action / c
     expect(up.success).toBe(true)
   })
 })
+
+describe('dynamic features — identity / upload_status / identity_claim (additive)', () => {
+  it('parses identity frames for ok and non-ok states', () => {
+    const ok = Frame.safeParse({ ...base, type: 'identity', status: 'ok', username: 'victor_t' })
+    expect(ok.success).toBe(true)
+    const bad = Frame.safeParse({ ...base, type: 'identity', status: 'banana' })
+    expect(bad.success).toBe(false)
+  })
+
+  it('parses upload_status phases and rejects unknown phases', () => {
+    const ok = Frame.safeParse({
+      ...base,
+      type: 'upload_status',
+      fileId: 'f_1',
+      name: 'portfolio.csv',
+      sizeDisplay: '184 KB',
+      phase: 'analyzing',
+    })
+    expect(ok.success).toBe(true)
+    const bad = Frame.safeParse({
+      ...base,
+      type: 'upload_status',
+      fileId: 'f_1',
+      name: 'x',
+      sizeDisplay: '1 KB',
+      phase: 'uploading',
+    })
+    expect(bad.success).toBe(false) // client-side byte progress never crosses the wire
+  })
+
+  it('identity_claim validates username charset and 4-digit pin; signout needs neither', () => {
+    const mk = (extra: object) =>
+      Uplink.safeParse({ v: 1, sessionId: 's_1', ts: 1_752_480_000_000, kind: 'identity_claim', ...extra })
+    expect(mk({ mode: 'create', username: 'victor_t', pin: '4821' }).success).toBe(true)
+    expect(mk({ mode: 'signin', username: 'victor_t', pin: '4821' }).success).toBe(true)
+    expect(mk({ mode: 'signout' }).success).toBe(true)
+    expect(mk({ mode: 'create', username: 'no spaces!', pin: '4821' }).success).toBe(false)
+    expect(mk({ mode: 'signin', username: 'victor_t', pin: '48213' }).success).toBe(false)
+    expect(mk({ mode: 'signin', username: 'victor_t', pin: 'abcd' }).success).toBe(false)
+  })
+})
