@@ -185,7 +185,7 @@ A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, se
 - [~] Adapter codegen — **deterministic half done**: `draftAdapterConfig(scan)` → `adapter.config.yaml` (CTI capability → discovered endpoint + auth strategy + gap/mapping flags); `hippo scan` now emits it alongside the report. Pending (model-driven stage 4): `mapping.ts` for divergent shapes + `rejections.yaml`, the Assetworks adapter as golden reference
 - [x] Embed injection — `hippo embed` + `hippo verify` merged ([PR #19](https://github.com/peersclub/Hippo/pull/19), deterministic stages 5–6); provisioning via `hippo register` (`34a30c3`)
 - [x] Theming extraction (partner accent beyond light/dark) — [PR #86](https://github.com/peersclub/Hippo/pull/86): scan extracts, embed --accent carries, loader applies (strict #rrggbb)
-- [ ] Dogfood: regenerate the Assetworks adapter via CLI, diff vs hand-built = quality score
+- [x] Dogfood: regenerate the Assetworks adapter via CLI, diff vs hand-built — **DONE 2026-07-31** ([[Second-Venue Dogfood Report]]): scan vs LIVE venue = architecture match 1:1 (7/7 endpoints, auth, honest gaps), 5/5 mappings typechecked, verifier 8/8 Conformant; one codegen fix queued (thread enum descriptions into the stage-4 prompt)
 - [ ] Exit gate: second venue integrated end-to-end with < 1 day human review
 
 ### Phase 5 — Pilot launch (not started)
@@ -203,7 +203,7 @@ A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, se
 ### Infra (cross-cutting)
 - [ ] India + Gulf GPU quotes (Kartik) → capacity plan
 - [ ] vLLM pods: regional intent (7–8B) + global research (~30B) + cache tier
-- [ ] docker-compose local stack (redis, postgres, fixtures); k8s deferred to Phase 2/3 of infra plan
+- [x] docker-compose local stack — [PR #87](https://github.com/peersclub/Hippo/pull/87) (`deploy/docker-compose.yml`: infra default + 8-service parity profile) **+ cross-process rotate/suspend E2E PASSED against the live stack** (`scripts/rotate-suspend-e2e.sh`); k8s deferred to Phase 2/3 of infra plan
 
 ---
 
