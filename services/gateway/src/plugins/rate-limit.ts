@@ -21,6 +21,9 @@ export type RateLimitOptions = {
 
 type Bucket = { count: number; resetAt: number }
 
+/** The preHandler shape createRateLimiter returns (shared with new routes). */
+export type RateLimitHandler = ReturnType<typeof createRateLimiter>
+
 export function createRateLimiter(opts: RateLimitOptions) {
   const buckets = new Map<string, Bucket>()
   // Reclaim expired buckets so the map can't grow unbounded under IP churn.
