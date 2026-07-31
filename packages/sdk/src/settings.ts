@@ -5,8 +5,9 @@
  * language and are deliberately NOT i18n keys — a language option must be
  * readable by the person who needs it.
  */
-import type { LearnedFact } from './state.js'
+
 import type { Locale } from './i18n.js'
+import type { LearnedFact } from './state.js'
 
 export type SettingsLanguage = 'en' | 'hi' | 'hinglish' | 'ar'
 

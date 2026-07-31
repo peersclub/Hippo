@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   cancelAffordance,
+  confirmPendingSteps,
   fillCaption,
   isInFlight,
   journeySteps,
@@ -47,6 +48,20 @@ describe('journeySteps — the line only advances on real server frames', () => 
     for (const phase of ['filled', 'cancelled', 'expired'] as const) {
       expect(journeySteps(phase, undefined)).toBeNull()
     }
+  })
+})
+
+describe('confirmPendingSteps — the confirm-in-flight loader', () => {
+  it('reads PLACED (done) · WORKING (active) → FILLED (pending)', () => {
+    expect(confirmPendingSteps().map((x) => `${x.labelKey}:${x.state}`)).toEqual([
+      'journey_placed:done',
+      'journey_working:active',
+      'journey_filled:pending',
+    ])
+  })
+
+  it('is static — it never advances client-side (lifecycle frames take over)', () => {
+    expect(confirmPendingSteps()).toEqual(confirmPendingSteps())
   })
 })
 

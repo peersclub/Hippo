@@ -104,6 +104,35 @@ export type MessageKey =
   | 'draft_dismiss'
   | 'draft_dismissed'
   | 'draft_sent'
+  | 'dismiss'
+  | 'id_section'
+  | 'id_firstrun_title'
+  | 'id_firstrun_cta'
+  | 'id_mode_create'
+  | 'id_mode_signin'
+  | 'id_username_label'
+  | 'id_pin_label'
+  | 'id_submit_create'
+  | 'id_submit_signin'
+  | 'id_checking'
+  | 'id_taken'
+  | 'id_wrong_pin'
+  | 'id_invalid'
+  | 'id_rate_limited'
+  | 'id_signed_out'
+  | 'id_signed_in_as' // interpolates {username}
+  | 'id_sign_out'
+  | 'upload_attach'
+  | 'upload_uploading'
+  | 'upload_too_large_csv'
+  | 'upload_too_large_image'
+  | 'upload_unsupported'
+  | 'upload_send_failed'
+  | 'upload_received'
+  | 'upload_analyzing'
+  | 'upload_failed'
+  | 'journey_placed'
+  | 'order_in_flight'
 
 type Catalog = Record<MessageKey, string>
 
@@ -192,6 +221,35 @@ const en: Catalog = {
   draft_dismiss: 'Dismiss',
   draft_dismissed: 'Order draft dismissed',
   draft_sent: 'SENT ✓',
+  dismiss: 'Dismiss',
+  id_section: 'Identity',
+  id_firstrun_title: 'Claim a username so Hippo remembers you anywhere',
+  id_firstrun_cta: 'Claim username',
+  id_mode_create: 'Create',
+  id_mode_signin: 'Sign in',
+  id_username_label: 'Username',
+  id_pin_label: '4-digit PIN',
+  id_submit_create: 'Claim it',
+  id_submit_signin: 'Sign in',
+  id_checking: 'CHECKING…',
+  id_taken: 'That username is taken — sign in instead, or pick another.',
+  id_wrong_pin: 'Wrong PIN — try again.',
+  id_invalid: 'Usernames are 3–24 letters, numbers, - or _; the PIN is 4 digits.',
+  id_rate_limited: 'Too many attempts — please wait a bit, then try again.',
+  id_signed_out: 'Signed out ✓',
+  id_signed_in_as: 'Signed in as {username}',
+  id_sign_out: 'Sign out',
+  upload_attach: 'Attach a CSV or image',
+  upload_uploading: 'UPLOADING',
+  upload_too_large_csv: 'CSV files up to 512 KB can be analyzed — this one is larger.',
+  upload_too_large_image: 'Images up to 3 MB can be analyzed — this one is larger.',
+  upload_unsupported: 'Only CSV, PNG, JPEG or WebP files can be analyzed.',
+  upload_send_failed: 'Upload failed — nothing reached Hippo. Try again.',
+  upload_received: 'RECEIVED',
+  upload_analyzing: 'ANALYZING…',
+  upload_failed: 'UPLOAD FAILED',
+  journey_placed: 'PLACED',
+  order_in_flight: 'ORDER IN FLIGHT — AWAITING THE VENUE…',
 }
 
 // First pass — pending native review.
@@ -278,6 +336,35 @@ const hi: Catalog = {
   draft_dismiss: 'हटाएँ',
   draft_dismissed: 'ऑर्डर ड्राफ़्ट हटा दिया गया',
   draft_sent: 'भेज दिया ✓',
+  dismiss: 'हटाएँ',
+  id_section: 'पहचान',
+  id_firstrun_title: 'एक username चुनें ताकि Hippo आपको हर जगह याद रखे',
+  id_firstrun_cta: 'Username चुनें',
+  id_mode_create: 'नया बनाएँ',
+  id_mode_signin: 'साइन इन',
+  id_username_label: 'Username',
+  id_pin_label: '4 अंकों का PIN',
+  id_submit_create: 'क्लेम करें',
+  id_submit_signin: 'साइन इन करें',
+  id_checking: 'जाँच हो रही है…',
+  id_taken: 'यह username पहले से लिया गया है — साइन इन करें या दूसरा चुनें।',
+  id_wrong_pin: 'गलत PIN — दोबारा कोशिश करें।',
+  id_invalid: 'Username में 3–24 अक्षर, अंक, - या _ हों; PIN 4 अंकों का हो।',
+  id_rate_limited: 'बहुत बार कोशिश हुई — थोड़ी देर बाद दोबारा कोशिश करें।',
+  id_signed_out: 'साइन आउट हो गया ✓',
+  id_signed_in_as: '{username} के रूप में साइन इन',
+  id_sign_out: 'साइन आउट',
+  upload_attach: 'CSV या इमेज जोड़ें',
+  upload_uploading: 'अपलोड हो रहा है',
+  upload_too_large_csv: 'सिर्फ़ 512 KB तक की CSV फ़ाइलें — यह उससे बड़ी है।',
+  upload_too_large_image: 'सिर्फ़ 3 MB तक की इमेज — यह उससे बड़ी है।',
+  upload_unsupported: 'सिर्फ़ CSV, PNG, JPEG या WebP फ़ाइलों का विश्लेषण हो सकता है।',
+  upload_send_failed: 'अपलोड विफल — कुछ नहीं भेजा गया। दोबारा कोशिश करें।',
+  upload_received: 'मिल गई',
+  upload_analyzing: 'विश्लेषण हो रहा है…',
+  upload_failed: 'अपलोड विफल',
+  journey_placed: 'भेजा गया',
+  order_in_flight: 'ऑर्डर भेजा गया — वेन्यू की प्रतीक्षा…',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -370,6 +457,36 @@ const hiLatn: Catalog = {
   draft_dismiss: 'Hatao',
   draft_dismissed: 'Order draft hata diya',
   draft_sent: 'BHEJ DIYA ✓',
+  dismiss: 'Hatao',
+  id_section: 'Identity',
+  id_firstrun_title: 'Username claim karo taaki Hippo aapko har jagah yaad rakhe',
+  id_firstrun_cta: 'Username claim karo',
+  id_mode_create: 'Naya banao',
+  id_mode_signin: 'Sign in',
+  id_username_label: 'Username',
+  id_pin_label: '4-digit PIN',
+  id_submit_create: 'Claim karo',
+  id_submit_signin: 'Sign in karo',
+  id_checking: 'CHECK HO RAHA…',
+  id_taken: 'Yeh username pehle se liya hai — sign in karo ya doosra chuno.',
+  id_wrong_pin: 'Galat PIN — dobara try karo.',
+  id_invalid: 'Username 3–24 letters, numbers, - ya _ ka ho; PIN 4 digit ka.',
+  id_rate_limited: 'Bahut baar try hua — thodi der baad dobara try karo.',
+  id_signed_out: 'Sign out ho gaya ✓',
+  id_signed_in_as: '{username} ke roop mein signed in',
+  id_sign_out: 'Sign out',
+  upload_attach: 'CSV ya image attach karo',
+  upload_uploading: 'UPLOAD HO RAHA',
+  upload_too_large_csv: 'Sirf 512 KB tak ki CSV files — yeh usse badi hai.',
+  upload_too_large_image: 'Sirf 3 MB tak ki images — yeh usse badi hai.',
+  upload_unsupported: 'Sirf CSV, PNG, JPEG ya WebP files analyze ho sakti hain.',
+  upload_send_failed: 'Upload fail — kuch nahi bheja gaya. Dobara try karo.',
+  upload_received: 'MIL GAYI',
+  upload_analyzing: 'ANALYZE HO RAHA…',
+  upload_failed: 'UPLOAD FAIL',
+  // Lifecycle vocabulary stays in English product terms, like FILL above.
+  journey_placed: 'PLACED',
+  order_in_flight: 'Order bhej diya — venue ka wait…',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -459,6 +576,35 @@ const ar: Catalog = {
   draft_dismiss: 'تجاهل',
   draft_dismissed: 'تم تجاهل مسودة الأمر',
   draft_sent: 'تم الإرسال ✓',
+  dismiss: 'إغلاق',
+  id_section: 'الهوية',
+  id_firstrun_title: 'احجز اسم مستخدم ليتذكرك Hippo في كل مكان',
+  id_firstrun_cta: 'احجز اسم مستخدم',
+  id_mode_create: 'إنشاء',
+  id_mode_signin: 'تسجيل الدخول',
+  id_username_label: 'اسم المستخدم',
+  id_pin_label: 'رمز PIN من 4 أرقام',
+  id_submit_create: 'احجزه',
+  id_submit_signin: 'سجّل الدخول',
+  id_checking: 'جارٍ التحقق…',
+  id_taken: 'اسم المستخدم هذا محجوز — سجّل الدخول أو اختر اسمًا آخر.',
+  id_wrong_pin: 'رمز PIN خاطئ — حاول مرة أخرى.',
+  id_invalid: 'اسم المستخدم من 3–24 حرفًا أو رقمًا أو - أو _؛ والرمز 4 أرقام.',
+  id_rate_limited: 'محاولات كثيرة — يُرجى الانتظار قليلًا ثم المحاولة مجددًا.',
+  id_signed_out: 'تم تسجيل الخروج ✓',
+  id_signed_in_as: 'مسجّل الدخول باسم {username}',
+  id_sign_out: 'تسجيل الخروج',
+  upload_attach: 'أرفق ملف CSV أو صورة',
+  upload_uploading: 'جارٍ الرفع',
+  upload_too_large_csv: 'ملفات CSV حتى 512 KB فقط — هذا الملف أكبر.',
+  upload_too_large_image: 'الصور حتى 3 MB فقط — هذه الصورة أكبر.',
+  upload_unsupported: 'يمكن تحليل ملفات CSV وPNG وJPEG وWebP فقط.',
+  upload_send_failed: 'فشل الرفع — لم يصل شيء. حاول مرة أخرى.',
+  upload_received: 'استُلم',
+  upload_analyzing: 'جارٍ التحليل…',
+  upload_failed: 'فشل الرفع',
+  journey_placed: 'أُرسل',
+  order_in_flight: 'أُرسل أمرك — في انتظار المنصّة…',
 }
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }

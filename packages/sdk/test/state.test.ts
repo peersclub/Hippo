@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   banners,
+  identityStatus,
+  identityUsername,
   learnedFacts,
   learnedMemoryOptIn,
   livePrice,
+  localUploads,
   orders,
   pushFrame,
   thread,
@@ -450,6 +453,130 @@ describe('lifecycle collapse by ticketId', () => {
     pushFrame({ kind: 'frame', frame: lifecycle('l1', 't_9') })
     const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
     expect(types).toEqual(['lifecycle'])
+  })
+})
+
+describe('identity frame routing', () => {
+  const identity = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+    ...base,
+    id,
+    type: 'identity' as const,
+    status: status as 'ok',
+    ...extra,
+  })
+
+  it('never enters the thread — the identity card renders the signal in place', () => {
+    thread.value = []
+    identityStatus.value = null
+    identityUsername.value = null
+    pushFrame({ kind: 'frame', frame: identity('i1', 'ok', { username: 'victor' }) })
+    expect(thread.value).toHaveLength(0)
+    // peek(): the `= null` reset above narrows .value to null for TS
+    expect(identityStatus.peek()?.status).toBe('ok')
+  })
+
+  it('ok binds the username; signed_out unbinds it', () => {
+    identityUsername.value = null
+    pushFrame({ kind: 'frame', frame: identity('i1', 'ok', { username: 'victor' }) })
+    expect(identityUsername.value).toBe('victor')
+    pushFrame({ kind: 'frame', frame: identity('i2', 'signed_out') })
+    expect(identityUsername.value).toBeNull()
+    expect(identityStatus.value?.status).toBe('signed_out')
+  })
+
+  it('failure statuses report WITHOUT un-signing a live session', () => {
+    identityUsername.value = null
+    pushFrame({ kind: 'frame', frame: identity('i1', 'ok', { username: 'victor' }) })
+    for (const status of ['taken', 'wrong_pin', 'invalid', 'rate_limited'] as const) {
+      pushFrame({ kind: 'frame', frame: identity(`i_${status}`, status) })
+      expect(identityUsername.value).toBe('victor') // sticky
+      expect(identityStatus.value?.status).toBe(status) // latest reported
+    }
+  })
+
+  it('cannot clear a thinking card — it is routed state, not content', () => {
+    thread.value = []
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'th', type: 'thinking', lines: ['…'] } })
+    pushFrame({ kind: 'frame', frame: identity('i9', 'ok', { username: 'victor' }) })
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(types).toEqual(['thinking'])
+  })
+})
+
+describe('upload_status routing', () => {
+  const upload = (
+    id: string,
+    fileId: string,
+    phase: string,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...base,
+    id,
+    type: 'upload_status' as const,
+    fileId,
+    name: 'trades.csv',
+    sizeDisplay: '184 KB',
+    phase: phase as 'received',
+    ...extra,
+  })
+
+  it('is a conversation card — it enters the thread and clears a trailing thinking', () => {
+    thread.value = []
+    localUploads.value = []
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'th', type: 'thinking', lines: ['…'] } })
+    pushFrame({ kind: 'frame', frame: upload('u1', 'f_1', 'received') })
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(types).toEqual(['upload_status'])
+  })
+
+  it('collapses in place by fileId — one chip tells the file journey', () => {
+    thread.value = []
+    localUploads.value = []
+    pushFrame({ kind: 'frame', frame: upload('u1', 'f_1', 'received') })
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'e', type: 'user_echo', text: 'analyze' } })
+    pushFrame({ kind: 'frame', frame: upload('u2', 'f_1', 'analyzing') })
+    expect(thread.value).toHaveLength(2)
+    const first = thread.value[0]
+    expect(
+      first?.kind === 'frame' && first.frame.type === 'upload_status' && first.frame.phase,
+    ).toBe('analyzing')
+  })
+
+  it('different files never collapse into each other', () => {
+    thread.value = []
+    localUploads.value = []
+    pushFrame({ kind: 'frame', frame: upload('u1', 'f_1', 'received') })
+    pushFrame({ kind: 'frame', frame: upload('u2', 'f_2', 'received') })
+    expect(thread.value).toHaveLength(2)
+  })
+
+  it('failed replaces in place too, carrying the server reason', () => {
+    thread.value = []
+    localUploads.value = []
+    pushFrame({ kind: 'frame', frame: upload('u1', 'f_1', 'analyzing') })
+    pushFrame({ kind: 'frame', frame: upload('u2', 'f_1', 'failed', { reason: 'Unreadable CSV' }) })
+    expect(thread.value).toHaveLength(1)
+    const only = thread.value[0]
+    expect(only?.kind === 'frame' && only.frame.type === 'upload_status' && only.frame.reason).toBe(
+      'Unreadable CSV',
+    )
+  })
+
+  it('retires the client-local progress row for its fileId (server takes over)', () => {
+    thread.value = []
+    localUploads.value = [
+      {
+        id: 1,
+        name: 'trades.csv',
+        sizeDisplay: '184 KB',
+        pct: 100,
+        phase: 'sending',
+        fileId: 'f_1',
+      },
+      { id: 2, name: 'other.png', sizeDisplay: '1.0 MB', pct: 40, phase: 'sending', fileId: 'f_2' },
+    ]
+    pushFrame({ kind: 'frame', frame: upload('u1', 'f_1', 'received') })
+    expect(localUploads.value.map((u) => u.fileId)).toEqual(['f_2'])
   })
 })
 

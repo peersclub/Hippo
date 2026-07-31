@@ -19,11 +19,29 @@ export type JourneyStep = {
   /** i18n catalog key — the journey line is SDK chrome, so it localizes. */
   labelKey:
     | 'journey_prepared'
+    | 'journey_placed'
     | 'journey_placing'
     | 'journey_working'
     | 'journey_filled'
     | 'journey_cancelling'
   state: 'done' | 'active' | 'pending'
+}
+
+/**
+ * The confirm-in-flight loader: between a confirmed ticket_action and the
+ * FIRST lifecycle frame for the ticket there is real dead air (gateway →
+ * venue handoff) that used to read as a mute disabled button. Same journey
+ * vocabulary as the lifecycle card — PLACED is done the moment the gateway
+ * accepted the confirm (that's wire truth: the 200), WORKING pulses while we
+ * wait for the venue, FILLED stays pending. Static by design: it never
+ * advances client-side — the first lifecycle frame takes over the story.
+ */
+export function confirmPendingSteps(): JourneyStep[] {
+  return [
+    { key: 'prepared', labelKey: 'journey_placed', state: 'done' },
+    { key: 'working', labelKey: 'journey_working', state: 'active' },
+    { key: 'terminal', labelKey: 'journey_filled', state: 'pending' },
+  ]
 }
 
 /**

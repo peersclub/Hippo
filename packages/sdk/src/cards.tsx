@@ -17,6 +17,7 @@ import type {
   Skeleton,
   Thinking,
   UnknownFrame,
+  UploadStatus,
   UserEcho,
 } from '@hippo/protocol'
 import type { JSX } from 'preact'
@@ -32,6 +33,7 @@ import { isStale, LANDED_FLASH_MS, STALE_CHECK_INTERVAL_MS, staleAgeLabel } from
 import { t } from './i18n.js'
 import {
   cancelAffordance,
+  confirmPendingSteps,
   fillCaption,
   isInFlight,
   journeySteps,
@@ -280,6 +282,9 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
   // fired minutes later is unacceptable) — so a live failure must surface here.
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Confirm accepted by the gateway — the order is genuinely in flight. Drives
+  // the stepped loader below until the first lifecycle frame takes over.
+  const [placed, setPlaced] = useState(false)
   // Once a lifecycle frame exists for this ticket the order is handed off —
   // derived from the thread (not component state) so it survives remounts.
   const handedOff = thread.value.some(
@@ -296,7 +301,9 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
     })
     setBusy(false)
     if (!ok) setFailed(true)
+    else setPlaced(true)
   }
+  const L = locale.value
   return (
     <div class="ticket">
       <div class="th">
@@ -311,24 +318,41 @@ function OrderTicketCard({ frame }: { frame: OrderTicket }) {
           </div>
         ))}
       </div>
-      {/* ticket_action is deliberately NOT queueable — a confirm fired minutes
-          later without the trader present is unacceptable. Offline: fail loud.
-          `busy` reflects the real uplink round-trip; `handedOff` is wire truth. */}
-      <button
-        type="button"
-        class="cta"
-        disabled={busy || handedOff || connection.value !== 'live'}
-        aria-busy={busy}
-        title={connection.value !== 'live' ? t(locale.value, 'ticket_offline_hint') : undefined}
-        onClick={confirm}
-      >
-        {handedOff
-          ? t(locale.value, 'handed_off')
-          : busy
-            ? t(locale.value, 'confirming')
-            : frame.cta}
-      </button>
-      {failed && <div class="action-failed">{t(locale.value, 'action_failed')}</div>}
+      {placed && !handedOff ? (
+        // Between the accepted confirm and the FIRST lifecycle frame: a
+        // stepped loader in the lifecycle vocabulary (PLACED · WORKING →
+        // FILLED) instead of a mute disabled button. Static by design — it
+        // never advances client-side; the lifecycle card takes the story over.
+        <>
+          <div class="journey" aria-hidden="true">
+            {confirmPendingSteps().map((s) => (
+              <span class={`stp ${s.state}`} key={s.key}>
+                {s.state === 'done' && <span class="tick">✓</span>}
+                {s.state === 'active' && <span class="pulse" />}
+                {t(L, s.labelKey)}
+              </span>
+            ))}
+          </div>
+          <div class="await" role="status" aria-live="polite">
+            {t(L, 'order_in_flight')}
+          </div>
+        </>
+      ) : (
+        /* ticket_action is deliberately NOT queueable — a confirm fired minutes
+           later without the trader present is unacceptable. Offline: fail loud.
+           `busy` reflects the real uplink round-trip; `handedOff` is wire truth. */
+        <button
+          type="button"
+          class="cta"
+          disabled={busy || handedOff || connection.value !== 'live'}
+          aria-busy={busy}
+          title={connection.value !== 'live' ? t(L, 'ticket_offline_hint') : undefined}
+          onClick={confirm}
+        >
+          {handedOff ? t(L, 'handed_off') : busy ? t(L, 'confirming') : frame.cta}
+        </button>
+      )}
+      {failed && <div class="action-failed">{t(L, 'action_failed')}</div>}
       <div class="tfoot">{frame.footnote}</div>
     </div>
   )
@@ -857,6 +881,43 @@ function StreamingBriefCard({ frame }: { frame: BriefDelta }) {
   )
 }
 
+/**
+ * Upload journey chip — the server-side phases of an uploaded file (the
+ * client's own byte-progress bar lives in the composer; these frames take
+ * over once the gateway has the bytes). One chip per file: the store
+ * collapses upload_status frames in place by fileId, and the panel keys the
+ * chip by file so phase changes never remount. `analyzing` gets a distinct
+ * indeterminate treatment (shimmer across the chip) — the analysis answer
+ * itself arrives as a normal research_brief below.
+ */
+function UploadStatusCard({ frame }: { frame: UploadStatus }) {
+  const L = locale.value
+  const failed = frame.phase === 'failed'
+  const analyzing = frame.phase === 'analyzing'
+  return (
+    <div
+      class={`upchip${analyzing ? ' analyzing' : ''}${failed ? ' failed' : ''}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span class="upicon" aria-hidden="true">
+        ▤
+      </span>
+      <span class="upname">{frame.name}</span>
+      <span class="upsize">{frame.sizeDisplay}</span>
+      <span class="upphase">
+        {analyzing && <span class="pulse" aria-hidden="true" />}
+        {failed
+          ? t(L, 'upload_failed')
+          : analyzing
+            ? t(L, 'upload_analyzing')
+            : t(L, 'upload_received')}
+      </span>
+      {failed && frame.reason && <span class="upreason">{frame.reason}</span>}
+    </div>
+  )
+}
+
 function BannerCard({ frame }: { frame: Banner }) {
   return (
     <div class={`banner ${frame.kind}`}>
@@ -915,9 +976,11 @@ export function renderFrame(frame: Frame): JSX.Element | null {
       return <StreamingBriefCard frame={frame} />
     case 'banner':
       return <BannerCard frame={frame} />
+    case 'upload_status':
+      return <UploadStatusCard frame={frame} />
     case 'user_echo':
       return <UserEchoCard frame={frame} />
     default:
-      return null // orders_snapshot, pulse & price_tick are handled by stores, never rendered in-thread
+      return null // orders_snapshot, pulse, price_tick, learned_memory & identity are handled by stores, never rendered in-thread
   }
 }
