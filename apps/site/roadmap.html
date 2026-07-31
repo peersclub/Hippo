@@ -77,6 +77,12 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   .mgroup .mg-count{margin-left:auto;color:var(--hippo-text-faint);background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:1px 8px}
   .mg-cards{display:flex;flex-direction:column;gap:10px;padding:2px 10px 12px}
 
+  /* today's shipments: the date group becomes a highlighted tab */
+  .mgroup.today{border-color:rgba(240,185,74,.55);background:linear-gradient(180deg,rgba(240,185,74,.07),var(--hippo-card-2))}
+  .mgroup.today summary{color:var(--hippo-text-hi)}
+  .mgroup.today summary::after{content:'TODAY';font-size:8.5px;letter-spacing:.14em;color:var(--hippo-amber-ink);background:var(--hippo-amber);border-radius:var(--hippo-radius-pill);padding:2px 8px;margin-left:4px}
+  .mgroup.today .mg-count{border-color:rgba(240,185,74,.45);color:var(--hippo-amber)}
+
   .legend{font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-text-faint);text-align:center;margin:-40px 0 60px}
   .legend b{color:var(--hippo-text-mid);font-weight:500}
 
@@ -288,12 +294,18 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
       if (!groups.has(f.date)) groups.set(f.date, [])
       groups.get(f.date).push(f)
     }
+    // "Jul 31"-style stamp for the viewer's current day — the matching date
+    // group renders as a highlighted TODAY tab (and reverts to a plain date
+    // group the day after, with no edit needed).
+    const now = new Date()
+    const todayStamp = `${Object.keys(MONTHS)[now.getMonth()]} ${now.getDate()}`
     return [...groups.keys()]
       .sort((a, b) => dateKey(b) - dateKey(a))
       .map((date, i) => {
         const cards = groups.get(date)
-        const open = forceOpen || i === 0
-        return `<details class="mgroup"${open ? ' open' : ''}>
+        const isToday = date === todayStamp
+        const open = forceOpen || i === 0 || isToday
+        return `<details class="mgroup${isToday ? ' today' : ''}"${open ? ' open' : ''}>
           <summary>${date}<span class="mg-count">${cards.length}</span></summary>
           <div class="mg-cards">${cards.map(cardHTML).join('')}</div>
         </details>`
