@@ -8,6 +8,8 @@ import type { ResearchBrief } from '@hippo/protocol'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { SparklineSvg } from './cards.js'
 import { t } from './i18n.js'
+import { signOutUplink } from './identity.js'
+import { IdentityForm } from './identity-card.js'
 import { consentRows, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
 import { dispatch } from './outbox.js'
 import {
@@ -25,6 +27,7 @@ import { COPIED_FLASH_MS, shareLink } from './share.js'
 import {
   entitlements,
   glass,
+  identityUsername,
   learnedFacts,
   learnedMemoryOptIn,
   locale,
@@ -35,6 +38,7 @@ import {
   shareFrame,
   venueName,
 } from './state.js'
+import { send } from './transport.js'
 
 /** Feedback window on the learned-memory clear button: it disables briefly so
  * the tap registers, then the empty `learned_memory` frame the server sends
@@ -402,6 +406,44 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
 }
 
 /**
+ * Identity in settings — signed in: the username + a Sign out action (the
+ * server answers with a `signed_out` frame, which unbinds the sticky
+ * username and flips this section back to the claim form). Not signed in:
+ * the same claim/sign-in form as the first-run card. Sign-out goes straight
+ * through transport `send` (never the outbox — an auth action fired minutes
+ * later without the trader present would be wrong) and fails loud.
+ */
+function IdentitySection() {
+  const L = locale.value
+  const username = identityUsername.value
+  const [signOutFailed, setSignOutFailed] = useState(false)
+  const signOut = async () => {
+    setSignOutFailed(false)
+    const ok = await send(signOutUplink()).catch(() => false)
+    if (!ok) setSignOutFailed(true)
+  }
+  if (!username) return <IdentityForm />
+  return (
+    <>
+      <div class="obrow">
+        <span class="obicon">◉</span>
+        <div>
+          <b>{t(L, 'id_signed_in_as', { username })}</b>
+        </div>
+        <button type="button" class="idout" onClick={() => void signOut()}>
+          {t(L, 'id_sign_out')}
+        </button>
+      </div>
+      {signOutFailed && (
+        <div class="idmsg err" role="status">
+          {t(L, 'action_failed')}
+        </div>
+      )}
+    </>
+  )
+}
+
+/**
  * ⚙ settings sheet (baseline §6): memory toggle + clear, the data rows
  * restated in plain language, answer language (with RTL preview via عربي),
  * and "Replay the intro". Language taps relabel the chrome instantly (the
@@ -510,6 +552,8 @@ export function SettingsSheet({ onReplay }: { onReplay: () => void }) {
               </div>
             ))}
         </div>
+        <div class="setlab">{t(L, 'id_section')}</div>
+        <IdentitySection />
         <div class="setlab">{t(L, 'settings_language')}</div>
         <div class="langrow">
           {LANGUAGE_OPTIONS.map((opt) => (

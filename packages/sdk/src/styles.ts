@@ -481,12 +481,89 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
   border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:5px 10px}
 .mem .shitem[disabled]{opacity:.55}
 .memoff{font-size:11px;color:var(--hippo-text-mid);margin:0;padding:2px 0}
+/* identity — first-run claim card (chrome, above the orders strip) + form */
+.idcard{flex-shrink:0;margin:9px 13px 0;border:1px dashed rgba(var(--hippo-amber-rgb),.5);
+  border-radius:13px;padding:11px 12px;display:flex;flex-direction:column;gap:9px}
+.idcard.ok{flex-direction:row;align-items:center;gap:8px;border-style:solid;border-color:rgba(var(--hippo-up-rgb),.45);
+  font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-up)}
+.idcard.ok span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.idhead{display:flex;align-items:flex-start;gap:8px}
+.idhead b{flex:1;font-family:var(--hippo-font-display);font-weight:600;font-size:12px;line-height:1.4;color:var(--hippo-amber)}
+.idx{flex-shrink:0;width:20px;height:20px;border-radius:7px;border:1px solid var(--hippo-hairline);
+  color:var(--hippo-text-dim);display:grid;place-items:center;font-size:9px}
+.idx:hover{color:var(--hippo-text-hi)}
+.idcta{font-family:var(--hippo-font-display);font-weight:600;font-size:11.5px;padding:9px 12px;
+  border-radius:10px;background:var(--hippo-amber);color:var(--hippo-amber-ink);text-align:center}
+.idform{display:flex;flex-direction:column;gap:9px}
+.idmodes{display:flex;gap:6px}
+.idmode{flex:1;border:1px solid var(--hippo-hairline);border-radius:10px;padding:7px 4px;font-size:11px;
+  color:var(--hippo-text-mid);text-align:center}
+.idmode:hover{border-color:rgba(var(--hippo-amber-rgb),.4);color:var(--hippo-text-hi)}
+.idmode.on{border-color:rgba(var(--hippo-amber-rgb),.6);background:rgba(var(--hippo-amber-rgb),.08);color:var(--hippo-text-hi)}
+/* PIN — four masked digit boxes; never a plain-text render of the value */
+.pinrow{display:flex;gap:7px}
+.pinbox{width:38px;height:40px;text-align:center;font-family:var(--hippo-font-mono);font-size:15px;
+  color:var(--hippo-text-hi);background:rgba(var(--hippo-panel-deep-rgb),.7);border:1px solid var(--hippo-hairline);
+  border-radius:var(--hippo-radius-cell);outline:none;appearance:none}
+.pinbox:focus{border-color:rgba(var(--hippo-amber-rgb),.5)}
+.pinbox:disabled{opacity:.5}
+.idmsg{font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.04em;line-height:1.5}
+.idmsg.err{color:var(--hippo-down)}
+.idform .obcta{margin-top:0}
+.idform .obcta:disabled{opacity:.45;cursor:default}
+/* settings identity row — the sign-out pill */
+.idout{flex-shrink:0;font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.08em;color:var(--hippo-text-dim);
+  border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:5px 10px}
+.idout:hover{color:var(--hippo-down);border-color:rgba(var(--hippo-down-rgb),.5)}
+/* composer attach (paperclip) */
+.attach{width:33px;height:33px;border-radius:11px;border:1px solid var(--hippo-hairline);
+  background:rgba(var(--hippo-white-rgb),.03);color:var(--hippo-text-dim);display:grid;place-items:center;flex-shrink:0}
+.attach:hover{color:var(--hippo-text-hi);border-color:rgba(var(--hippo-white-rgb),.18)}
+.attach:disabled{opacity:.4;cursor:default}
+/* client-local upload rows — byte progress + inline local errors */
+.uprow{display:flex;align-items:center;gap:8px;padding:8px 15px 0;font-family:var(--hippo-font-mono);
+  font-size:9px;letter-spacing:.06em;color:var(--hippo-text-dim)}
+.uprow .upname{color:var(--hippo-text-hi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%;flex-shrink:0}
+.uprow .upsize{color:var(--hippo-text-faint)}
+.uprow .upbar{flex:1;height:4px;border-radius:2px;background:rgba(var(--hippo-white-rgb),.08);overflow:hidden}
+.uprow .upbar span{display:block;height:100%;border-radius:2px;background:var(--hippo-amber);transition:width .2s ease}
+.uprow .uppct{color:var(--hippo-amber)}
+.uprow.err{color:var(--hippo-down)}
+.uprow.err .upmsg{flex:1;letter-spacing:.04em;line-height:1.4}
+.uprow .upx{flex-shrink:0;width:18px;height:18px;border-radius:6px;border:1px solid var(--hippo-hairline);
+  color:var(--hippo-text-dim);display:grid;place-items:center;font-size:8px}
+.uprow .upx:hover{color:var(--hippo-text-hi)}
+/* upload_status chip — the file's server-side journey, one chip per file */
+.upchip{align-self:flex-start;display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:94%;
+  border:1px solid var(--hippo-hairline);border-radius:13px;padding:9px 12px;background:var(--hippo-card);
+  font-family:var(--hippo-font-mono);font-size:10px}
+.upchip .upicon{color:var(--hippo-amber)}
+.upchip .upname{color:var(--hippo-text-hi)}
+.upchip .upsize{color:var(--hippo-text-faint);font-size:9px}
+.upchip .upphase{margin-inline-start:auto;display:inline-flex;align-items:center;gap:6px;
+  font-size:8.5px;letter-spacing:.1em;color:var(--hippo-text-dim)}
+.upchip .upphase .pulse{width:6px;height:6px;border-radius:50%;background:var(--hippo-amber);animation:hpulse 1.2s ease infinite}
+/* analyzing — distinct indeterminate treatment: shimmer across the chip */
+.upchip.analyzing{border-color:rgba(var(--hippo-amber-rgb),.35);
+  background:linear-gradient(90deg,var(--hippo-card) 25%,var(--hippo-card-2) 37%,var(--hippo-card) 63%);
+  background-size:400% 100%;animation:shim 1.2s linear infinite}
+.upchip.analyzing .upphase{color:var(--hippo-amber)}
+.upchip.failed{border-color:rgba(var(--hippo-down-rgb),.45)}
+.upchip.failed .upphase{color:var(--hippo-down)}
+.upchip .upreason{flex-basis:100%;font-family:var(--hippo-font-body);font-size:11px;line-height:1.45;color:var(--hippo-down);opacity:.85}
+/* reduced motion for the additions — same hard brand rule as above */
+@media (prefers-reduced-motion:reduce){
+  .upchip.analyzing,.upchip .upphase .pulse{animation:none}
+  .uprow .upbar span{transition:none}
+}
 /* shared focus ring — every interactive element inside the panel */
 .chip:focus-visible,.livebar button:focus-visible,.fbchip:focus-visible,.fbskip:focus-visible,
 .composer textarea:focus-visible,.send:focus-visible,.jump:focus-visible,.shrx:focus-visible,
 .shitem:focus-visible,.lang:focus-visible,.obnotnow:focus-visible,.omanage:focus-visible,
 .cta:focus-visible,.await .cxl:focus-visible,.obcheck:focus-visible,
-.dfield select:focus-visible,.dfield input:focus-visible,.ddismiss:focus-visible{
+.dfield select:focus-visible,.dfield input:focus-visible,.ddismiss:focus-visible,
+.attach:focus-visible,.idx:focus-visible,.idcta:focus-visible,.idmode:focus-visible,
+.idout:focus-visible,.pinbox:focus-visible,.upx:focus-visible{
   outline:2px solid var(--hippo-amber);outline-offset:1px}
 /* ── light lean — PURE token swap (redeclares tokens only) ── */
 :host([data-theme="light"]){

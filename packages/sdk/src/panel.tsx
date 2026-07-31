@@ -12,6 +12,7 @@ import { FallbackCard, renderFrame } from './cards.js'
 import { LONG_PRESS_MS, PRESS_MOVE_SLOP_PX, roveIndex } from './chips.js'
 import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js'
 import { resolveLocale, t } from './i18n.js'
+import { IdentityFirstRunCard } from './identity-card.js'
 import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
 import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
 import { dispatch, outbox } from './outbox.js'
@@ -30,6 +31,7 @@ import {
   floatPos,
   glass,
   locale,
+  localUploads,
   openOrderCount,
   orders,
   pageSymbol,
@@ -50,6 +52,7 @@ import {
 import { isStreaming } from './streaming.js'
 import { panelCss } from './styles.js'
 import { connect, send } from './transport.js'
+import { dismissUpload, startUpload } from './upload.js'
 
 type MountOpts = {
   shadow: ShadowRoot
@@ -161,10 +164,60 @@ function ChipButton({
   )
 }
 
+/** Crisp inline paperclip — emoji render differently on every host platform
+ * and fight the mono aesthetic; currentColor lets CSS drive the state. */
+function ClipSvg() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6h-1.5z" />
+    </svg>
+  )
+}
+
+/** Client-local upload rows — byte progress while the POST runs (the wire has
+ * no 'uploading' phase by design), and inline local errors for files that
+ * never leave the panel (unsupported / oversized / failed send). Success rows
+ * are cleared by the first upload_status frame for their fileId (state.ts). */
+function UploadRows() {
+  const rows = localUploads.value
+  const L = locale.value
+  if (rows.length === 0) return null
+  return (
+    <>
+      {rows.map((u) =>
+        u.phase === 'sending' ? (
+          <div class="uprow" role="status" key={u.id}>
+            <span class="upname">{u.name}</span>
+            <span class="upsize">{u.sizeDisplay}</span>
+            <span class="upbar" aria-hidden="true">
+              <span style={{ width: `${u.pct}%` }} />
+            </span>
+            <span class="uppct">{u.pct}%</span>
+          </div>
+        ) : (
+          <div class="uprow err" role="status" key={u.id}>
+            <span class="upname">{u.name}</span>
+            <span class="upmsg">{t(L, u.errorKey ?? 'upload_send_failed')}</span>
+            <button
+              type="button"
+              class="upx"
+              aria-label={t(L, 'dismiss')}
+              onClick={() => dismissUpload(u.id)}
+            >
+              ✕
+            </button>
+          </div>
+        ),
+      )}
+    </>
+  )
+}
+
 function Composer() {
   const text = composerDraft.value
   const [failed, setFailed] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const conn = connection.value
   // Terminal/dropped states where typing is pointless — disable the input.
   // `connecting` keeps it enabled so the draft can be composed while we warm up.
@@ -233,7 +286,33 @@ function Composer() {
         </div>
       )}
       {count && <div class={`ccount${text.length >= 2000 ? ' max' : ''}`}>{count}</div>}
+      <UploadRows />
       <form class="composer" onSubmit={submit}>
+        {/* Attach — CSV/image analysis. The picker's accept narrows the chooser;
+            checkUpload (upload.ts) is the real gate before any byte is sent.
+            Needs a live session (the POST carries it), so it disables with send. */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv,image/png,image/jpeg,image/webp"
+          hidden
+          onChange={(e) => {
+            const input = e.target as HTMLInputElement
+            const f = input.files?.[0]
+            if (f) void startUpload(f)
+            input.value = '' // re-picking the same file must fire change again
+          }}
+        />
+        <button
+          type="button"
+          class="attach"
+          disabled={blocked}
+          title={t(L, 'upload_attach')}
+          aria-label={t(L, 'upload_attach')}
+          onClick={() => fileRef.current?.click()}
+        >
+          <ClipSvg />
+        </button>
         <textarea
           ref={inputRef}
           value={text}
@@ -468,7 +547,15 @@ function Thread() {
             // remount (no re-run of the card-in animation, no strobing on
             // partial ticks, cancel-failed state survives).
             <FrameWrap
-              key={item.frame.type === 'lifecycle' ? `lc:${item.frame.ticketId}` : item.frame.id}
+              key={
+                item.frame.type === 'lifecycle'
+                  ? `lc:${item.frame.ticketId}`
+                  : // Upload chips collapse in place by fileId (state.ts) — a
+                    // stable key means phase changes update, never remount.
+                    item.frame.type === 'upload_status'
+                    ? `up:${item.frame.fileId}`
+                    : item.frame.id
+              }
             >
               {renderFrame(item.frame)}
             </FrameWrap>
@@ -708,6 +795,7 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
         </div>
       </div>
       <PinnedBanners />
+      <IdentityFirstRunCard />
       <OrdersStrip />
       <Thread />
       <Chips />

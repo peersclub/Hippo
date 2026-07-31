@@ -1,6 +1,7 @@
 import type {
   Banner,
   Frame,
+  Identity,
   LearnedMemory,
   OrdersSnapshot,
   PriceTick,
@@ -10,7 +11,7 @@ import type {
 import { computed, signal } from '@preact/signals'
 import { resolveChips } from './chips.js'
 import type { FeedbackState } from './feedback.js'
-import { isRtl, type Locale } from './i18n.js'
+import { isRtl, type Locale, type MessageKey } from './i18n.js'
 import type { Posture } from './posture.js'
 import {
   armStreamWatchdog,
@@ -115,6 +116,43 @@ export const learnedFacts = signal<LearnedFact[]>([])
  * via a settings uplink and then reflects the next frame. Latest frame wins.
  */
 export const learnedMemoryOptIn = signal(true)
+
+/**
+ * Panel identity — the latest `identity` frame verbatim (server-authoritative,
+ * like learned_memory: the SDK only mirrors, never invents). NEVER a thread
+ * card — the identity card/settings section render it in place.
+ */
+export const identityStatus = signal<Identity | null>(null)
+
+/**
+ * The signed-in username, STICKY across non-terminal statuses: only an `ok`
+ * frame sets it and only a `signed_out` frame clears it — a failed re-claim
+ * (`taken`/`wrong_pin`) must not un-sign the trader mid-session.
+ */
+export const identityUsername = signal<string | null>(null)
+
+/** First-run "claim a username" card dismissal — session-scoped by design
+ * (a module signal, never storage): the nudge re-offers on the next visit. */
+export const identityFirstRunDismissed = signal(false)
+
+/**
+ * Client-local upload rows — the byte-progress phase of the upload
+ * affordance. Purely presentation (the wire has no 'uploading' phase): a row
+ * lives from file-pick to either a local error (dismissible) or the first
+ * `upload_status` frame for its fileId, which clears it (the server's frames
+ * take over in-thread from there).
+ */
+export type LocalUpload = {
+  id: number
+  name: string
+  sizeDisplay: string
+  pct: number
+  phase: 'sending' | 'error'
+  errorKey?: MessageKey
+  /** Set once the POST is accepted (202) — the join key to upload_status. */
+  fileId?: string
+}
+export const localUploads = signal<LocalUpload[]>([])
 
 /** Brief being shared — non-null opens the full-surface share overlay (§6). */
 export const shareFrame = signal<ResearchBrief | null>(null)
@@ -279,6 +317,29 @@ export function pushFrame(item: ThreadItem) {
     // also clears a trailing thinking/skeleton via the ephemeral rule).
   }
 
+  // Upload lifecycle collapses IN PLACE by fileId, exactly like lifecycle by
+  // ticketId — one chip tells the file's journey (received → analyzing →
+  // failed). The frame also retires the client-local progress row for its
+  // fileId: once the server speaks, the byte-progress phase is over.
+  if (t === 'upload_status' && item.kind === 'frame' && item.frame.type === 'upload_status') {
+    const fileId = item.frame.fileId
+    if (localUploads.value.some((u) => u.fileId === fileId)) {
+      localUploads.value = localUploads.value.filter((u) => u.fileId !== fileId)
+    }
+    const prev = thread.value
+    for (let i = prev.length - 1; i >= 0; i--) {
+      const x = prev[i]
+      if (x?.kind === 'frame' && x.frame.type === 'upload_status' && x.frame.fileId === fileId) {
+        const next = [...prev]
+        next[i] = item
+        commitThread(next)
+        return
+      }
+    }
+    // First frame for this file — fall through (clears a trailing
+    // thinking/skeleton via the ephemeral rule, like any content).
+  }
+
   if (t === 'orders_snapshot') {
     orders.value = (item as { frame: OrdersSnapshot }).frame
     return
@@ -315,6 +376,19 @@ export function pushFrame(item: ThreadItem) {
     const f = (item as { frame: LearnedMemory }).frame
     learnedFacts.value = f.facts
     learnedMemoryOptIn.value = f.optIn
+    return
+  }
+  // Identity frames never enter the thread — the identity card and the
+  // settings section render the latest one in place. Only `ok` binds a
+  // username and only `signed_out` unbinds it; failure statuses (taken /
+  // wrong_pin / invalid / rate_limited) report without touching a live
+  // sign-in. Like price_tick, this early return also means an identity frame
+  // can never clear a thinking/skeleton card.
+  if (t === 'identity') {
+    const f = (item as { frame: Identity }).frame
+    identityStatus.value = f
+    if (f.status === 'ok') identityUsername.value = f.username ?? null
+    else if (f.status === 'signed_out') identityUsername.value = null
     return
   }
 

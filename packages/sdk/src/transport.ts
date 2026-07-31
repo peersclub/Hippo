@@ -13,6 +13,12 @@ export type TransportConfig = { gateway: string; key: string; tokenUrl?: string;
 let cfg: TransportConfig | null = null
 let es: EventSource | null = null
 
+/** The connected gateway origin — for the one non-/v1/turns uplink (the
+ * upload POST in upload.ts). Null until connect() has been called. */
+export function gatewayUrl(): string | null {
+  return cfg?.gateway ?? null
+}
+
 // Reconnect backoff. Transient failures (5xx / network / a dead stream) climb
 // an exponential ladder capped at BACKOFF_MAX; a genuinely live stream resets
 // it. Capacity (429) is recoverable but not soon, so it waits far longer.
