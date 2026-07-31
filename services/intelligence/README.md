@@ -157,6 +157,29 @@ body. Events, in order:
 Cache hits emit `meta` + `done` immediately (< 800ms cache-hit budget path).
 Measured locally on qwen3:4b: first byte ~4ms (meta), full brief ~5s.
 
+### `POST /v1/analyze-file`
+
+Uploaded-file analysis (additive, July 2026 — the gateway's `/v1/uplink/file`
+pipeline). Returns the same brief/decline shapes as `/v1/respond`, so the
+gateway renders the answer as a normal `research_brief` and the no-advice
+guardrail applies to file answers unchanged.
+
+```json
+{"kind": "csv",   "name": "holdings.csv", "digest": { "columns": ["asset","qty"], "rowCount": 4, "assetTotals": [...] }, "language": "en"}
+{"kind": "image", "name": "chart.png", "mime": "image/png", "dataBase64": "...", "language": "en"}
+```
+
+- **CSV** arrives as the gateway-parsed digest (columns, row count, numeric
+  summaries, per-asset totals) — the raw file never reaches this service. The
+  digest is embedded as UNTRUSTED DATA in the user prompt beneath the
+  guardrail system prompt.
+- **Image** builds an OpenAI-compatible multimodal message (`image_url` data
+  URI) for the configured vision-capable model (e.g. OpenRouter
+  `anthropic/claude-haiku-4.5`). Base64 is capped at ~4.4MB (the gateway's
+  3MB decoded limit).
+- **Mock mode** (keyless/LLM down): CSV serves a deterministic digest echo;
+  image serves a canned "vision unavailable" brief. Never 500s.
+
 ### `GET /health`
 
 ```json

@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import extract as extract_engine
+import fileanalysis
 import intent as intent_engine
 import research
 from cache import make_answer_cache
@@ -188,6 +189,45 @@ async def respond(req: RespondRequest) -> dict[str, Any]:
             # serve the zero-I/O static shape. The promise is absolute.
             log.exception("fallback decline failed; serving static decline")
             return research.static_decline("BTC", req.language or "en")
+
+
+class AnalyzeFileRequest(BaseModel):
+    """POST /v1/analyze-file — uploaded-file analysis (additive to the pinned
+    contract). CSV arrives as the gateway-parsed digest (the raw file never
+    reaches this service); images arrive as base64 for the vision model.
+    3MB decoded is the gateway's image cap → ~4.2MB of base64 here."""
+
+    kind: Literal["csv", "image"]
+    name: str = Field(min_length=1, max_length=256)
+    language: Literal["en", "hi", "hinglish"] | None = None
+    # csv:
+    digest: dict[str, Any] | None = None
+    # image:
+    mime: str | None = Field(default=None, max_length=128)
+    dataBase64: str | None = Field(default=None, max_length=4_400_000)
+
+
+@app.post("/v1/analyze-file")
+async def analyze_file(req: AnalyzeFileRequest) -> dict[str, Any]:
+    """Analyze an uploaded file: CSV digest summary or image vision Q&A.
+    Returns the same brief/decline shapes as /v1/respond, so the gateway's
+    research_brief path (and the no-advice guardrail) applies unchanged.
+    Never 500s: any error degrades to a deterministic file brief."""
+    try:
+        if req.kind == "csv":
+            return await fileanalysis.analyze_csv(
+                req.name, req.digest or {}, router, language=req.language or "en"
+            )
+        return await fileanalysis.analyze_image(
+            req.name,
+            req.mime or "image/png",
+            req.dataBase64 or "",
+            router,
+            language=req.language or "en",
+        )
+    except Exception:
+        log.exception("analyze-file pipeline error; serving fallback brief")
+        return fileanalysis.fallback_brief(req.name, req.kind)
 
 
 @app.post("/v1/respond/stream")

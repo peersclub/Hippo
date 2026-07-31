@@ -37,6 +37,8 @@ import { authenticate, createSessionStore, type SessionStore } from './plugins/a
 import { createRateLimiter, type RateLimitOptions } from './plugins/rate-limit.js'
 import { createEmitter, streamSession } from './plugins/sse.js'
 import { Telemetry } from './plugins/telemetry.js'
+import { createFileAnalysisClient } from './upload/analysis.js'
+import { registerFileUploadRoute } from './upload/route.js'
 
 const PORT = Number(process.env.PORT ?? 8788)
 
@@ -45,6 +47,9 @@ export type GatewayOptions = {
   market?: import('./orchestrator/market.js').MarketClient
   memory?: import('./orchestrator/memory.js').MemoryClient
   seam?: import('./orchestrator/seam.js').SeamClient
+  /** File-analysis client for POST /v1/uplink/file (tests inject a stub).
+   * Defaults to the intelligence service's /v1/analyze-file endpoint. */
+  fileAnalysis?: import('./upload/analysis.js').FileAnalysisClient
   /** Throw on invalid frames instead of log+drop. Defaults to true in tests. */
   strictFrames?: boolean
   /** Allow anonymous {partnerKey} sessions. OPT-IN: defaults to
@@ -315,6 +320,18 @@ export async function buildApp(opts: GatewayOptions = {}) {
     diagnostics.recordUplink()
     orchestrator.handleUplink(session, parsed.data)
     return { ok: true }
+  })
+
+  // File upload → analysis pipeline (CSV digest / image vision → research
+  // brief over the session SSE). Same session possession auth as /v1/turns,
+  // same per-IP limiter (uploads fan out to the LLM). Additive module — see
+  // upload/route.ts for the pinned SDK contract.
+  registerFileUploadRoute(app, {
+    sessions,
+    emit,
+    analysis: opts.fileAnalysis ?? createFileAnalysisClient(),
+    log: app.log,
+    ...(rateLimit ? { rateLimit } : {}),
   })
 
   /** Venue lifecycle events delivered by the seam (the callbackUrl given at
