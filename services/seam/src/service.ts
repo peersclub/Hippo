@@ -27,6 +27,7 @@ import type {
   Capability,
   LifecycleEvent,
   OrderPlan,
+  OrderRecord,
   PreparedTicket,
   PrepareRequest,
   VenueAdapter,
@@ -409,6 +410,31 @@ export function buildService(
     async (req, reply) => {
       if (!internalGuard(req, reply)) return reply
       return adapter.portfolio(req.params.partnerId, req.params.userId)
+    },
+  )
+
+  // Consolidated orders blotter (open + filled + cancelled) behind orders_query.
+  // Same internal-token guard, never cached — the seam never serves stale order
+  // state. When the adapter can't reach a full listing it degrades to the
+  // reachable open-orders subset (marked statusClass:'open'); the gateway's
+  // card note then says what's included rather than fabricating history.
+  app.get<{ Params: { partnerId: string; userId: string } }>(
+    '/v1/orders/:partnerId/:userId',
+    async (req, reply) => {
+      if (!internalGuard(req, reply)) return reply
+      const { partnerId, userId } = req.params
+      if (adapter.listOrders) return { orders: await adapter.listOrders(partnerId, userId) }
+      const { openOrders } = await adapter.portfolio(partnerId, userId)
+      const orders: OrderRecord[] = openOrders.map((o) => ({
+        orderId: o.orderId,
+        symbol: '',
+        side: o.side,
+        kind: o.summary,
+        qty: '',
+        status: o.status,
+        statusClass: 'open' as const,
+      }))
+      return { orders }
     },
   )
 

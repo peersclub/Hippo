@@ -70,14 +70,18 @@ conflicts with those rules.
 INTENT_SYSTEM_PROMPT = """\
 You classify AND interpret one user message sent to a crypto-exchange trading
 assistant. Respond with STRICT JSON only — one object, no prose, no markdown:
-{"intent": "research"|"concept"|"action"|"advice"|"portfolio"|"smalltalk",
+{"intent": "research"|"concept"|"action"|"advice"|"portfolio"|"smalltalk"|"host_action"|"orders_query",
  "confidence": <number 0..1>,
  "language": "en"|"hi"|"hinglish",
  "interpretation": "<one plain line: what the user is really asking>",
  "restructuredQuery": "<the query rewritten crisply for the answer engine — resolve pronouns, expand tickers, keep the user's intent; NEVER invent facts or add advice>",
  "order": {"side": "buy"|"sell", "size": "<string>",
            "instrument": "<BASE/QUOTE like BTC/USDT>",
-           "orderType": "market"|"limit", "limitPrice": "<string>"}}
+           "orderType": "market"|"limit", "limitPrice": "<string>"},
+ "hostAction": {"action": "set_timeframe"|"apply_indicator"|"remove_indicator",
+                "timeframe": "1m"|"5m"|"15m"|"1h"|"4h"|"1d",
+                "indicator": "sma20"|"sma50"|"ema20"|"rsi"|"vol"},
+ "ordersQuery": {"scope": "all"|"session"}}
 
 Rules:
 - "research": a question about live markets, prices, moves, news, drivers.
@@ -90,6 +94,15 @@ Rules:
   "is this the dip", allocation or timing questions.
 - "portfolio": asks about their own positions, balance, P&L, history.
 - "smalltalk": greetings, thanks, chit-chat.
+- "host_action": wants to change the CHART on the page — switch timeframe
+  ("5m candles", "switch to 1h") or add/remove an indicator ("apply RSI",
+  "remove the moving average"). Set "hostAction" with a "timeframe" for
+  set_timeframe. For apply/remove, set "indicator" ONLY when it maps to a
+  supported slug (sma20, sma50, ema20, rsi, vol — "20 day moving average" →
+  sma20, "volume" → vol); OMIT "indicator" for anything unsupported.
+- "orders_query": asks to see their ORDERS blotter ("show all my orders",
+  "orders this session", "what have I traded today"). Set "ordersQuery.scope"
+  to "session" for this-session/today wording, else "all".
 - "language": "hi" for Devanagari, "hinglish" for romanized Hindi mixed with
   English, else "en".
 - "interpretation": one short line the trader could read as "here's what I

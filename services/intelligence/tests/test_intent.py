@@ -9,10 +9,14 @@ import unittest
 from typing import Any
 
 from intent import (
+    canonical_indicator,
+    canonical_timeframe,
     classify,
     detect_language,
     fast_path,
+    parse_host_action,
     parse_order,
+    parse_orders_query,
     rule_classify,
 )
 
@@ -264,6 +268,154 @@ class ClassifyLLMPath(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["intent"], "research")
         self.assertTrue(result["interpretation"])
         self.assertEqual(result["restructuredQuery"], "why btc down")
+
+
+class HostActionParsing(unittest.TestCase):
+    def test_timeframe_candles(self) -> None:
+        for text, tf in (
+            ("switch the chart to 5m candles", "5m"),
+            ("show me the 15m candles", "15m"),
+            ("change timeframe to 1h", "1h"),
+            ("set the chart to 4h", "4h"),
+            ("switch to daily", "1d"),
+            ("make it 1 minute candles", "1m"),
+        ):
+            ha = parse_host_action(text)
+            self.assertIsNotNone(ha, text)
+            assert ha is not None
+            self.assertEqual(ha["action"], "set_timeframe")
+            self.assertEqual(ha["timeframe"], tf, text)
+
+    def test_bare_timeframe_without_trigger_is_not_host_action(self) -> None:
+        # "in the last 5m" is not a chart command — no trigger word.
+        self.assertIsNone(parse_host_action("why is btc up in the last 5m"))
+
+    def test_apply_indicator(self) -> None:
+        for text, ind in (
+            ("apply RSI", "rsi"),
+            ("add the 20 day moving average", "sma20"),
+            ("show volume", "vol"),
+            ("overlay a 50 day ma", "sma50"),
+            ("apply ema", "ema20"),
+            ("add sma20", "sma20"),
+        ):
+            ha = parse_host_action(text)
+            self.assertIsNotNone(ha, text)
+            assert ha is not None
+            self.assertEqual(ha["action"], "apply_indicator")
+            self.assertEqual(ha.get("indicator"), ind, text)
+
+    def test_remove_indicator(self) -> None:
+        ha = parse_host_action("remove the moving average")
+        assert ha is not None
+        self.assertEqual(ha["action"], "remove_indicator")
+        self.assertEqual(ha["indicator"], "sma20")
+        ha = parse_host_action("hide rsi")
+        assert ha is not None
+        self.assertEqual(ha["action"], "remove_indicator")
+        self.assertEqual(ha["indicator"], "rsi")
+
+    def test_unsupported_indicator_omits_slug(self) -> None:
+        # An indicator hint is present ("indicator") but "ichimoku" isn't in the
+        # demo set — classify host_action, no slug, so the gateway declines
+        # honestly instead of guessing.
+        ha = parse_host_action("apply the ichimoku indicator")
+        assert ha is not None
+        self.assertEqual(ha["action"], "apply_indicator")
+        self.assertNotIn("indicator", ha)
+
+    def test_canonicalisers(self) -> None:
+        self.assertEqual(canonical_timeframe("15m"), "15m")
+        self.assertIsNone(canonical_timeframe("3m"))  # unsupported minute
+        self.assertEqual(canonical_indicator("20 day moving average"), "sma20")
+        self.assertEqual(canonical_indicator("volume"), "vol")
+        self.assertIsNone(canonical_indicator("macd"))
+
+    def test_fast_path_classifies_host_action(self) -> None:
+        result = fast_path("switch to 5m candles")
+        assert result is not None
+        self.assertEqual(result["intent"], "host_action")
+        self.assertEqual(result["hostAction"]["timeframe"], "5m")
+
+
+class OrdersQueryParsing(unittest.TestCase):
+    def test_all_scope_default(self) -> None:
+        for text in ("show all my orders", "my orders", "list my orders"):
+            oq = parse_orders_query(text)
+            self.assertIsNotNone(oq, text)
+            assert oq is not None
+            self.assertEqual(oq["scope"], "all", text)
+
+    def test_session_scope(self) -> None:
+        for text in (
+            "orders in this session",
+            "what have I traded today",
+            "my orders right now",
+            "current session orders",
+        ):
+            oq = parse_orders_query(text)
+            self.assertIsNotNone(oq, text)
+            assert oq is not None
+            self.assertEqual(oq["scope"], "session", text)
+
+    def test_non_orders_defers(self) -> None:
+        self.assertIsNone(parse_orders_query("what is the btc price"))
+
+    def test_fast_path_orders_query_beats_portfolio(self) -> None:
+        # "my orders" is the blotter query, not the positions/P&L portfolio view.
+        result = fast_path("show all my orders")
+        assert result is not None
+        self.assertEqual(result["intent"], "orders_query")
+        self.assertEqual(result["ordersQuery"]["scope"], "all")
+
+    def test_portfolio_still_wins_for_positions(self) -> None:
+        result = fast_path("what are my positions?")
+        assert result is not None
+        self.assertEqual(result["intent"], "portfolio")
+
+
+class HostActionOrdersLLMPath(unittest.IsolatedAsyncioTestCase):
+    async def test_llm_host_action_validated(self) -> None:
+        router = ScriptedRouter(
+            [
+                '{"intent":"host_action","confidence":0.9,"language":"en",'
+                '"hostAction":{"action":"set_timeframe","timeframe":"1h"}}'
+            ]
+        )
+        result = await classify("put it on the hourly", router)
+        self.assertEqual(result["intent"], "host_action")
+        self.assertEqual(result["hostAction"]["timeframe"], "1h")
+
+    async def test_llm_host_action_missing_payload_falls_back(self) -> None:
+        # Claimed host_action but no usable payload → retry, then rules fallback
+        # (which reclassifies deterministically — here, research).
+        router = ScriptedRouter(
+            [
+                '{"intent":"host_action","confidence":0.9,"language":"en"}',
+                '{"intent":"host_action","confidence":0.9,"language":"en"}',
+            ]
+        )
+        result = await classify("why is btc down today", router)
+        self.assertEqual(router.calls, 2)
+        self.assertEqual(result["intent"], "research")
+
+    async def test_llm_orders_query_scope(self) -> None:
+        router = ScriptedRouter(
+            [
+                '{"intent":"orders_query","confidence":0.9,"language":"en",'
+                '"ordersQuery":{"scope":"session"}}'
+            ]
+        )
+        result = await classify("everything I've done in here", router)
+        self.assertEqual(result["intent"], "orders_query")
+        self.assertEqual(result["ordersQuery"]["scope"], "session")
+
+    async def test_host_action_carries_interpretation(self) -> None:
+        router = ScriptedRouter([])  # fast-path hit, no LLM
+        result = await classify("apply RSI", router)
+        self.assertEqual(router.calls, 0)
+        self.assertEqual(result["intent"], "host_action")
+        self.assertTrue(result["interpretation"])
 
 
 if __name__ == "__main__":

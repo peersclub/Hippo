@@ -171,6 +171,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
       prepareOrder: 'order',
       confirm: 'order',
       cancel: 'order',
+      listOrders: 'order',
     }),
     identity: identities,
     emit,

@@ -17,7 +17,12 @@ import type {
   Persona,
   PersonaUpdate,
 } from '../src/orchestrator/memory.js'
-import type { PreparedTicket, SeamClient, SeamPortfolio } from '../src/orchestrator/seam.js'
+import type {
+  OrderRecord,
+  PreparedTicket,
+  SeamClient,
+  SeamPortfolio,
+} from '../src/orchestrator/seam.js'
 import type { Session, SessionStore } from '../src/plugins/auth.js'
 
 export const snapshotFixture: MarketSnapshot = {
@@ -230,6 +235,43 @@ export const portfolioFixture: SeamPortfolio = {
   openOrders: [{ orderId: 'o_btc', side: 'buy', summary: 'BUY 0.05 BTC · MKT', status: 'OPEN' }],
 }
 
+/** A mixed orders blotter (open + filled + cancelled) for orders_query tests. */
+export const ordersFixture: OrderRecord[] = [
+  {
+    orderId: 't_open01',
+    symbol: 'BTC/USDT',
+    side: 'buy',
+    kind: 'MKT',
+    qty: '0.05',
+    status: 'WORKING',
+    statusClass: 'open',
+    tsIso: '2026-07-31T09:00:00.000Z',
+  },
+  {
+    orderId: 't_fill01',
+    symbol: 'ETH/USDT',
+    side: 'sell',
+    kind: 'LMT 3,100',
+    qty: '2',
+    price: '3,100',
+    status: 'FILLED',
+    statusClass: 'filled',
+    filledPct: 100,
+    tsIso: '2026-07-31T08:00:00.000Z',
+  },
+  {
+    orderId: 't_cxl01',
+    symbol: 'SOL/USDT',
+    side: 'buy',
+    kind: 'LMT 120',
+    qty: '10',
+    price: '120',
+    status: 'CANCELLED',
+    statusClass: 'cancelled',
+    tsIso: '2026-07-31T07:00:00.000Z',
+  },
+]
+
 /** Default stubbed venue capabilities: spot + 20x perps, both margin modes. */
 export const capabilitiesFixture: VenueCapabilities = {
   spot: {},
@@ -237,18 +279,24 @@ export const capabilitiesFixture: VenueCapabilities = {
 }
 
 /** Call-recording seam client with fixture responses. */
-export function stubSeam(caps: VenueCapabilities = capabilitiesFixture): SeamClient & {
+export function stubSeam(
+  caps: VenueCapabilities = capabilitiesFixture,
+  orders: OrderRecord[] = ordersFixture,
+): SeamClient & {
   prepares: unknown[]
   confirms: string[]
   cancels: string[]
+  listOrdersCalls: Array<{ partnerId: string; userId: string }>
 } {
   const prepares: unknown[] = []
   const confirms: string[] = []
   const cancels: string[] = []
+  const listOrdersCalls: Array<{ partnerId: string; userId: string }> = []
   return {
     prepares,
     confirms,
     cancels,
+    listOrdersCalls,
     async prepare(req) {
       prepares.push(req)
       return { ...ticketFixture, side: req.side, instrument: req.instrument }
@@ -271,6 +319,10 @@ export function stubSeam(caps: VenueCapabilities = capabilitiesFixture): SeamCli
     async portfolio() {
       return portfolioFixture
     },
+    async listOrders(partnerId, userId) {
+      listOrdersCalls.push({ partnerId, userId })
+      return orders
+    },
     async capabilities() {
       return caps
     },
@@ -292,6 +344,9 @@ export const deadSeam: SeamClient = {
     throw new Error('seam unreachable')
   },
   portfolio: async () => {
+    throw new Error('seam unreachable')
+  },
+  listOrders: async () => {
     throw new Error('seam unreachable')
   },
   capabilities: async () => {

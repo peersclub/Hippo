@@ -25,6 +25,8 @@ import type {
   LifecycleEvent,
   LifecyclePhase,
   OrderPlan,
+  OrderRecord,
+  OrderRecordStatus,
   Portfolio,
   PreparedTicket,
   PrepareRequest,
@@ -109,6 +111,12 @@ type PositionRow = {
   entry: number
   leverage: number
   liquidation: number
+}
+/** A full-history order row (open + terminal) from the host's book of record. */
+type AllOrderRow = OpenOrderRow & {
+  tradeTypeLabel?: 'market' | 'limit'
+  createdAt?: number
+  avgFillPrice?: number
 }
 
 export class AssetworksVenueAdapter implements VenueAdapter {
@@ -595,6 +603,19 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     return res.data?.orders ?? []
   }
 
+  /**
+   * The full orders blotter — the host keeps a durable book of record (all
+   * statuses), so we read it verbatim rather than reconstruct history from
+   * open-orders polls. partnerId/userId are ignored: the signed key resolves
+   * the user server-side, exactly as portfolio() does.
+   */
+  async listOrders(_partnerId: string, _userId: string): Promise<OrderRecord[]> {
+    const res = await this.signedPost<{ orders: AllOrderRow[] }>('/api/v1/trade/orders/all', {
+      limit: 200,
+    })
+    return (res.data?.orders ?? []).map(rowToRecord)
+  }
+
   async portfolio(_partnerId: string, _userId: string): Promise<Portfolio> {
     // Positions = ACTUAL open positions (perps) only — matching the sim
     // adapter's real-fills semantics. Spot BALANCES are holdings, not
@@ -632,4 +653,36 @@ function mapStatus(status: number | string): LifecyclePhase {
   if (n === ORDER_STATUS.CANCELED || n === ORDER_STATUS.PARTIAL_CANCELED) return 'cancelled'
   if (n === ORDER_STATUS.SETTLED) return 'filled'
   return 'awaiting_confirm'
+}
+
+/** Venue numeric status → the blotter's (statusClass, display) pair. */
+function statusToBlotter(status: number): { statusClass: OrderRecordStatus; display: string } {
+  const n = Number(status)
+  if (n === ORDER_STATUS.SETTLED) return { statusClass: 'filled', display: 'FILLED' }
+  if (n === ORDER_STATUS.CANCELED) return { statusClass: 'cancelled', display: 'CANCELLED' }
+  if (n === ORDER_STATUS.PARTIAL_CANCELED)
+    return { statusClass: 'cancelled', display: 'CANCELLED (PARTIAL)' }
+  if (n === ORDER_STATUS.PARTIAL) return { statusClass: 'open', display: 'PARTIAL' }
+  return { statusClass: 'open', display: 'WORKING' }
+}
+
+/** Host book-of-record order row → canonical blotter record. */
+function rowToRecord(o: AllOrderRow): OrderRecord {
+  const symbol = o.pairName.replace('-', '/')
+  const isLimit = o.tradeTypeLabel === 'limit'
+  const { statusClass, display } = statusToBlotter(o.status)
+  return {
+    // The seam ticketId (clientOrderId) is the gateway's session-scope key;
+    // fall back to the venue id for orders the host UI placed directly.
+    orderId: o.clientOrderId ?? String(o.id),
+    symbol,
+    side: o.orderType === ORDER_TY.sell ? 'sell' : 'buy',
+    kind: isLimit ? `LMT ${formatPrice(o.rate)}` : 'MKT',
+    qty: String(o.qty),
+    ...(isLimit ? { price: formatPrice(o.rate) } : {}),
+    status: display,
+    statusClass,
+    ...(o.qty > 0 ? { filledPct: Math.round((o.filledQty / o.qty) * 100) } : {}),
+    ...(o.createdAt ? { tsIso: new Date(o.createdAt).toISOString() } : {}),
+  }
 }

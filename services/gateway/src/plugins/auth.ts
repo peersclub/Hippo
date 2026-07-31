@@ -107,6 +107,15 @@ export type Session = {
   /** The host page's market ("BTC/USDT") from session mint or a context
    * uplink — the default symbol for research, drafts and price ticks. */
   symbol?: string
+  /** Host page-control opt-in from the context uplink (data-hippo-page-control).
+   * true = the host accepts host_action frames (chart timeframe/indicator
+   * commands); absent/false = the orchestrator answers chart requests in prose
+   * instead of emitting a frame the host would silently drop. */
+  pageControl?: boolean
+  /** OrderIds this session created (prepared tickets), append-only — the basis
+   * for orders_query scope 'session'. Live-object only (best-effort across a
+   * cold resume); scope 'all' never depends on it. */
+  createdTicketIds?: Set<string>
   /** Degraded banner is emitted once per session per degradation episode. */
   degradedBannerShown: boolean
   /** Prepared tickets awaiting confirm/cancel. */

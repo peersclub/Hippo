@@ -11,6 +11,7 @@ import type {
   LifecycleEvent,
   OptionsPlan,
   OrderPlan,
+  OrderRecord,
   Portfolio,
   PreparedTicket,
   PrepareRequest,
@@ -50,10 +51,21 @@ type StoredTicket = {
 /** Net position per (user, instrument), accumulated from actual fills. */
 type PositionAgg = { netSize: number; costBasis: number }
 
+/** A retained order record for the consolidated blotter — the sim keeps the
+ * order through its whole lifecycle (WORKING → FILLED/CANCELLED) so listOrders
+ * can answer "show all my orders" honestly, not just show what's still open. */
+type LoggedOrder = { partnerId: string; userId: string; record: OrderRecord }
+
+/** Bound on the retained order log (per adapter). Oldest evicted beyond this —
+ * a demo adapter must not grow without limit. */
+const ORDER_LOG_CAP = 500
+
 export class SimVenueAdapter implements VenueAdapter {
   private readonly tickets = new Map<string, StoredTicket>()
   /** `${partnerId}:${userId}` → instrument → net position from real fills. */
   private readonly books = new Map<string, Map<string, PositionAgg>>()
+  /** ticketId → retained order record (all statuses) for listOrders. */
+  private readonly orderLog = new Map<string, LoggedOrder>()
   private handler: (event: LifecycleEvent) => void = () => {}
 
   constructor(private readonly opts: { fillDelayMs?: number; marketDataUrl?: string } = {}) {}
@@ -239,10 +251,53 @@ export class SimVenueAdapter implements VenueAdapter {
     this.books.set(bookKey, book)
   }
 
+  /** Insert/update the retained blotter record for a ticket. */
+  private logOrder(ticketId: string, patch: Partial<OrderRecord>): void {
+    const t = this.tickets.get(ticketId)
+    const existing = this.orderLog.get(ticketId)
+    if (!existing && !t) return
+    if (existing) {
+      existing.record = { ...existing.record, ...patch }
+      return
+    }
+    if (!t) return
+    const base = t.req.instrument.split('/')[0] ?? t.req.instrument
+    const isLimit = t.req.orderType === 'limit'
+    const record: OrderRecord = {
+      orderId: ticketId,
+      symbol: t.req.instrument,
+      side: t.req.side,
+      kind: isLimit ? `LMT ${formatPrice(t.price)}` : 'MKT',
+      qty: `${t.req.size} ${base}`,
+      ...(isLimit ? { price: formatPrice(t.price) } : {}),
+      status: 'WORKING',
+      statusClass: 'open',
+      tsIso: new Date().toISOString(),
+      ...patch,
+    }
+    this.orderLog.set(ticketId, { partnerId: t.req.partnerId, userId: t.req.userId, record })
+    while (this.orderLog.size > ORDER_LOG_CAP) {
+      const oldest = this.orderLog.keys().next().value
+      if (oldest === undefined) break
+      this.orderLog.delete(oldest)
+    }
+  }
+
+  async listOrders(partnerId: string, userId: string): Promise<OrderRecord[]> {
+    // Real state only: the retained log holds confirmed orders across their
+    // whole lifecycle. A fresh user is empty. Newest first.
+    return [...this.orderLog.values()]
+      .filter((o) => o.partnerId === partnerId && o.userId === userId)
+      .map((o) => o.record)
+      .sort((a, b) => (b.tsIso ?? '').localeCompare(a.tsIso ?? ''))
+  }
+
   async confirm(ticketId: string): Promise<void> {
     const ticket = this.tickets.get(ticketId)
     if (!ticket) throw new Error(`unknown ticket ${ticketId}`)
     ticket.confirmed = true
+    // Retain the order for the consolidated blotter (WORKING at placement).
+    this.logOrder(ticketId, {})
 
     // The order IS on the (simulated) venue from this moment — say so before
     // the fill lands, exactly like a real venue's placement ack.
@@ -273,6 +328,13 @@ export class SimVenueAdapter implements VenueAdapter {
         ],
       })
       this.recordFill(ticket.req, ticket.sizeNum, ticket.price)
+      // Terminal blotter transition: FILLED at the actual price.
+      this.logOrder(ticketId, {
+        status: 'FILLED',
+        statusClass: 'filled',
+        filledPct: 100,
+        price: formatPrice(ticket.price),
+      })
       this.tickets.delete(ticketId)
     }, this.opts.fillDelayMs ?? 3_000)
   }
@@ -281,6 +343,9 @@ export class SimVenueAdapter implements VenueAdapter {
     const ticket = this.tickets.get(ticketId)
     if (!ticket) return false
     if (ticket.fillTimer) clearTimeout(ticket.fillTimer)
+    // Terminal blotter transition — only for orders that were retained (i.e.
+    // confirmed). A pre-confirm cancel was never on the book, so nothing to log.
+    this.logOrder(ticketId, { status: 'CANCELLED', statusClass: 'cancelled' })
     this.tickets.delete(ticketId)
     return true
   }

@@ -17,8 +17,18 @@ from providers import Message, ProviderRouter
 from prompts import INTENT_RETRY_SUFFIX, INTENT_SYSTEM_PROMPT
 from textutil import canonical_text, extract_json_object
 
-INTENTS = {"research", "concept", "action", "advice", "portfolio", "smalltalk"}
+INTENTS = {
+    "research", "concept", "action", "advice", "portfolio", "smalltalk",
+    # Host-interaction wave (July 2026): chart control + consolidated orders.
+    "host_action", "orders_query",
+}
 LANGUAGES = {"en", "hi", "hinglish"}
+
+# Supported chart timeframes + indicator slugs for host_action (demo set).
+# Natural phrasings canonicalise to these; anything outside the set is an
+# honest decline downstream (the gateway never guesses an unsupported one).
+_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
+_INDICATORS = {"sma20", "sma50", "ema20", "rsi", "vol"}
 
 # Intent-path LLM deadline, well inside the gateway's 3s /v1/intent abort.
 # A merely SLOW (not dead) model must trip ProviderError → mock fallback here;
@@ -141,6 +151,120 @@ def parse_order(text: str) -> dict | None:
     return order
 
 
+# --- host actions (chart control) ---------------------------------------------
+# The host page can be driven ("switch to 5m candles", "apply RSI", "remove the
+# moving average") only when it opted in — the gateway gates on that. Here we
+# just CLASSIFY + normalise; the deterministic set is small and unambiguous.
+_TF_TRIGGER = re.compile(
+    r"\b(?:timeframe|time frame|candles?|chart|interval|switch|change|"
+    r"set|make|view|show me|go to|zoom)\b",
+    re.IGNORECASE,
+)
+_APPLY_RE = re.compile(
+    r"\b(?:apply|add|show|enable|overlay|put|plot|display|turn on)\b", re.IGNORECASE
+)
+_REMOVE_RE = re.compile(
+    r"\b(?:remove|hide|clear|disable|drop|turn off|take off|get rid of)\b",
+    re.IGNORECASE,
+)
+_INDICATOR_HINT = re.compile(
+    r"\b(?:rsi|sma\d*|ema\d*|vol|volume|moving\s*average|ma\d*|indicator)\b",
+    re.IGNORECASE,
+)
+
+
+def canonical_timeframe(text: str) -> str | None:
+    """Map a phrasing to a supported timeframe slug, else None."""
+    t = text.lower()
+    m = re.search(r"\b(1m|5m|15m|1h|4h|1d)\b", t)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(\d{1,2})\s*(?:min|mins|minute|minutes)\b", t)
+    if m and m.group(1) in {"1", "5", "15"}:
+        return f"{m.group(1)}m"
+    m = re.search(r"\b(\d{1,2})\s*(?:h|hr|hrs|hour|hours)\b", t)
+    if m and m.group(1) in {"1", "4"}:
+        return f"{m.group(1)}h"
+    if re.search(r"\b(?:daily|day\s*candles?|1\s*day|one\s*day)\b", t):
+        return "1d"
+    return None
+
+
+def canonical_indicator(text: str) -> str | None:
+    """Canonicalise a natural indicator phrase to a supported slug, else None.
+
+    "volume" → vol, "20 day moving average" → sma20, "50 day ma" → sma50,
+    "ema"/"exponential" → ema20, "rsi" → rsi. An unrecognised indicator returns
+    None so the caller can decline honestly rather than guess.
+    """
+    t = text.lower()
+    if re.search(r"\brsi\b", t):
+        return "rsi"
+    if re.search(r"\b(?:vol|volume)\b", t):
+        return "vol"
+    # explicit slug like sma20 / ema 50
+    m = re.search(r"\b(sma|ema)\s*(\d{1,3})\b", t)
+    if m:
+        kind, period = m.group(1), m.group(2)
+        if kind == "ema":
+            return "ema20"  # only ema20 is in the demo set
+        return "sma50" if period == "50" else "sma20"
+    is_ema = bool(re.search(r"\b(?:ema|exponential)\b", t))
+    is_sma = bool(re.search(r"\b(?:sma|simple|ma|moving\s*average)\b", t))
+    if not (is_ema or is_sma):
+        return None
+    if is_ema:
+        return "ema20"
+    period = re.search(r"\b(\d{1,3})\b", t)
+    return "sma50" if (period and period.group(1) == "50") else "sma20"
+
+
+def parse_host_action(text: str) -> dict[str, Any] | None:
+    """Extract a chart-control action, else None. `indicator` is omitted when it
+    can't be canonicalised — the gateway then declines honestly."""
+    t = text.strip()
+    tf = canonical_timeframe(t)
+    if tf and _TF_TRIGGER.search(t):
+        return {"action": "set_timeframe", "timeframe": tf}
+    remove = bool(_REMOVE_RE.search(t))
+    apply = bool(_APPLY_RE.search(t))
+    if (remove or apply) and _INDICATOR_HINT.search(t):
+        action = "remove_indicator" if remove else "apply_indicator"
+        out: dict[str, Any] = {"action": action}
+        ind = canonical_indicator(t)
+        if ind:
+            out["indicator"] = ind
+        return out
+    return None
+
+
+# --- consolidated orders query ------------------------------------------------
+# "show all my orders" / "orders in this session" / "what have I traded today".
+# Distinct from `portfolio` (positions/P&L/balance) — this is the orders blotter.
+_ORDERS_WORD_RE = re.compile(r"\borders?\b", re.IGNORECASE)
+_TRADED_RE = re.compile(
+    r"\b(?:what (?:have|did) i traded?|what did i trade|my trades?|traded today)\b",
+    re.IGNORECASE,
+)
+_SESSION_SCOPE_RE = re.compile(
+    r"\b(?:this session|current session|this chat|this conversation|right now|"
+    r"just (?:now|placed|made)|today|so far|since i started)\b",
+    re.IGNORECASE,
+)
+
+
+def parse_orders_query(text: str) -> dict[str, Any] | None:
+    """Classify an orders-blotter query and its scope, else None.
+
+    "my orders" defaults to scope 'all'; this-session / today wording → 'session'.
+    """
+    tl = text.lower()
+    if not (_ORDERS_WORD_RE.search(tl) or _TRADED_RE.search(tl)):
+        return None
+    scope = "session" if _SESSION_SCOPE_RE.search(tl) else "all"
+    return {"scope": scope}
+
+
 # --- deterministic classification rules ---------------------------------------
 _ADVICE_BAIT = [
     re.compile(p, re.IGNORECASE)
@@ -194,6 +318,24 @@ def fast_path(text: str) -> dict[str, Any] | None:
             "language": language,
             "order": order,
         }
+    # Host actions and orders queries are checked BEFORE portfolio: "my orders"
+    # is a blotter query (orders_query), not the positions/P&L portfolio view.
+    host_action = parse_host_action(text)
+    if host_action is not None:
+        return {
+            "intent": "host_action",
+            "confidence": 0.95,
+            "language": language,
+            "hostAction": host_action,
+        }
+    orders_query = parse_orders_query(text)
+    if orders_query is not None:
+        return {
+            "intent": "orders_query",
+            "confidence": 0.93,
+            "language": language,
+            "ordersQuery": orders_query,
+        }
     if not _ACTION_VERB_START.match(text) and _PORTFOLIO_RE.search(text):
         return {"intent": "portfolio", "confidence": 0.92, "language": language}
     return None
@@ -246,6 +388,37 @@ def _validate_order(raw: object) -> dict[str, str] | None:
     return order
 
 
+def _validate_host_action(raw: object) -> dict[str, Any] | None:
+    """Validate an LLM-proposed host_action payload. set_timeframe REQUIRES a
+    supported timeframe; apply/remove attach an indicator only when it maps to a
+    supported slug (else omitted → the gateway declines)."""
+    if not isinstance(raw, dict):
+        return None
+    action = raw.get("action")
+    if action not in ("set_timeframe", "apply_indicator", "remove_indicator"):
+        return None
+    if action == "set_timeframe":
+        tf = raw.get("timeframe")
+        if not isinstance(tf, str):
+            return None
+        tf = tf if tf in _TIMEFRAMES else (canonical_timeframe(tf) or "")
+        if tf not in _TIMEFRAMES:
+            return None
+        return {"action": action, "timeframe": tf}
+    out: dict[str, Any] = {"action": action}
+    ind = raw.get("indicator")
+    if isinstance(ind, str) and ind.strip():
+        canon = ind if ind in _INDICATORS else canonical_indicator(ind)
+        if canon:
+            out["indicator"] = canon
+    return out
+
+
+def _validate_orders_query(raw: object) -> dict[str, Any]:
+    scope = raw.get("scope") if isinstance(raw, dict) else None
+    return {"scope": scope if scope in ("all", "session") else "all"}
+
+
 def _validate_classification(
     parsed: dict | None, text: str
 ) -> dict[str, Any] | None:
@@ -275,6 +448,18 @@ def _validate_classification(
         order = _validate_order(parsed.get("order"))
         if order is not None:
             result["order"] = order
+    elif parsed["intent"] == "host_action":
+        host_action = _validate_host_action(
+            parsed.get("hostAction") or parsed.get("host_action")
+        )
+        if host_action is None:
+            # Claimed host_action but no usable payload — let retry/rules decide.
+            return None
+        result["hostAction"] = host_action
+    elif parsed["intent"] == "orders_query":
+        result["ordersQuery"] = _validate_orders_query(
+            parsed.get("ordersQuery") or parsed.get("orders_query")
+        )
     return result
 
 
@@ -287,6 +472,8 @@ _INTERP_TEMPLATES = {
     "advice": "This asks for a call — I'll share facts, not advice.",
     "portfolio": "Checking your own positions and balance.",
     "smalltalk": "Just saying hi.",
+    "host_action": "Adjusting the chart on the page.",
+    "orders_query": "Pulling together your orders.",
 }
 
 

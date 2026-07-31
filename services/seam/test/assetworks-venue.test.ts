@@ -263,4 +263,69 @@ describe('AssetworksVenueAdapter', () => {
     expect(pf.positions.some((p) => p.instrument === 'BTC')).toBe(false)
     expect(pf.openOrders).toHaveLength(1)
   })
+
+  it('listOrders maps the host book of record (all statuses) to canonical records', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url)
+      if (u.endsWith('/api/v1/trade/orders/all')) {
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        expect(headers['x-signature']).toBeTruthy() // signed read
+        return new Response(
+          JSON.stringify({
+            status: true,
+            data: {
+              orders: [
+                {
+                  id: 999,
+                  clientOrderId: 't_a',
+                  pairName: 'BTC-USDT',
+                  qty: 0.05,
+                  filledQty: 0.05,
+                  rate: 61_240,
+                  status: 20, // SETTLED
+                  orderType: 0, // buy
+                  tradeTypeLabel: 'market',
+                  createdAt: 1_753_000_000_000,
+                },
+                {
+                  id: 1000,
+                  clientOrderId: 't_b',
+                  pairName: 'ETH-USDT',
+                  qty: 2,
+                  filledQty: 0,
+                  rate: 3_100,
+                  status: 50, // CANCELED
+                  orderType: 1, // sell
+                  tradeTypeLabel: 'limit',
+                  createdAt: 1_753_000_100_000,
+                },
+              ],
+            },
+          }),
+          { status: 200 },
+        )
+      }
+      return new Response('nf', { status: 404 })
+    }) as unknown as typeof fetch
+    const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
+    const orders = await adapter.listOrders('p', 'u1')
+    expect(orders).toHaveLength(2)
+    expect(orders[0]).toMatchObject({
+      orderId: 't_a', // clientOrderId (the seam ticketId) is the session-scope key
+      symbol: 'BTC/USDT',
+      side: 'buy',
+      kind: 'MKT',
+      status: 'FILLED',
+      statusClass: 'filled',
+      filledPct: 100,
+    })
+    expect(orders[1]).toMatchObject({
+      orderId: 't_b',
+      symbol: 'ETH/USDT',
+      side: 'sell',
+      kind: 'LMT 3,100',
+      price: '3,100',
+      statusClass: 'cancelled',
+    })
+  })
 })

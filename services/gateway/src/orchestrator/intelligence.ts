@@ -22,7 +22,30 @@ const EXTRACT_TIMEOUT_MS = 4_000
  * service's own LLM breaker). */
 const BREAKER_MS = 15_000
 
-export type IntentKind = 'research' | 'concept' | 'action' | 'advice' | 'portfolio' | 'smalltalk'
+export type IntentKind =
+  | 'research'
+  | 'concept'
+  | 'action'
+  | 'advice'
+  | 'portfolio'
+  | 'smalltalk'
+  // Host-interaction wave (July 2026): chart control + consolidated orders.
+  | 'host_action'
+  | 'orders_query'
+
+/** Chart-control intent (host_action). `indicator` is a supported slug when the
+ * intelligence service could canonicalise it; ABSENT when the phrasing named an
+ * unsupported indicator — the orchestrator then declines honestly rather than
+ * guessing. Mirrors @hippo/protocol HostActionFrame's action/timeframe vocab. */
+export type HostActionIntent = {
+  action: 'set_timeframe' | 'apply_indicator' | 'remove_indicator'
+  timeframe?: '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
+  indicator?: string
+}
+
+/** Consolidated-orders intent (orders_query). "my orders" defaults to 'all';
+ * this-session/today wording → 'session'. */
+export type OrdersQueryIntent = { scope: 'all' | 'session' }
 
 export type OrderIntent = {
   /** Absent/'spot' = spot; 'futures_perp' routes to the seam's plan path. */
@@ -46,6 +69,10 @@ export type IntentResult = {
   confidence: number
   language: 'en' | 'hi' | 'hinglish'
   order?: OrderIntent
+  /** Chart-control payload when intent is 'host_action' (additive). */
+  hostAction?: HostActionIntent
+  /** Orders-blotter scope when intent is 'orders_query' (additive). */
+  ordersQuery?: OrdersQueryIntent
   /** Stage-1 "understanding" (additive): a one-line restatement for the
    * research-view card, and a crisp rewrite forwarded to the answer engine.
    * Absent from older intelligence builds — callers default gracefully. */
@@ -301,6 +328,21 @@ export function guessIntent(text: string): IntentResult {
     }
   }
 
+  // Host actions and orders queries stay fully live in degraded mode — they
+  // never needed the model. Checked BEFORE portfolio so "my orders" routes to
+  // the blotter, not the positions view. Mirrors the intelligence fast-path.
+  const hostAction = guessHostAction(t)
+  if (hostAction) return { intent: 'host_action', confidence: 0.5, language: 'en', hostAction }
+  if (/\borders?\b|what (?:have|did) i traded?|my trades?/.test(t)) {
+    const scope: 'all' | 'session' =
+      /this session|current session|this chat|this conversation|right now|just (?:now|placed|made)|today|so far/.test(
+        t,
+      )
+        ? 'session'
+        : 'all'
+    return { intent: 'orders_query', confidence: 0.5, language: 'en', ordersQuery: { scope } }
+  }
+
   if (/position|p&l|pnl|portfolio/.test(t)) {
     return { intent: 'portfolio', confidence: 0.5, language: 'en' }
   }
@@ -310,4 +352,59 @@ export function guessIntent(text: string): IntentResult {
   }
 
   return { intent: 'research', confidence: 0.5, language: 'en' }
+}
+
+/** Chart-control canonicalisers — mirror of the intelligence service's, used
+ * only in the degraded-mode `guessIntent` above so chart control keeps working
+ * when the model is down. */
+const TF_TRIGGER =
+  /\b(?:timeframe|time frame|candles?|chart|interval|switch|change|set|make|view|show me|go to|zoom)\b/
+const APPLY_RE = /\b(?:apply|add|show|enable|overlay|put|plot|display|turn on)\b/
+const REMOVE_RE = /\b(?:remove|hide|clear|disable|drop|turn off|take off|get rid of)\b/
+const INDICATOR_HINT = /\b(?:rsi|sma\d*|ema\d*|vol|volume|moving\s*average|ma\d*|indicator)\b/
+
+function canonTimeframe(t: string): HostActionIntent['timeframe'] | undefined {
+  const m = t.match(/\b(1m|5m|15m|1h|4h|1d)\b/)
+  if (m) return m[1] as HostActionIntent['timeframe']
+  const min = t.match(/\b(\d{1,2})\s*(?:min|mins|minute|minutes)\b/)
+  if (min && ['1', '5', '15'].includes(min[1] as string))
+    return `${min[1]}m` as HostActionIntent['timeframe']
+  const hr = t.match(/\b(\d{1,2})\s*(?:h|hr|hrs|hour|hours)\b/)
+  if (hr && ['1', '4'].includes(hr[1] as string))
+    return `${hr[1]}h` as HostActionIntent['timeframe']
+  if (/\b(?:daily|day\s*candles?|1\s*day|one\s*day)\b/.test(t)) return '1d'
+  return undefined
+}
+
+function canonIndicator(t: string): string | undefined {
+  if (/\brsi\b/.test(t)) return 'rsi'
+  if (/\b(?:vol|volume)\b/.test(t)) return 'vol'
+  const slug = t.match(/\b(sma|ema)\s*(\d{1,3})\b/)
+  if (slug) {
+    if (slug[1] === 'ema') return 'ema20'
+    return slug[2] === '50' ? 'sma50' : 'sma20'
+  }
+  const isEma = /\b(?:ema|exponential)\b/.test(t)
+  const isSma = /\b(?:sma|simple|ma|moving\s*average)\b/.test(t)
+  if (!isEma && !isSma) return undefined
+  if (isEma) return 'ema20'
+  const period = t.match(/\b(\d{1,3})\b/)
+  return period && period[1] === '50' ? 'sma50' : 'sma20'
+}
+
+/** Deterministic host-action detection for degraded mode. Returns undefined
+ * when the message isn't a chart command. */
+function guessHostAction(t: string): HostActionIntent | undefined {
+  const tf = canonTimeframe(t)
+  if (tf && TF_TRIGGER.test(t)) return { action: 'set_timeframe', timeframe: tf }
+  const remove = REMOVE_RE.test(t)
+  const apply = APPLY_RE.test(t)
+  if ((remove || apply) && INDICATOR_HINT.test(t)) {
+    const indicator = canonIndicator(t)
+    return {
+      action: remove ? 'remove_indicator' : 'apply_indicator',
+      ...(indicator ? { indicator } : {}),
+    }
+  }
+  return undefined
 }
