@@ -61,6 +61,53 @@ describe('sim venue adapter', () => {
     expect(ticket.rows[2]).toEqual({ label: 'Limit price', value: '60,000' })
   })
 
+  it('a limit order rests until the quote crosses its price, then fills', async () => {
+    // Quote starts ABOVE the buy limit → must rest; dropping it below → fills.
+    let last = 61_240
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        if (String(url).includes('/v1/snapshot'))
+          return new Response(JSON.stringify({ last }), { status: 200 })
+        return new Response('not found', { status: 404 })
+      }),
+    )
+    const adapter = new SimVenueAdapter({ fillDelayMs: 10 })
+    const events: LifecycleEvent[] = []
+    adapter.onEvent((e) => events.push(e))
+    const t = await adapter.prepare({
+      ...(prepareBody as unknown as PrepareRequest),
+      orderType: 'limit',
+      limitPrice: '60000',
+    })
+    await adapter.confirm(t.ticketId)
+    await new Promise((r) => setTimeout(r, 60))
+    // Several fill windows later it is still only PLACED — WORKING.
+    expect(events.map((e) => e.phase)).toEqual(['awaiting_confirm'])
+    expect((await adapter.listOrders('koinbx-dev', 'u1'))[0]?.status).toBe('WORKING')
+    // Market drops through the limit → next window fills at the limit price.
+    last = 59_900
+    await new Promise((r) => setTimeout(r, 40))
+    expect(events.at(-1)?.phase).toBe('filled')
+    expect(events.at(-1)?.rows?.[0]).toEqual({ label: 'Avg fill', value: '60,000' })
+  })
+
+  it('a resting limit can still be cancelled between polls', async () => {
+    const adapter = new SimVenueAdapter({ fillDelayMs: 10 })
+    const events: LifecycleEvent[] = []
+    adapter.onEvent((e) => events.push(e))
+    const t = await adapter.prepare({
+      ...(prepareBody as unknown as PrepareRequest),
+      orderType: 'limit',
+      limitPrice: '60000', // below the stubbed 61,240 quote → rests
+    })
+    await adapter.confirm(t.ticketId)
+    await new Promise((r) => setTimeout(r, 35))
+    expect(await adapter.cancel(t.ticketId)).toBe(true)
+    await new Promise((r) => setTimeout(r, 35))
+    expect(events.some((e) => e.phase === 'filled')).toBe(false)
+  })
+
   it('confirm emits placement (working) then a filled event with fill actuals; cancel prevents the fill', async () => {
     const adapter = new SimVenueAdapter({ fillDelayMs: 10 })
     const events: LifecycleEvent[] = []
