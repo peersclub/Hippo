@@ -13,6 +13,7 @@ import { PartnerDetailPage } from './pages/partner-detail.js'
 import { PartnersPage } from './pages/partners.js'
 import { PlansPage } from './pages/plans.js'
 import { SessionsPage } from './pages/sessions.js'
+import { TechPage } from './pages/tech.js'
 import { UserDetailPage, UsersPage } from './pages/users.js'
 import { navigate, route } from './router.js'
 import { ConfirmHost, Toasts } from './ui.js'
@@ -23,6 +24,7 @@ const NAV = [
   ['plans', 'Plans'],
   ['users', 'Users'],
   ['sessions', 'Sessions'],
+  ['tech', 'Tech'],
   ['memory', 'Memory'],
   ['memory-config', 'Memory Config'],
   ['operators', 'Operators'],
@@ -50,6 +52,8 @@ function Page() {
       )
     case 'sessions':
       return <SessionsPage />
+    case 'tech':
+      return <TechPage />
     case 'memory':
       return <UsersPage mode="memory" />
     case 'memory-config':

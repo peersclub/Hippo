@@ -1537,9 +1537,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                 ]
               : ['Parsing intent…', 'Fetching live market data…', 'Reading funding & flows…'],
           })
-          processTurn(session, uplink.text).catch((err) => {
-            log.error({ err }, 'turn processing failed')
-          })
+          // Total turn latency (uplink → all frames emitted) feeds the
+          // operator diagnostics window; a no-op when no sink is wired.
+          const turnT0 = Date.now()
+          processTurn(session, uplink.text)
+            .catch((err) => {
+              log.error({ err }, 'turn processing failed')
+            })
+            .finally(() => telemetry.recordTurnLatency(Date.now() - turnT0))
           return
         }
         case 'ticket_action': {
