@@ -12,6 +12,7 @@
  *   GET/DELETE /v1/learned-facts/user/:partnerId/:userId
  *   GET /v1/learned-facts/session/:sessionId
  *   GET /v1/metrics  GET /v1/audit           GET /health
+ *   GET /v1/tech/telemetry (gateway diagnostics + intelligence health)
  *
  * Memory data stays owned by services/memory — this service proxies its
  * /admin surface with the internal token. Every mutating route writes one
@@ -808,6 +809,36 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     } catch {
       return reply.code(502).send({ error: 'gateway unreachable' })
     }
+  })
+
+  // ── tech diagnostics (gateway proxy) ─────────────────────────────────────
+  // The gateway's live operator telemetry (latency percentiles, call log,
+  // load, degraded clock) joined with the intelligence /health mode+model.
+  // Any authenticated operator may view; a read, so no audit row. Either
+  // upstream being down degrades to null — the page renders what it has.
+  app.get('/v1/tech/telemetry', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    let gateway: unknown = null
+    try {
+      const res = await gatewayFetch('/internal/telemetry')
+      if (res.ok) gateway = await res.json()
+    } catch {
+      /* gateway down — intelligence half still renders */
+    }
+    let intelligence: { mode: string; model: string } | null = null
+    try {
+      const res = await fetchImpl(`${intelligenceUrl}/health`, {
+        signal: AbortSignal.timeout(3_000),
+      })
+      if (res.ok) {
+        const body = (await res.json()) as { mode?: string; model?: string }
+        intelligence = { mode: body.mode ?? 'mock', model: body.model ?? 'mock' }
+      }
+    } catch {
+      /* intelligence down — gateway half still renders */
+    }
+    return { gateway, intelligence }
   })
 
   // ── partner detail (aggregated drill-down) ───────────────────────────────

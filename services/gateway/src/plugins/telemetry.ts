@@ -80,8 +80,19 @@ export class Telemetry {
     })
   }
 
+  /** Optional operator-diagnostics sinks (see ../diagnostics.ts). Additive:
+   * unset (tests, plain boots) they are no-ops on the existing paths. */
+  onFirstToken?: (durationMs: number) => void
+  onTurnLatency?: (durationMs: number) => void
+
   recordTurn(kind: string): void {
     this.turns[kind] = (this.turns[kind] ?? 0) + 1
+  }
+
+  /** Total turn latency (uplink received → turn processing settled) for the
+   * operator diagnostics window. Counters/OTel don't consume this today. */
+  recordTurnLatency(durationMs: number): void {
+    this.onTurnLatency?.(durationMs)
   }
 
   /** Records the resolved intent; `durationMs` (when the caller timed the
@@ -95,6 +106,7 @@ export class Telemetry {
   /** First-token latency for a streamed research brief (the < 2s budget). */
   recordFirstToken(durationMs: number, intent: string): void {
     this.firstTokenDuration.record(durationMs, { intent })
+    this.onFirstToken?.(durationMs)
   }
 
   /** Advice-turn outcome — the decline rate the compliance story rests on. */

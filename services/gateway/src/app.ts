@@ -24,6 +24,7 @@ import {
   type UserStore,
 } from '@hippo/stores'
 import Fastify from 'fastify'
+import { Diagnostics, instrumentClient } from './diagnostics.js'
 import { createOrchestrator } from './orchestrator/index.js'
 import { createIntelligenceClient } from './orchestrator/intelligence.js'
 import { createMarketClient, normalizeSymbol } from './orchestrator/market.js'
@@ -112,6 +113,11 @@ export async function buildApp(opts: GatewayOptions = {}) {
       partnerLookup: (partnerId) => partners.get(partnerId),
     })
   const telemetry = new Telemetry()
+  // Operator diagnostics (the admin "Tech" page): rolling latency windows,
+  // call log, live-load gauges. In-memory only — resets with the process.
+  const diagnostics = new Diagnostics()
+  telemetry.onFirstToken = (ms) => diagnostics.recordFirstToken(ms)
+  telemetry.onTurnLatency = (ms) => diagnostics.recordTurn(ms)
   // Restart-proof quota state: seed the in-process MAU set from the durable
   // store, so a pod restart never resets enforcement or the panel's alerts.
   try {
@@ -120,11 +126,29 @@ export async function buildApp(opts: GatewayOptions = {}) {
     app.log.warn({ err }, 'MAU hydration failed — quota counters start cold')
   }
   const emit = createEmitter({ strict: opts.strictFrames ?? isTest, log: app.log })
+  // Instrumented pass-through wrappers feed the diagnostics call log. The
+  // market client is deliberately NOT wrapped: the shared price-tick poller
+  // calls snapshot() every few seconds and would drown the 100-entry log.
   const orchestrator = createOrchestrator({
-    intel: opts.intel ?? createIntelligenceClient(),
+    intel: instrumentClient(opts.intel ?? createIntelligenceClient(), diagnostics, {
+      intent: 'interpret',
+      respond: 'research',
+      respondStream: 'research',
+    }),
     market: opts.market ?? createMarketClient(),
-    memory: opts.memory ?? createMemoryClient(),
-    seam: opts.seam ?? createSeamClient(),
+    memory: instrumentClient(opts.memory ?? createMemoryClient(), diagnostics, {
+      update: 'memory-write',
+      clear: 'memory-write',
+      saveComposed: 'memory-write',
+      upsertLearnedFacts: 'memory-write',
+      clearLearnedFacts: 'memory-write',
+    }),
+    seam: instrumentClient(opts.seam ?? createSeamClient(), diagnostics, {
+      prepare: 'order',
+      prepareOrder: 'order',
+      confirm: 'order',
+      cancel: 'order',
+    }),
     emit,
     telemetry,
     log: app.log,
@@ -257,6 +281,10 @@ export async function buildApp(opts: GatewayOptions = {}) {
       reply.code(404)
       return { error: 'unknown session' }
     }
+    // Open-connection gauge for the diagnostics surface; the close event
+    // fires on every disconnect path (client drop, revoke, shutdown).
+    diagnostics.sseOpened()
+    req.raw.on('close', () => diagnostics.sseClosed())
     // Opening frames land in the journal first, so the replay-then-live path
     // below is the only delivery mechanism — one ordering for everything.
     orchestrator.onStreamConnect(session)
@@ -274,6 +302,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
       reply.code(404)
       return { error: 'unknown session' }
     }
+    diagnostics.recordUplink()
     orchestrator.handleUplink(session, parsed.data)
     return { ok: true }
   })
@@ -302,6 +331,28 @@ export async function buildApp(opts: GatewayOptions = {}) {
   // In-memory counters for dev; OTel + telemetry_events replace this in pods.
   app.get('/internal/metrics', async () => telemetry.snapshot())
 
+  // ── operator diagnostics (admin "Tech" page) ─────────────────────────────
+  // Latency percentiles (recomputed on read), downstream call log, live load,
+  // degraded clock, and the upstream config as this process sees it. Guarded
+  // like every other internal surface. In-memory — resets on restart.
+  app.get('/internal/telemetry', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const { degraded } = telemetry.snapshot() as {
+      degraded: { active: boolean; seconds: number }
+    }
+    return {
+      ...diagnostics.snapshot(sessions.list().length),
+      degraded,
+      config: {
+        // Mirrors the boot log: what this process was configured with, not a
+        // live probe (the admin service probes intelligence /health itself).
+        sessionsBackend: process.env.REDIS_URL ? 'redis' : 'memory',
+        devMode,
+        intelligenceUrl: process.env.INTELLIGENCE_URL ?? 'http://localhost:8791',
+      },
+    }
+  })
+
   // ── live-session inventory + kill switch (admin panel) ──────────────────
   // Guarded by internalGuard (INTERNAL_API_TOKEN, timing-safe, fail-closed) —
   // revoking sessions and injecting venue events are mutating powers.
@@ -317,7 +368,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
     return { revoked: sessions.revoke(req.params.id) }
   })
 
-  return { app, sessions, emit, telemetry, partners, plans, users }
+  return { app, sessions, emit, telemetry, diagnostics, partners, plans, users }
 }
 
 if (process.env.NODE_ENV !== 'test') {
