@@ -40,4 +40,10 @@ export {
   type SeamAuditStore,
 } from './seam-audit-store.js'
 export * from './types.js'
+export {
+  InMemoryUserIdentityStore,
+  PostgresUserIdentityStore,
+  type UserIdentity,
+  type UserIdentityStore,
+} from './user-identity-store.js'
 export { InMemoryUserStore, PostgresUserStore, type UserStore } from './user-store.js'

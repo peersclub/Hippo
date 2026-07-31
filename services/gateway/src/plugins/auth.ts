@@ -76,11 +76,24 @@ export type DraftFields = {
   userText: string
 }
 
+/** In-panel identity (username + PIN, demo-grade) currently bound to the
+ * session. While set, the orchestrator keys memory/persona/learned facts to
+ * `id:<usernameLower>` instead of the host-minted sub — the `id:` namespace
+ * can never collide with venue user ids. */
+export type SessionIdentity = {
+  /** Display casing as claimed. */
+  username: string
+  /** Case-insensitive key — always username.toLowerCase(). */
+  usernameLower: string
+}
+
 export type Session = {
   id: string
   partner: PartnerConfig
   /** venue_user_id from the partner JWT; null for anonymous dev sessions. */
   venueUserId: string | null
+  /** Claimed in-panel identity; null/absent = anonymous host-minted sub. */
+  identity?: SessionIdentity | null
   seq: number
   journal: Journal
   live: ((entry: JournalEntry) => void) | null
@@ -154,6 +167,10 @@ export interface SessionStore {
   releaseTicket?(session: Session, ticketId: string): void
   /** ticketId → sessionId from the durable mapping; null when unknown. */
   resolveTicket?(ticketId: string): Promise<string | null>
+  /** Re-snapshot durable session metadata after an out-of-band state change
+   * (identity adopt/signout). Optional — a no-op on the in-memory store,
+   * whose live object IS the state. */
+  persistMeta?(session: Session): void
 }
 
 export class InMemorySessionStore implements SessionStore {
@@ -242,6 +259,9 @@ type SessionMeta = {
   seq: number
   language: string | null
   degradedBannerShown: boolean
+  /** Claimed in-panel identity — restored on durable resume so memory keying
+   * stays on the identity id across a pod restart. Absent when anonymous. */
+  identity?: SessionIdentity
   /** Live (non-terminal) prepared tickets so venue events still route after a
    * durable resume. Small by construction: terminal phases delete entries, so
    * only in-flight orders are ever serialized. Absent when none are live. */
@@ -338,6 +358,7 @@ export class RedisSessionStore implements SessionStore {
       id,
       partner,
       venueUserId: meta.venueUserId ?? null,
+      ...(meta.identity ? { identity: meta.identity } : {}),
       // The journal is the source of truth for the sequence high-water mark.
       seq: journal.lastSeq(),
       journal,
@@ -403,6 +424,12 @@ export class RedisSessionStore implements SessionStore {
     return this.redis.get(this.ticketKey(ticketId))
   }
 
+  /** Re-snapshot the meta after an identity adopt/signout, so a durable
+   * resume keeps keying memory to the effective (identity-adopted) id. */
+  persistMeta(session: Session): void {
+    this.persist(session)
+  }
+
   /** Await all pending metadata + journal writes (resume + tests need this). */
   async flush(): Promise<void> {
     await this.pending
@@ -424,6 +451,7 @@ export class RedisSessionStore implements SessionStore {
       seq: session.seq,
       language: session.language ?? null,
       degradedBannerShown: session.degradedBannerShown,
+      ...(session.identity ? { identity: session.identity } : {}),
       ...(session.tickets.size > 0 ? { tickets } : {}),
     }
     this.enqueue(() =>
