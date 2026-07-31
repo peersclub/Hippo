@@ -328,10 +328,13 @@ export const IdentityFrame = z.object({
 /**
  * File upload lifecycle (additive, July 2026) — server-side phases of an
  * uploaded file (the client renders its own byte-progress bar during the HTTP
- * upload; these frames take over once the gateway has the bytes). `done` has
- * no phase of its own: the analysis lands as a normal research_brief right
- * after `analyzing`, so the result card is the same trusted shape as every
- * other answer (guardrail included).
+ * upload; these frames take over once the gateway has the bytes). The
+ * analysis answer itself still lands as a normal research_brief, so the
+ * result card is the same trusted shape as every other answer (guardrail
+ * included). Phase semantics split by durability, like lifecycle vs
+ * price_tick: `received`/`analyzing` are TRANSIENT progress (live socket
+ * only, never journaled), while the terminal `analyzed`/`failed` phases are
+ * journaled so the file chip survives a resume/reload.
  */
 export const UploadStatusFrame = z.object({
   ...base,
@@ -339,9 +342,12 @@ export const UploadStatusFrame = z.object({
   fileId: z.string(),
   name: z.string(), // display filename, server-sanitized
   sizeDisplay: z.string(), // e.g. "184 KB"
-  phase: z.enum(['received', 'analyzing', 'failed']),
+  phase: z.enum(['received', 'analyzing', 'analyzed', 'failed']),
   /** Server-authored reason when phase is failed (too large, unsupported…). */
   reason: z.string().optional(),
+  /** File classification — lets the SDK pick the chip icon. Absent when the
+   * file failed before classification (unsupported type). Additive. */
+  kind: z.enum(['csv', 'image']).optional(),
 })
 
 /**

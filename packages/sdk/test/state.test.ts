@@ -562,6 +562,34 @@ describe('upload_status routing', () => {
     )
   })
 
+  it('collapses received → analyzing → analyzed into ONE terminal chip that persists', () => {
+    thread.value = []
+    localUploads.value = []
+    pushFrame({ kind: 'frame', frame: upload('u1', 'f_1', 'received', { kind: 'csv' }) })
+    pushFrame({ kind: 'frame', frame: upload('u2', 'f_1', 'analyzing', { kind: 'csv' }) })
+    pushFrame({ kind: 'frame', frame: upload('u3', 'f_1', 'analyzed', { kind: 'csv' }) })
+    // The analysis brief lands beneath the chip — the chip stays in the thread.
+    pushFrame({
+      kind: 'frame',
+      frame: {
+        ...base,
+        id: 'b',
+        type: 'research_brief',
+        eyebrow: 'FILE ANALYSIS',
+        live: false,
+        headline: 'h',
+        paragraphs: [],
+        liveBar: { asOf: 'now' },
+      },
+    })
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(types).toEqual(['upload_status', 'research_brief'])
+    const chip = thread.value[0]
+    expect(chip?.kind === 'frame' && chip.frame.type === 'upload_status' && chip.frame.phase).toBe(
+      'analyzed',
+    )
+  })
+
   it('retires the client-local progress row for its fileId (server takes over)', () => {
     thread.value = []
     localUploads.value = [

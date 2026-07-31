@@ -550,12 +550,45 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .upchip.analyzing .upphase{color:var(--hippo-amber)}
 .upchip.failed{border-color:rgba(var(--hippo-down-rgb),.45)}
 .upchip.failed .upphase{color:var(--hippo-down)}
+/* analyzed — the lasting terminal chip: a quiet confirmed state */
+.upchip.analyzed{border-color:rgba(var(--hippo-up-rgb),.4)}
+.upchip.analyzed .upphase{color:var(--hippo-up)}
 .upchip .upreason{flex-basis:100%;font-family:var(--hippo-font-body);font-size:11px;line-height:1.45;color:var(--hippo-down);opacity:.85}
+/* local upload row retry affordance (send/network failures) */
+.uprow .upretry{flex-shrink:0;font-family:var(--hippo-font-mono);font-size:8px;letter-spacing:.08em;
+  color:var(--hippo-amber);border:1px solid rgba(var(--hippo-amber-rgb),.4);border-radius:var(--hippo-radius-pill);
+  padding:3px 8px}
+.uprow .upretry:hover{border-color:var(--hippo-amber);color:var(--hippo-text-hi)}
 /* reduced motion for the additions — same hard brand rule as above */
 @media (prefers-reduced-motion:reduce){
   .upchip.analyzing,.upchip .upphase .pulse{animation:none}
   .uprow .upbar span{transition:none}
 }
+/* ── Files library overlay (WhatsApp-style list) ── */
+.filestate{font-family:var(--hippo-font-body);font-size:12px;line-height:1.55;color:var(--hippo-text-mid);
+  text-align:center;padding:26px 12px}
+.filestate.err{color:var(--hippo-down)}
+.filestate.err p{margin-bottom:12px}
+.filestate.empty{color:var(--hippo-text-dim)}
+.filelist{display:flex;flex-direction:column;gap:8px;overflow-y:auto}
+.filerow{border:1px solid var(--hippo-hairline);border-radius:12px;background:rgba(var(--hippo-panel-deep-rgb),.7);
+  overflow:hidden}
+.filehd{width:100%;display:flex;align-items:center;gap:10px;padding:10px 12px;text-align:start}
+.filehd:disabled{cursor:default}
+.filehd .fileicon{flex-shrink:0;font-size:14px;color:var(--hippo-amber)}
+.filehd .filemeta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.filehd .filename{font-family:var(--hippo-font-display);font-weight:600;font-size:12px;color:var(--hippo-text-hi);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.filehd .filesub{font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.06em;color:var(--hippo-text-faint)}
+.filehd .filebadge{flex-shrink:0;font-family:var(--hippo-font-mono);font-size:8px;letter-spacing:.1em;
+  color:var(--hippo-text-dim)}
+.filehd .filebadge.analyzed{color:var(--hippo-up)}
+.filehd .filebadge.failed{color:var(--hippo-down)}
+.filesummary{font-family:var(--hippo-font-body);font-size:11.5px;line-height:1.55;color:var(--hippo-text-mid);
+  padding:0 12px 11px;margin-top:-2px}
+.filereason{font-family:var(--hippo-font-body);font-size:11px;line-height:1.45;color:var(--hippo-down);
+  opacity:.85;padding:0 12px 11px}
+.filehd:hover:not(:disabled) .filename{color:var(--hippo-amber-tint,var(--hippo-text-hi))}
 /* shared focus ring — every interactive element inside the panel */
 .chip:focus-visible,.livebar button:focus-visible,.fbchip:focus-visible,.fbskip:focus-visible,
 .composer textarea:focus-visible,.send:focus-visible,.jump:focus-visible,.shrx:focus-visible,
@@ -563,7 +596,8 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .cta:focus-visible,.await .cxl:focus-visible,.obcheck:focus-visible,
 .dfield select:focus-visible,.dfield input:focus-visible,.ddismiss:focus-visible,
 .attach:focus-visible,.idx:focus-visible,.idcta:focus-visible,.idmode:focus-visible,
-.idout:focus-visible,.pinbox:focus-visible,.upx:focus-visible{
+.idout:focus-visible,.pinbox:focus-visible,.upx:focus-visible,.upretry:focus-visible,
+.filehd:focus-visible{
   outline:2px solid var(--hippo-amber);outline-offset:1px}
 /* ── light lean — PURE token swap (redeclares tokens only) ── */
 :host([data-theme="light"]){

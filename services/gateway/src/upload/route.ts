@@ -10,9 +10,16 @@
  *    JSON ack and pushes an upload_status phase:'failed' frame — the SDK
  *    treats frames as the source of truth.
  *  - Success: 202 { fileId } immediately, then asynchronously over the
- *    session SSE: upload_status 'received' → 'analyzing' → a research_brief
- *    (or advice_decline — the no-advice guardrail applies to file answers
- *    too), or upload_status 'failed' + reason.
+ *    session SSE: upload_status 'received' → 'analyzing' → 'analyzed' + a
+ *    research_brief (or advice_decline — the no-advice guardrail applies to
+ *    file answers too), or upload_status 'failed' + reason.
+ *  - Durability split (the price_tick precedent): 'received'/'analyzing' are
+ *    TRANSIENT progress — live socket only, never journaled — while the
+ *    terminal 'analyzed'/'failed' frames are journaled, so a resume/reload
+ *    replays exactly one chip per file in its final state.
+ *  - Every ACCEPTED upload is recorded in the uploaded_files store (keyed by
+ *    the session's effective userKey — identity-aware, like memory) and
+ *    listed by GET /v1/uplink/files?session=… for the SDK's "Files" view.
  *
  * File content is UNTRUSTED DATA end to end: CSV bytes are parsed server-side
  * into a bounded digest (never shipped raw into a prompt) and the intelligence
@@ -20,16 +27,22 @@
  * its no-advice system prompt.
  */
 import { randomUUID } from 'node:crypto'
+import type { UploadedFile, UploadedFileStore } from '@hippo/stores'
+import { UPLOADED_FILES_LIST_CAP } from '@hippo/stores'
 import type { FastifyInstance } from 'fastify'
+import { userKey } from '../orchestrator/index.js'
 import type { RespondResult } from '../orchestrator/intelligence.js'
 import { asOfDisplay } from '../orchestrator/market.js'
 import type { Session, SessionStore } from '../plugins/auth.js'
-import type { EmitFrame } from '../plugins/sse.js'
+import { type EmitFrame, emitTransient } from '../plugins/sse.js'
 import type { FileAnalysisClient, FileAnalysisRequest } from './analysis.js'
 import { buildCsvDigest } from './csv.js'
 
 export const CSV_MAX_BYTES = 512 * 1024
 export const IMAGE_MAX_BYTES = 3 * 1024 * 1024
+
+/** Library summaries stay excerpts — the full brief lives in the thread. */
+export const SUMMARY_MAX_CHARS = 400
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
@@ -42,6 +55,9 @@ export type FileUploadDeps = {
   sessions: SessionStore
   emit: EmitFrame
   analysis: FileAnalysisClient
+  /** Durable upload records (migration 016) — the "Files" library. All writes
+   * are best-effort: a store outage must never break the upload pipeline. */
+  files: UploadedFileStore
   log: Log
   /** The gateway's shared per-IP limiter (uploads fan out to the LLM). */
   rateLimit?: import('../plugins/rate-limit.js').RateLimitHandler
@@ -97,8 +113,17 @@ function classify(name: string, mime: string): 'csv' | 'image' | null {
   return null
 }
 
+/** Short plain-text library summary of an analysis answer (headline + prose,
+ * excerpt-capped) — what the "Files" view shows without re-opening the brief. */
+export function summaryOf(res: RespondResult): string {
+  const text = (
+    res.kind === 'decline' ? res.message : [res.headline, ...res.paragraphs].join(' ')
+  ).trim()
+  return text.length > SUMMARY_MAX_CHARS ? `${text.slice(0, SUMMARY_MAX_CHARS)}…` : text
+}
+
 export function registerFileUploadRoute(app: FastifyInstance, deps: FileUploadDeps): void {
-  const { sessions, emit, analysis, log } = deps
+  const { sessions, emit, analysis, files, log } = deps
   // Fastify's default 1MB bodyLimit would 413 a legitimate 3MB image before
   // the handler runs. 8MB comfortably covers the base64 form of every
   // in-limit file (3MB → ~4.2MB) AND the over-limit range we soft-fail with
@@ -108,21 +133,29 @@ export function registerFileUploadRoute(app: FastifyInstance, deps: FileUploadDe
     ...(deps.rateLimit ? { preHandler: deps.rateLimit } : {}),
   }
 
+  /** Progress phases ride the transient (journal-bypassing) path — like
+   * price_tick — so a resume never replays a stale "analyzing". The terminal
+   * phases go through the journaled emitter: the file chip's final state must
+   * survive reload/resume. */
   function uploadStatus(
     session: Session,
     fileId: string,
     name: string,
     size: string,
-    phase: 'received' | 'analyzing' | 'failed',
+    phase: 'received' | 'analyzing' | 'analyzed' | 'failed',
     reason?: string,
+    kind?: 'csv' | 'image',
   ): void {
-    emit(session, {
+    const terminal = phase === 'analyzed' || phase === 'failed'
+    const deliver = terminal ? emit : emitTransient
+    deliver(session, {
       type: 'upload_status',
       fileId,
       name,
       sizeDisplay: size,
       phase,
       ...(reason ? { reason } : {}),
+      ...(kind ? { kind } : {}),
     })
   }
 
@@ -166,6 +199,12 @@ export function registerFileUploadRoute(app: FastifyInstance, deps: FileUploadDe
     })
   }
 
+  /** Best-effort store write — a library outage must never break the upload
+   * pipeline (frames stay the source of truth for the thread). */
+  function record(op: Promise<void>, fileId: string): void {
+    op.catch((err) => log.warn({ err, fileId }, 'uploaded_files store write failed'))
+  }
+
   async function analyze(
     session: Session,
     fileId: string,
@@ -176,8 +215,9 @@ export function registerFileUploadRoute(app: FastifyInstance, deps: FileUploadDe
     bytes: Buffer,
     dataBase64: string,
   ): Promise<void> {
-    uploadStatus(session, fileId, name, size, 'received')
-    uploadStatus(session, fileId, name, size, 'analyzing')
+    const partnerId = session.partner.partnerId
+    uploadStatus(session, fileId, name, size, 'received', undefined, kind)
+    uploadStatus(session, fileId, name, size, 'analyzing', undefined, kind)
     try {
       const req: FileAnalysisRequest =
         kind === 'csv'
@@ -194,17 +234,18 @@ export function registerFileUploadRoute(app: FastifyInstance, deps: FileUploadDe
               dataBase64,
               ...(session.language ? { language: session.language } : {}),
             }
-      emitAnalysis(session, await analysis.analyzeFile(req))
+      const res = await analysis.analyzeFile(req)
+      record(files.markAnalyzed(partnerId, fileId, summaryOf(res)), fileId)
+      // Terminal chip BEFORE the answer card, so a resume replays them in
+      // reading order (chip, then the brief beneath it).
+      uploadStatus(session, fileId, name, size, 'analyzed', undefined, kind)
+      emitAnalysis(session, res)
     } catch (err) {
       log.error({ err, fileId, kind }, 'file analysis failed')
-      uploadStatus(
-        session,
-        fileId,
-        name,
-        size,
-        'failed',
-        'Analysis is temporarily unavailable — your file was not stored. Try again in a moment.',
-      )
+      const reason =
+        'Analysis is temporarily unavailable — your file was not stored. Try again in a moment.'
+      record(files.markFailed(partnerId, fileId, reason), fileId)
+      uploadStatus(session, fileId, name, size, 'failed', reason, kind)
     }
   }
 
@@ -233,7 +274,7 @@ export function registerFileUploadRoute(app: FastifyInstance, deps: FileUploadDe
     // Unsupported/over-limit: a 200 ack + a 'failed' frame, never a hard 4xx —
     // the SDK renders outcomes from frames, and its upload card must resolve.
     const failed = (reason: string) => {
-      uploadStatus(session, fileId, name, size, 'failed', reason)
+      uploadStatus(session, fileId, name, size, 'failed', reason, kind ?? undefined)
       return { fileId, accepted: false, reason }
     }
     if (kind === null) {
@@ -246,11 +287,68 @@ export function registerFileUploadRoute(app: FastifyInstance, deps: FileUploadDe
       return failed(`Image too large (${size}) — the limit is 3 MB.`)
     }
 
-    // Accepted: ack now, analyze asynchronously over the session SSE.
+    // Accepted: record it durably (keyed by the session's EFFECTIVE userKey
+    // at upload time — identity-aware, like memory), ack now, analyze
+    // asynchronously over the session SSE.
+    const uploadRecord: UploadedFile = {
+      partnerId: session.partner.partnerId,
+      fileId,
+      userKey: userKey(session),
+      name,
+      sizeBytes: bytes.length,
+      sizeDisplay: size,
+      mime: body.mime.toLowerCase(),
+      kind,
+      status: 'analyzing',
+      createdAt: Date.now(),
+    }
+    record(files.insert(uploadRecord), fileId)
     void analyze(session, fileId, name, size, kind, body.mime, bytes, body.dataBase64).catch(
       (err) => log.error({ err, fileId }, 'upload pipeline failed'),
     )
     reply.code(202)
     return { fileId }
   })
+
+  // The "Files" library: everything this user has uploaded, newest first.
+  // Same session-possession auth as the upload POST (404 unknown session);
+  // the effective userKey is resolved PER REQUEST, so a signin/signout is
+  // reflected by the very next fetch with no extra wiring. Plain JSON (not a
+  // frame) — a pull surface like the upload POST itself.
+  app.get(
+    '/v1/uplink/files',
+    deps.rateLimit ? { preHandler: deps.rateLimit } : {},
+    async (req, reply) => {
+      const { session: sessionId } = req.query as { session?: string }
+      const session = sessionId ? sessions.get(sessionId) : null
+      if (!session) {
+        reply.code(404)
+        return { error: 'unknown session' }
+      }
+      try {
+        const rows = await files.listByUser(
+          session.partner.partnerId,
+          userKey(session),
+          UPLOADED_FILES_LIST_CAP,
+        )
+        return {
+          files: rows.map((f) => ({
+            fileId: f.fileId,
+            name: f.name,
+            sizeDisplay: f.sizeDisplay,
+            mime: f.mime,
+            kind: f.kind,
+            status: f.status,
+            ...(f.reason ? { reason: f.reason } : {}),
+            ...(f.summary ? { summary: f.summary } : {}),
+            createdAt: f.createdAt,
+          })),
+        }
+      } catch (err) {
+        log.error({ err }, 'uploaded_files list failed')
+        reply.code(503)
+        return { error: 'file library temporarily unavailable' }
+      }
+    },
+  )
 }

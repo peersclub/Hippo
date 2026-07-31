@@ -108,10 +108,11 @@ export type Orchestrator = {
 }
 
 /** The effective userId every per-user read/write keys off (memory, persona,
- * learned facts, seam, telemetry). A claimed in-panel identity takes over the
+ * learned facts, seam, telemetry — and the upload library, which imports this
+ * rather than re-deriving it). A claimed in-panel identity takes over the
  * moment it's adopted — namespaced `id:` so it can never collide with a
  * host-minted sub — which is what makes memory travel with the person. */
-function userKey(session: Session): string {
+export function userKey(session: Session): string {
   if (session.identity) return `id:${session.identity.usernameLower}`
   return session.venueUserId ?? session.id
 }

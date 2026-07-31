@@ -130,7 +130,16 @@ export type MessageKey =
   | 'upload_send_failed'
   | 'upload_received'
   | 'upload_analyzing'
+  | 'upload_analyzed'
   | 'upload_failed'
+  | 'upload_retry'
+  | 'files_title'
+  | 'files_open'
+  | 'files_loading'
+  | 'files_error'
+  | 'files_retry'
+  | 'files_empty'
+  | 'files_close'
   | 'journey_placed'
   | 'order_in_flight'
 
@@ -247,7 +256,16 @@ const en: Catalog = {
   upload_send_failed: 'Upload failed — nothing reached Hippo. Try again.',
   upload_received: 'RECEIVED',
   upload_analyzing: 'ANALYZING…',
+  upload_analyzed: 'ANALYZED ✓',
   upload_failed: 'UPLOAD FAILED',
+  upload_retry: 'Retry',
+  files_title: 'Files',
+  files_open: 'Your uploaded files',
+  files_loading: 'Loading your files…',
+  files_error: "Couldn't load files",
+  files_retry: 'Try again',
+  files_empty: 'Nothing uploaded yet — attach a CSV or image from the composer.',
+  files_close: 'Close files',
   journey_placed: 'PLACED',
   order_in_flight: 'ORDER IN FLIGHT — AWAITING THE VENUE…',
 }
@@ -362,7 +380,16 @@ const hi: Catalog = {
   upload_send_failed: 'अपलोड विफल — कुछ नहीं भेजा गया। दोबारा कोशिश करें।',
   upload_received: 'मिल गई',
   upload_analyzing: 'विश्लेषण हो रहा है…',
+  upload_analyzed: 'विश्लेषण पूरा ✓',
   upload_failed: 'अपलोड विफल',
+  upload_retry: 'दोबारा',
+  files_title: 'फ़ाइलें',
+  files_open: 'आपकी अपलोड की गई फ़ाइलें',
+  files_loading: 'आपकी फ़ाइलें लोड हो रही हैं…',
+  files_error: 'फ़ाइलें लोड नहीं हो सकीं',
+  files_retry: 'दोबारा कोशिश करें',
+  files_empty: 'अभी कुछ अपलोड नहीं हुआ — कंपोज़र से CSV या इमेज जोड़ें।',
+  files_close: 'फ़ाइलें बंद करें',
   journey_placed: 'भेजा गया',
   order_in_flight: 'ऑर्डर भेजा गया — वेन्यू की प्रतीक्षा…',
 }
@@ -483,7 +510,16 @@ const hiLatn: Catalog = {
   upload_send_failed: 'Upload fail — kuch nahi bheja gaya. Dobara try karo.',
   upload_received: 'MIL GAYI',
   upload_analyzing: 'ANALYZE HO RAHA…',
+  upload_analyzed: 'ANALYZED ✓',
   upload_failed: 'UPLOAD FAIL',
+  upload_retry: 'Retry',
+  files_title: 'Files',
+  files_open: 'Aapki uploaded files',
+  files_loading: 'Aapki files load ho rahi hain…',
+  files_error: 'Files load nahi ho sakin',
+  files_retry: 'Dobara try karo',
+  files_empty: 'Abhi kuch upload nahi hua — composer se CSV ya image attach karo.',
+  files_close: 'Files band karo',
   // Lifecycle vocabulary stays in English product terms, like FILL above.
   journey_placed: 'PLACED',
   order_in_flight: 'Order bhej diya — venue ka wait…',
@@ -602,7 +638,16 @@ const ar: Catalog = {
   upload_send_failed: 'فشل الرفع — لم يصل شيء. حاول مرة أخرى.',
   upload_received: 'استُلم',
   upload_analyzing: 'جارٍ التحليل…',
+  upload_analyzed: 'تم التحليل ✓',
   upload_failed: 'فشل الرفع',
+  upload_retry: 'إعادة المحاولة',
+  files_title: 'الملفات',
+  files_open: 'ملفاتك المرفوعة',
+  files_loading: 'جارٍ تحميل ملفاتك…',
+  files_error: 'تعذّر تحميل الملفات',
+  files_retry: 'حاول مرة أخرى',
+  files_empty: 'لا شيء مرفوع بعد — أرفق ملف CSV أو صورة من مربّع الكتابة.',
+  files_close: 'إغلاق الملفات',
   journey_placed: 'أُرسل',
   order_in_flight: 'أُرسل أمرك — في انتظار المنصّة…',
 }

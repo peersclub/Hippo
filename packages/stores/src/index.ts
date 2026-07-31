@@ -41,6 +41,14 @@ export {
 } from './seam-audit-store.js'
 export * from './types.js'
 export {
+  InMemoryUploadedFileStore,
+  PostgresUploadedFileStore,
+  UPLOADED_FILES_LIST_CAP,
+  type UploadedFile,
+  type UploadedFileStatus,
+  type UploadedFileStore,
+} from './uploaded-file-store.js'
+export {
   InMemoryUserIdentityStore,
   PostgresUserIdentityStore,
   type UserIdentity,

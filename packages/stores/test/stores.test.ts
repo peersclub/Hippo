@@ -7,7 +7,9 @@ import {
   InMemoryPartnerStore,
   InMemoryPlanStore,
   InMemorySeamAuditStore,
+  InMemoryUploadedFileStore,
   InMemoryUserStore,
+  type UploadedFile,
 } from '../src/index.js'
 import { signJwtHS256, verifyJwtHS256 } from '../src/jwt.js'
 
@@ -303,5 +305,89 @@ describe('user search (q)', () => {
     expect((await store.list({ q: 'RAHUL' })).total).toBe(2)
     expect((await store.list({ q: 'rahul', partnerId: 'p1' })).total).toBe(1)
     expect((await store.list({ q: 'nobody' })).total).toBe(0)
+  })
+})
+
+describe('InMemoryUploadedFileStore', () => {
+  const base = (over: Partial<UploadedFile> = {}): UploadedFile => ({
+    partnerId: 'p1',
+    fileId: 'u_1',
+    userKey: 'sub_a',
+    name: 'holdings.csv',
+    sizeBytes: 1024,
+    sizeDisplay: '1 KB',
+    mime: 'text/csv',
+    kind: 'csv',
+    status: 'analyzing',
+    createdAt: 1000,
+    ...over,
+  })
+
+  it('inserts a record and lists it by user key', async () => {
+    const store = new InMemoryUploadedFileStore()
+    await store.insert(base())
+    const files = await store.listByUser('p1', 'sub_a')
+    expect(files).toHaveLength(1)
+    expect(files[0]?.fileId).toBe('u_1')
+    expect(files[0]?.status).toBe('analyzing')
+  })
+
+  it('insert is idempotent per (partnerId, fileId)', async () => {
+    const store = new InMemoryUploadedFileStore()
+    await store.insert(base())
+    await store.insert(base({ name: 'other.csv' })) // same id — ignored
+    const files = await store.listByUser('p1', 'sub_a')
+    expect(files).toHaveLength(1)
+    expect(files[0]?.name).toBe('holdings.csv')
+  })
+
+  it('markAnalyzed sets the summary and clears any reason', async () => {
+    const store = new InMemoryUploadedFileStore()
+    await store.insert(base({ status: 'failed', reason: 'oops' }))
+    await store.markAnalyzed('p1', 'u_1', 'BTC is down 4%')
+    const [file] = await store.listByUser('p1', 'sub_a')
+    expect(file?.status).toBe('analyzed')
+    expect(file?.summary).toBe('BTC is down 4%')
+    expect(file?.reason).toBeUndefined()
+  })
+
+  it('markFailed sets the reason and clears any summary', async () => {
+    const store = new InMemoryUploadedFileStore()
+    await store.insert(base({ status: 'analyzed', summary: 'a brief' }))
+    await store.markFailed('p1', 'u_1', 'unreachable')
+    const [file] = await store.listByUser('p1', 'sub_a')
+    expect(file?.status).toBe('failed')
+    expect(file?.reason).toBe('unreachable')
+    expect(file?.summary).toBeUndefined()
+  })
+
+  it('lists a user’s own files only, never another user’s or partner’s', async () => {
+    const store = new InMemoryUploadedFileStore()
+    await store.insert(base({ fileId: 'u_1', userKey: 'sub_a' }))
+    await store.insert(base({ fileId: 'u_2', userKey: 'id:victor' }))
+    await store.insert(base({ fileId: 'u_3', userKey: 'sub_a', partnerId: 'p2' }))
+    const files = await store.listByUser('p1', 'sub_a')
+    expect(files.map((f) => f.fileId)).toEqual(['u_1'])
+  })
+
+  it('returns newest first', async () => {
+    const store = new InMemoryUploadedFileStore()
+    await store.insert(base({ fileId: 'u_1', createdAt: 1000 }))
+    await store.insert(base({ fileId: 'u_2', createdAt: 3000 }))
+    await store.insert(base({ fileId: 'u_3', createdAt: 2000 }))
+    const files = await store.listByUser('p1', 'sub_a')
+    expect(files.map((f) => f.fileId)).toEqual(['u_2', 'u_3', 'u_1'])
+  })
+
+  it('caps the result at the requested limit', async () => {
+    const store = new InMemoryUploadedFileStore()
+    for (let i = 0; i < 60; i++) {
+      await store.insert(base({ fileId: `u_${i}`, createdAt: i }))
+    }
+    const capped = await store.listByUser('p1', 'sub_a', 50)
+    expect(capped).toHaveLength(50)
+    // Newest 50 (createdAt 59..10), so the oldest kept is u_10.
+    expect(capped[0]?.fileId).toBe('u_59')
+    expect(capped[49]?.fileId).toBe('u_10')
   })
 })
