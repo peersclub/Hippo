@@ -28,6 +28,7 @@ const EMBED = [
   ['open', ''],
   ['key', 'pk_assetworks'],
   ['priceSource', 'server'],
+  ['pageControl', '1'],
 ]
 const getPref = (k, d) => {
   try {
@@ -52,6 +53,7 @@ function loadEmbed() {
   $('e-key').value = getPref('key', 'pk_assetworks')
   const src = getPref('priceSource', 'server')
   for (const b of $('e-priceSource').children) b.classList.toggle('on', b.dataset.v === src)
+  $('e-pageControl').checked = getPref('pageControl', '1') === '1'
 }
 for (const b of $('e-theme').children)
   b.onclick = () => {
@@ -67,6 +69,8 @@ for (const b of $('e-priceSource').children)
     setPref('priceSource', b.dataset.v)
     loadEmbed()
   }
+// Store '1'/'0' explicitly (not '') so an OFF choice persists — the default is ON.
+$('e-pageControl').onchange = (e) => setPref('pageControl', e.target.checked ? '1' : '0')
 $('e-reset').onclick = () => {
   for (const [k] of EMBED) setPref(k, '')
   loadEmbed()
