@@ -305,15 +305,18 @@ const ctx = canvas.getContext('2d')
 async function startMarket() {
   $('chartsym').textContent = pair
   const sym = pair.replace('/', '').toUpperCase()
-  // Seed history via REST, then stream live.
+  // Seed history via REST at the active timeframe, then stream live. The candle
+  // series is genuinely bucketed to `timeframe` — Binance klines carry the real
+  // per-bucket OHLCV, so switching timeframe re-fetches candles of the selected
+  // duration rather than resampling 1m bars on the client.
   try {
     const r = await fetch(
-      `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=1m&limit=120`,
+      `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${timeframe}&limit=120`,
     )
     const raw = await r.json()
-    candles = raw.map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4] }))
+    candles = raw.map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }))
     lastPrice = candles[candles.length - 1]?.c || 0
-    drawChart()
+    redraw()
     syncEst()
   } catch {
     /* offline — chart stays empty, venue still works */
@@ -325,12 +328,15 @@ async function startMarket() {
     } catch {}
   }
   const s = bsym(pair)
+  // The live kline stream tracks the active timeframe, so the last candle keeps
+  // filling at the right bucket duration (5m, 1h, …) — Hippo and the human see
+  // the same thing whichever set the timeframe.
   ws = new WebSocket(
-    `wss://stream.binance.com:9443/stream?streams=${s}@kline_1m/${s}@depth20@100ms/${s}@trade/${s}@ticker`,
+    `wss://stream.binance.com:9443/stream?streams=${s}@kline_${timeframe}/${s}@depth20@100ms/${s}@trade/${s}@ticker`,
   )
   ws.onmessage = (m) => {
     const { stream, data } = JSON.parse(m.data)
-    if (stream.endsWith('@kline_1m')) onKline(data.k)
+    if (stream.includes('@kline_')) onKline(data.k)
     else if (stream.includes('@depth')) onDepth(data)
     else if (stream.endsWith('@trade')) onTrade(data)
     else if (stream.endsWith('@ticker')) onTicker(data)
@@ -338,7 +344,7 @@ async function startMarket() {
 }
 
 function onKline(k) {
-  const c = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c }
+  const c = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
   const last = candles[candles.length - 1]
   if (last && last.t === c.t) candles[candles.length - 1] = c
   else {
@@ -346,7 +352,7 @@ function onKline(k) {
     if (candles.length > 120) candles.shift()
   }
   lastPrice = c.c
-  drawChart()
+  redraw()
   syncEst()
 }
 function onTicker(d) {
@@ -398,6 +404,131 @@ function onTrade(d) {
     .join('')
 }
 
+// ── timeframe + indicators (chart controls, shared by human + Hippo) ─────────
+// The chart now has a real notion of candle duration and a small set of
+// demo-grade-but-real indicators. Every mutation flows through setTimeframe /
+// applyIndicator / removeIndicator so a human click and a hippo:action land on
+// the exact same code path and leave chart, header and chips consistent.
+const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+const INDICATORS = ['sma20', 'sma50', 'ema20', 'rsi', 'vol']
+const IND_META = {
+  sma20: { label: 'SMA 20', color: '#3b82f6' },
+  sma50: { label: 'SMA 50', color: '#8b5cf6' },
+  ema20: { label: 'EMA 20', color: '#f59e0b' },
+  rsi: { label: 'RSI 14', color: '#0ea5e9' },
+  vol: { label: 'Volume', color: '#94a3b8' },
+}
+let timeframe = '1m'
+let indicators = [] // active slugs, unique, insertion-ordered
+
+const rsiCanvas = $('rsipane')
+const rsiCtx = rsiCanvas.getContext('2d')
+
+// Timeframe segmented control — a human can switch by hand; Hippo drives the
+// SAME setTimeframe path.
+const tfseg = $('tfseg')
+for (const tf of TIMEFRAMES) {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.textContent = tf
+  b.dataset.v = tf
+  if (tf === timeframe) b.classList.add('on')
+  b.onclick = () => setTimeframe(tf)
+  tfseg.appendChild(b)
+}
+// "＋ Indicator" picker — a human can add one; Hippo uses applyIndicator too.
+$('indadd').onchange = (e) => {
+  const slug = e.target.value
+  e.target.value = ''
+  if (slug) applyIndicator(slug)
+}
+
+function setTimeframe(tf) {
+  if (!TIMEFRAMES.includes(tf)) return false
+  timeframe = tf
+  for (const b of tfseg.children) b.classList.toggle('on', b.dataset.v === tf)
+  startMarket() // re-seed + reconnect the live kline stream at the new duration
+  return true
+}
+function applyIndicator(slug) {
+  if (!INDICATORS.includes(slug)) return false
+  if (!indicators.includes(slug)) indicators.push(slug)
+  syncIndicators()
+  return true
+}
+function removeIndicator(slug) {
+  // No slug → clear all; a slug → drop just that one (idempotent).
+  if (!slug) indicators = []
+  else indicators = indicators.filter((s) => s !== slug)
+  syncIndicators()
+  return true
+}
+function syncIndicators() {
+  renderChips()
+  rsiCanvas.classList.toggle('hidden', !indicators.includes('rsi'))
+  redraw()
+}
+function renderChips() {
+  const el = $('indchips')
+  el.innerHTML = indicators
+    .map((s) => {
+      const m = IND_META[s]
+      return `<span class="chip"><span class="dot" style="background:${m.color}"></span>${m.label}<button type="button" data-rm="${s}" title="Remove ${m.label}">×</button></span>`
+    })
+    .join('')
+  for (const b of el.querySelectorAll('[data-rm]')) b.onclick = () => removeIndicator(b.dataset.rm)
+}
+
+// ── indicator math (real, over the candle closes / volume) ───────────────────
+function sma(vals, n) {
+  const out = new Array(vals.length).fill(null)
+  let sum = 0
+  for (let i = 0; i < vals.length; i++) {
+    sum += vals[i]
+    if (i >= n) sum -= vals[i - n]
+    if (i >= n - 1) out[i] = sum / n
+  }
+  return out
+}
+function ema(vals, n) {
+  const out = new Array(vals.length).fill(null)
+  const k = 2 / (n + 1)
+  let prev = null
+  for (let i = 0; i < vals.length; i++) {
+    if (i < n - 1) continue
+    if (prev == null) {
+      let s = 0
+      for (let j = i - n + 1; j <= i; j++) s += vals[j]
+      prev = s / n // seed with the SMA of the first window
+    } else {
+      prev = vals[i] * k + prev * (1 - k)
+    }
+    out[i] = prev
+  }
+  return out
+}
+function rsiSeries(vals, n = 14) {
+  const out = new Array(vals.length).fill(null)
+  if (vals.length <= n) return out
+  let gain = 0
+  let loss = 0
+  for (let i = 1; i <= n; i++) {
+    const d = vals[i] - vals[i - 1]
+    if (d >= 0) gain += d
+    else loss -= d
+  }
+  gain /= n
+  loss /= n
+  out[n] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss)
+  for (let i = n + 1; i < vals.length; i++) {
+    const d = vals[i] - vals[i - 1]
+    gain = (gain * (n - 1) + (d > 0 ? d : 0)) / n // Wilder smoothing
+    loss = (loss * (n - 1) + (d < 0 ? -d : 0)) / n
+    out[i] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss)
+  }
+  return out
+}
+
 function drawChart() {
   const dpr = window.devicePixelRatio || 1
   const w = canvas.clientWidth,
@@ -408,14 +539,33 @@ function drawChart() {
   ctx.clearRect(0, 0, w, h)
   if (candles.length < 2) return
   const pad = 8
+  // Reserve a bottom band for volume bars only when the vol indicator is on, so
+  // the default chart is pixel-identical to before.
+  const volOn = indicators.includes('vol')
+  const volH = volOn ? Math.round(h * 0.18) : 0
+  const priceH = h - volH
   const his = candles.map((c) => c.h),
     los = candles.map((c) => c.l)
   const hi = Math.max(...his),
     lo = Math.min(...los)
-  const y = (p) => pad + (1 - (p - lo) / (hi - lo || 1)) * (h - pad * 2)
+  const y = (p) => pad + (1 - (p - lo) / (hi - lo || 1)) * (priceH - pad * 2)
   const cw = (w - pad * 2) / candles.length
+  const cx = (i) => pad + i * cw + cw / 2
+
+  if (volOn) {
+    const maxV = Math.max(...candles.map((c) => c.v || 0), 1)
+    const base = h - 2
+    const bw = Math.max(1, cw * 0.6)
+    candles.forEach((c, i) => {
+      const up = c.c >= c.o
+      const bh = ((c.v || 0) / maxV) * (volH - 4)
+      ctx.fillStyle = up ? 'rgba(16,185,129,.35)' : 'rgba(239,68,68,.35)'
+      ctx.fillRect(cx(i) - bw / 2, base - bh, bw, bh)
+    })
+  }
+
   candles.forEach((c, i) => {
-    const x = pad + i * cw + cw / 2
+    const x = cx(i)
     const up = c.c >= c.o
     ctx.strokeStyle = up ? '#10b981' : '#ef4444'
     ctx.fillStyle = up ? '#10b981' : '#ef4444'
@@ -428,8 +578,141 @@ function drawChart() {
       yc = y(c.c)
     ctx.fillRect(x - bw / 2, Math.min(yo, yc), bw, Math.max(1, Math.abs(yc - yo)))
   })
+
+  // moving-average overlays
+  const closes = candles.map((c) => c.c)
+  const overlays = [
+    ['sma20', () => sma(closes, 20)],
+    ['sma50', () => sma(closes, 50)],
+    ['ema20', () => ema(closes, 20)],
+  ]
+  for (const [slug, build] of overlays) {
+    if (!indicators.includes(slug)) continue
+    ctx.strokeStyle = IND_META[slug].color
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    let started = false
+    build().forEach((v, i) => {
+      if (v == null) return
+      const px = cx(i),
+        py = y(v)
+      if (!started) {
+        ctx.moveTo(px, py)
+        started = true
+      } else ctx.lineTo(px, py)
+    })
+    ctx.stroke()
+    ctx.lineWidth = 1
+  }
 }
-window.addEventListener('resize', drawChart)
+
+function drawRSI() {
+  if (!indicators.includes('rsi')) return
+  const dpr = window.devicePixelRatio || 1
+  const w = rsiCanvas.clientWidth,
+    h = rsiCanvas.clientHeight
+  if (!w || !h) return
+  rsiCanvas.width = w * dpr
+  rsiCanvas.height = h * dpr
+  rsiCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  rsiCtx.clearRect(0, 0, w, h)
+  if (candles.length < 2) return
+  const pad = 6
+  const series = rsiSeries(
+    candles.map((c) => c.c),
+    14,
+  )
+  const cw = (w - pad * 2) / candles.length
+  const y = (v) => pad + (1 - v / 100) * (h - pad * 2)
+  rsiCtx.strokeStyle = 'rgba(148,163,184,.35)'
+  rsiCtx.lineWidth = 1
+  for (const lvl of [70, 30]) {
+    rsiCtx.beginPath()
+    rsiCtx.moveTo(pad, y(lvl))
+    rsiCtx.lineTo(w - pad, y(lvl))
+    rsiCtx.stroke()
+  }
+  rsiCtx.strokeStyle = IND_META.rsi.color
+  rsiCtx.lineWidth = 1.5
+  rsiCtx.beginPath()
+  let started = false
+  series.forEach((v, i) => {
+    if (v == null) return
+    const px = pad + i * cw + cw / 2,
+      py = y(v)
+    if (!started) {
+      rsiCtx.moveTo(px, py)
+      started = true
+    } else rsiCtx.lineTo(px, py)
+  })
+  rsiCtx.stroke()
+  rsiCtx.lineWidth = 1
+}
+
+function redraw() {
+  drawChart()
+  drawRSI()
+}
+window.addEventListener('resize', redraw)
+
+// ── SDK→host page-control bridge (the reverse of the hippo:context bridge) ───
+// The SDK forwards VALIDATED chart-control actions to this window. We re-validate
+// at the boundary — origin, source, the closed action set, enum/allow-list
+// values — mirroring how the embed guards hippo:context, then run the same code
+// paths a human click would and ACK every action (ok or not, never throwing).
+const pageControlEnabled = (() => {
+  try {
+    return (localStorage.getItem('hippo_embed_pageControl') ?? '1') === '1'
+  } catch {
+    return true
+  }
+})()
+function ackAction(actionId, ok, reason) {
+  try {
+    window.postMessage(
+      {
+        source: 'hippo-host',
+        type: 'hippo:action:result',
+        actionId,
+        ok,
+        ...(reason ? { reason } : {}),
+      },
+      location.origin,
+    )
+  } catch {
+    /* origin quirk — never let an ack failure break the host */
+  }
+}
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin) return
+  const d = e.data
+  if (!d || d.source !== 'hippo-sdk' || d.type !== 'hippo:action') return
+  const { actionId, action } = d
+  try {
+    if (!pageControlEnabled) return ackAction(actionId, false, 'page control disabled')
+    if (action === 'set_timeframe') {
+      if (!TIMEFRAMES.includes(d.timeframe)) return ackAction(actionId, false, 'invalid timeframe')
+      setTimeframe(d.timeframe)
+      return ackAction(actionId, true)
+    }
+    if (action === 'apply_indicator') {
+      if (!INDICATORS.includes(d.indicator))
+        return ackAction(actionId, false, 'unsupported indicator')
+      applyIndicator(d.indicator)
+      return ackAction(actionId, true)
+    }
+    if (action === 'remove_indicator') {
+      // A slug removes one; no slug clears all. A named-but-unknown slug is an error.
+      if (d.indicator && !INDICATORS.includes(d.indicator))
+        return ackAction(actionId, false, 'unsupported indicator')
+      removeIndicator(d.indicator)
+      return ackAction(actionId, true)
+    }
+    return ackAction(actionId, false, 'unknown action')
+  } catch {
+    ackAction(actionId, false, 'error')
+  }
+})
 
 // ── go ──────────────────────────────────────────────────────────────────────
 syncTicket()
