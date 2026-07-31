@@ -24,10 +24,12 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { VenueCapabilities } from '@hippo/protocol'
+import type { UserIdentityStore } from '@hippo/stores'
 import type { DraftFields, Session, SessionStore } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft } from '../plugins/sse.js'
 import { emitTransient } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
+import { createIdentityHandler } from './identity.js'
 import type {
   BriefResponse,
   DeclineResponse,
@@ -84,6 +86,8 @@ export type OrchestratorDeps = {
   market: MarketClient
   memory: MemoryClient
   seam: SeamClient
+  /** In-panel username+PIN identities (identity_claim uplink, migration 015). */
+  identity: UserIdentityStore
   emit: EmitFrame
   telemetry: Telemetry
   log: Log
@@ -103,7 +107,12 @@ export type Orchestrator = {
   onVenueEvent(event: import('./seam.js').VenueEvent): Promise<boolean>
 }
 
+/** The effective userId every per-user read/write keys off (memory, persona,
+ * learned facts, seam, telemetry). A claimed in-panel identity takes over the
+ * moment it's adopted — namespaced `id:` so it can never collide with a
+ * host-minted sub — which is what makes memory travel with the person. */
 function userKey(session: Session): string {
+  if (session.identity) return `id:${session.identity.usernameLower}`
   return session.venueUserId ?? session.id
 }
 
@@ -181,7 +190,12 @@ function defaultInterpretation(intent: string): string {
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
-  const { intel, market, memory, seam, emit, telemetry, log, sessions } = deps
+  const { intel, market, memory, seam, identity, emit, telemetry, log, sessions } = deps
+
+  // In-panel username+PIN identity (identity_claim → identity frames). Owns
+  // hashing, rate limiting and the sub→identity links; adoption flips what
+  // userKey() above resolves to.
+  const identityHandler = createIdentityHandler({ store: identity, emit, log, sessions })
 
   /**
    * Post-turn auto-learning (PRE-PROD, gated by `memoryLab`): extract durable
@@ -1425,7 +1439,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         // through it would resubmit as an OPEN and double exposure instead
         // of reducing it. Guarded here, BEFORE any draft is remembered:
         // closes go straight down the classic prepare → order_ticket path.
-        if (intentRes.order && (intentRes.order.action === 'close' || intentRes.order.reduceOnly === true)) {
+        if (
+          intentRes.order &&
+          (intentRes.order.action === 'close' || intentRes.order.reduceOnly === true)
+        ) {
           emit(session, { type: 'skeleton', shape: 'ticket' })
           await prepareTicket(session, intentRes.order, text)
           return
@@ -1469,27 +1486,36 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   return {
     onStreamConnect(session) {
-      // Opening state: current orders strip only. No scripted conversation —
-      // the thread starts empty and the SDK shows its empty-state hero.
-      // Emit once per session: on reconnect the journal replay covers it.
-      // Fetched from the seam asynchronously; if the venue is unreachable
-      // the strip simply doesn't render — never a fabricated snapshot.
-      if (session.journal.lastSeq() === 0) {
-        seam
-          .portfolio(session.partner.partnerId, userKey(session))
-          .then(({ openOrders, positions }) => {
-            emit(session, {
-              type: 'orders_snapshot',
-              open: openOrders,
-              positionsCount: positions.length,
+      const fresh = session.journal.lastSeq() === 0
+      // Identity restore FIRST (fresh sessions only — a reconnect's journal
+      // replay re-delivers the original identity frame): if this session's
+      // sub claimed an identity earlier, adopt it BEFORE the first reads
+      // keyed by userKey below, so memory/portfolio never key to the
+      // anonymous sub for a signed-in trader.
+      const ready = fresh ? identityHandler.restore(session) : Promise.resolve()
+      void ready.then(() => {
+        // Opening state: current orders strip only. No scripted conversation —
+        // the thread starts empty and the SDK shows its empty-state hero.
+        // Emit once per session: on reconnect the journal replay covers it.
+        // Fetched from the seam asynchronously; if the venue is unreachable
+        // the strip simply doesn't render — never a fabricated snapshot.
+        if (fresh) {
+          seam
+            .portfolio(session.partner.partnerId, userKey(session))
+            .then(({ openOrders, positions }) => {
+              emit(session, {
+                type: 'orders_snapshot',
+                open: openOrders,
+                positionsCount: positions.length,
+              })
             })
-          })
-          .catch((err) => log.warn({ err }, 'orders snapshot unavailable'))
-      }
-      // "What Hippo remembers about you" — pushed on connect (gated on
-      // memoryLab; no-op otherwise). Fire-and-forget; the journal replay
-      // re-delivers it on reconnect, the SDK keeps only the latest.
-      void emitLearnedMemory(session)
+            .catch((err) => log.warn({ err }, 'orders snapshot unavailable'))
+        }
+        // "What Hippo remembers about you" — pushed on connect (gated on
+        // memoryLab; no-op otherwise). Fire-and-forget; the journal replay
+        // re-delivers it on reconnect, the SDK keeps only the latest.
+        void emitLearnedMemory(session)
+      })
       // Live price ticker for the session's symbol — transient frames to the
       // connected socket only, never the journal.
       watchTicker(session)
@@ -1668,6 +1694,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         case 'feedback': {
           // Recorded for the L2 export pipeline (BE doc §4); counters only here.
           telemetry.recordUplink(uplink.kind)
+          return
+        }
+        case 'identity_claim': {
+          // Command, not conversation: no echo, no thinking, no classify.
+          // All outcomes (ok/taken/wrong_pin/invalid/rate_limited/signed_out)
+          // come back as journaled `identity` frames.
+          identityHandler.handleClaim(session, uplink).catch((err) => {
+            log.error({ err }, 'identity claim failed')
+          })
           return
         }
         case 'stream_stop': {
