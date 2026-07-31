@@ -13,6 +13,20 @@ import { Busy, ErrorBanner, useLoad } from '../ui.js'
 
 type LoadBucket = { hourStartMs: number; uplinks: number; queries: number }
 
+type UsageBucket = { calls: number; promptTokens: number; completionTokens: number }
+
+/** GET /admin/usage on the intelligence service — measured tokens since ITS
+ * boot (a different boot clock than the gateway's; both are labeled). */
+type MeasuredUsage = {
+  bootAt: number
+  calls: number
+  unmetered: number
+  promptTokens: number
+  completionTokens: number
+  byPurpose: Record<string, UsageBucket>
+  byModel: Record<string, UsageBucket>
+}
+
 type Metrics = {
   gateway: {
     turns?: Record<string, number>
@@ -27,6 +41,7 @@ type Metrics = {
     mode: string
     model: string
     cache?: { entries: number; hitRate: number }
+    usage?: MeasuredUsage
   } | null
   partnerMau?: Array<{
     partnerId: string
@@ -206,6 +221,11 @@ export function estimateCost(
   return { total: interpret + research, interpret, research }
 }
 
+/** Measured tokens x configured prices — cost with only the price assumed. */
+export function measuredCost(a: Assumptions, u: MeasuredUsage): number {
+  return (u.promptTokens * a.priceInPerM + u.completionTokens * a.priceOutPerM) / 1_000_000
+}
+
 const usd = (v: number) => (v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(4)}`)
 
 export function PilotPage() {
@@ -250,6 +270,10 @@ export function PilotPage() {
   const hitRate = intel?.cache ? intel.cache.hitRate : gw?.cache?.hitRate
   const cost = estimateCost(assume, queries, misses)
   const partnerRows = metrics.partnerMau ?? []
+  // Measured usage wins whenever the intelligence service metered anything;
+  // the assumptions estimator stays as the fallback for older deploys.
+  const usage = intel?.usage
+  const measured = usage && usage.promptTokens + usage.completionTokens > 0 ? usage : null
 
   return (
     <>
@@ -368,42 +392,102 @@ export function PilotPage() {
       )}
 
       <h2>
-        Cost / MAU <span class="badge none">estimate</span>
+        Cost / MAU{' '}
+        {measured ? (
+          <span class="badge llm">measured tokens</span>
+        ) : (
+          <span class="badge none">estimate</span>
+        )}
       </h2>
-      <p class="dim">
-        No token metering yet — this model prices the two-stage flow from editable assumptions:
-        interpret runs on <b>every query</b> ({queries}), research only on a <b>cache miss</b> (
-        {misses}). Assumptions persist in this browser.
-      </p>
-      <div class="cards">
-        <div class="stat">
-          <div class="n">{usd(cost.total)}</div>
-          <div class="l">Est. LLM spend · since boot</div>
-        </div>
-        <div class="stat">
-          <div class="n">{mau > 0 ? usd(cost.total / mau) : '—'}</div>
-          <div class="l">Est. cost / MAU</div>
-        </div>
-        <div class="stat">
-          <div class="n">{usd(cost.interpret)}</div>
-          <div class="l">↳ interpret calls</div>
-        </div>
-        <div class="stat">
-          <div class="n">{usd(cost.research)}</div>
-          <div class="l">↳ research calls (misses)</div>
-        </div>
-      </div>
+      {measured ? (
+        <>
+          <p class="dim">
+            Token counts measured by the intelligence service since its boot — only the prices below
+            are assumptions.
+            {measured.unmetered > 0 &&
+              ` ${measured.unmetered} call${measured.unmetered === 1 ? '' : 's'} returned no usage and are not counted.`}
+          </p>
+          <div class="cards">
+            <div class="stat">
+              <div class="n">{usd(measuredCost(assume, measured))}</div>
+              <div class="l">LLM spend · measured</div>
+            </div>
+            <div class="stat">
+              <div class="n">{mau > 0 ? usd(measuredCost(assume, measured) / mau) : '—'}</div>
+              <div class="l">Cost / MAU</div>
+            </div>
+            <div class="stat">
+              <div class="n">{measured.promptTokens.toLocaleString()}</div>
+              <div class="l">Input tokens</div>
+            </div>
+            <div class="stat">
+              <div class="n">{measured.completionTokens.toLocaleString()}</div>
+              <div class="l">Output tokens</div>
+            </div>
+          </div>
+          <table style={{ maxWidth: '560px' }}>
+            <thead>
+              <tr>
+                <th>Purpose</th>
+                <th>Calls</th>
+                <th>Tokens in</th>
+                <th>Tokens out</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(measured.byPurpose).map(([purpose, u]) => (
+                <tr key={purpose}>
+                  <td>{purpose}</td>
+                  <td class="mono">{u.calls}</td>
+                  <td class="mono">{u.promptTokens.toLocaleString()}</td>
+                  <td class="mono">{u.completionTokens.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : (
+        <>
+          <p class="dim">
+            No measured usage yet — this model prices the two-stage flow from editable assumptions:
+            interpret runs on <b>every query</b> ({queries}), research only on a <b>cache miss</b> (
+            {misses}). Assumptions persist in this browser.
+          </p>
+          <div class="cards">
+            <div class="stat">
+              <div class="n">{usd(cost.total)}</div>
+              <div class="l">Est. LLM spend · since boot</div>
+            </div>
+            <div class="stat">
+              <div class="n">{mau > 0 ? usd(cost.total / mau) : '—'}</div>
+              <div class="l">Est. cost / MAU</div>
+            </div>
+            <div class="stat">
+              <div class="n">{usd(cost.interpret)}</div>
+              <div class="l">↳ interpret calls</div>
+            </div>
+            <div class="stat">
+              <div class="n">{usd(cost.research)}</div>
+              <div class="l">↳ research calls (misses)</div>
+            </div>
+          </div>
+        </>
+      )}
       <table style={{ maxWidth: '560px' }}>
         <tbody>
-          {(
-            [
-              ['priceInPerM', '$ / 1M input tokens'],
-              ['priceOutPerM', '$ / 1M output tokens'],
-              ['interpretTokIn', 'Interpret · input tok/call'],
-              ['interpretTokOut', 'Interpret · output tok/call'],
-              ['researchTokIn', 'Research · input tok/call'],
-              ['researchTokOut', 'Research · output tok/call'],
-            ] as Array<[keyof Assumptions, string]>
+          {(measured
+            ? ([
+                ['priceInPerM', '$ / 1M input tokens'],
+                ['priceOutPerM', '$ / 1M output tokens'],
+              ] as Array<[keyof Assumptions, string]>)
+            : ([
+                ['priceInPerM', '$ / 1M input tokens'],
+                ['priceOutPerM', '$ / 1M output tokens'],
+                ['interpretTokIn', 'Interpret · input tok/call'],
+                ['interpretTokOut', 'Interpret · output tok/call'],
+                ['researchTokIn', 'Research · input tok/call'],
+                ['researchTokOut', 'Research · output tok/call'],
+              ] as Array<[keyof Assumptions, string]>)
           ).map(([k, label]) => (
             <tr key={k}>
               <td>{label}</td>

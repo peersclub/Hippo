@@ -634,6 +634,10 @@ describe('live sessions proxy + partner detail + quota alerts', () => {
           status: 200,
         })
       }
+      if (String(url).includes('/admin/usage'))
+        return new Response(JSON.stringify({ calls: 3, promptTokens: 1200 }), { status: 200 })
+      if (String(url).includes('/health'))
+        return new Response(JSON.stringify({ mode: 'llm', model: 'haiku' }), { status: 200 })
       return new Response('{}', { status: 200 })
     }) as typeof fetch
 
@@ -656,7 +660,9 @@ describe('live sessions proxy + partner detail + quota alerts', () => {
 
     const res = await app.inject({ method: 'GET', url: '/v1/metrics', headers: { cookie } })
     expect(res.statusCode).toBe(200)
-    const { partnerMau } = res.json()
+    const { partnerMau, intelligence } = res.json()
+    // Measured token usage joins the intelligence block (Pilot page input).
+    expect(intelligence.usage).toMatchObject({ calls: 3, promptTokens: 1200 })
     expect(partnerMau).toHaveLength(1)
     expect(partnerMau[0]).toMatchObject({
       partnerId: 'koinbx-dev',

@@ -24,6 +24,7 @@ import research
 from cache import make_answer_cache
 from observability import first_token_duration, intent_duration, setup_otel, tracer
 from providers import AVAILABLE_MODELS, ProviderRouter
+from usage import meter
 
 # App loggers ("intelligence*") are otherwise unconfigured — uvicorn only
 # configures its own "uvicorn.*" tree — so without this every log.info/
@@ -303,6 +304,13 @@ async def set_model(req: ModelIn) -> dict[str, Any]:
     the brief card reports the new model — so the change is visible in-chat."""
     router.set_model(req.model)
     return {"ok": True, "current": router.configured_model, "mode": router.mode}
+
+
+@app.get("/admin/usage")
+async def admin_usage() -> dict[str, Any]:
+    """Measured LLM token usage since boot (see usage.py) — the Pilot
+    dashboard multiplies these by its configured prices for true cost/MAU."""
+    return meter.snapshot()
 
 
 @app.get("/admin/status")

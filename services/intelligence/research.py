@@ -156,7 +156,7 @@ async def _generate_prose(
         {"role": "user", "content": user},
     ]
     prose = _coerce_prose(
-        extract_json_object(await router.chat(messages, json_mode=True))
+        extract_json_object(await router.chat(messages, json_mode=True, purpose="research"))
     )
     if prose is None:
         retry = user + "\nYour previous output was not valid JSON. JSON only."
@@ -165,7 +165,7 @@ async def _generate_prose(
             {"role": "user", "content": retry},
         ]
         prose = _coerce_prose(
-            extract_json_object(await router.chat(messages, json_mode=True))
+            extract_json_object(await router.chat(messages, json_mode=True, purpose="research"))
         )
     if prose is None:
         # Deterministic floor: the mock's templated grounded prose. The user
@@ -500,7 +500,7 @@ async def respond_stream(
     extractor = JsonProseExtractor()
     raw = ""
     try:
-        async for chunk in router.chat_stream(messages, json_mode=True):
+        async for chunk in router.chat_stream(messages, json_mode=True, purpose="research"):
             raw += chunk
             visible = extractor.feed(chunk)
             if visible:
