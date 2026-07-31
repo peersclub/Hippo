@@ -44,6 +44,7 @@ import {
   sessionCookie,
 } from './auth.js'
 import { LoginThrottle, originAllowed } from './guard.js'
+import { createRateLimiter, type RateLimitOptions } from './rate-limit.js'
 
 export type PortalServiceOptions = {
   partners: PartnerStore
@@ -57,6 +58,8 @@ export type PortalServiceOptions = {
   mauStore?: MauStore
   /** Loader URL shown in the embed snippet. */
   sdkUrl?: string
+  /** Per-IP limiter; false disables (tests). Env-tunable in prod. */
+  rateLimit?: RateLimitOptions | false
 }
 
 export function buildPortalService(opts: PortalServiceOptions): FastifyInstance {
@@ -72,6 +75,24 @@ export function buildPortalService(opts: PortalServiceOptions): FastifyInstance 
   } = opts
 
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } })
+
+  // Coarse per-IP abuse guard (same limiter as the gateway). /health is
+  // exempt — deploy probes must never be throttled.
+  const rateLimit =
+    opts.rateLimit === false
+      ? undefined
+      : createRateLimiter(
+          opts.rateLimit ?? {
+            max: Number(process.env.RATE_LIMIT_MAX ?? 300),
+            windowMs: Number(process.env.RATE_LIMIT_WINDOW ?? 60_000),
+          },
+        )
+  if (rateLimit) {
+    app.addHook('onRequest', async (req, reply) => {
+      if (req.url === '/health') return
+      await rateLimit(req, reply)
+    })
+  }
 
   // CSRF belt-and-braces on top of SameSite=Strict (same posture as admin).
   app.addHook('onRequest', async (req, reply) => {

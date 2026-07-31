@@ -1099,3 +1099,21 @@ describe('memory-config (super-admin scope documents)', () => {
     expect(bad.statusCode).toBe(400)
   })
 })
+
+describe('per-IP rate limit', () => {
+  it('429s beyond the window max with Retry-After; /health stays exempt', async () => {
+    const { app } = await testAdmin({ rateLimit: { max: 3, windowMs: 60_000 } })
+    for (let i = 0; i < 3; i++) {
+      const res = await app.inject({ method: 'GET', url: '/auth/me' })
+      expect(res.statusCode).not.toBe(429)
+      expect(res.headers['x-ratelimit-limit']).toBe('3')
+    }
+    const blocked = await app.inject({ method: 'GET', url: '/auth/me' })
+    expect(blocked.statusCode).toBe(429)
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0)
+    for (let i = 0; i < 5; i++) {
+      expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200)
+    }
+    await app.close()
+  })
+})
