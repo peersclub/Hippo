@@ -381,3 +381,26 @@ describe('host-venue realism & policy levers', () => {
     expect(bal.get('BTC')).toBe(2)
   })
 })
+
+describe('discovery surface (hippo scan target)', () => {
+  it('serves the OpenAPI doc with the signed trade wire + capabilities', async () => {
+    const { app } = makeApp()
+    const res = await app.inject({ method: 'GET', url: '/openapi.json' })
+    expect(res.statusCode).toBe(200)
+    const doc = res.json()
+    expect(doc.openapi).toBe('3.0.3')
+    expect(Object.keys(doc.paths)).toContain('/api/v1/trade/orders')
+    expect(Object.keys(doc.paths)).toContain('/v1/capabilities')
+    expect(doc.components.securitySchemes.signature.name).toBe('x-signature')
+  })
+
+  it('serves a homepage with the brand accent for theming extraction', async () => {
+    const { app } = makeApp()
+    const res = await app.inject({ method: 'GET', url: '/' })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('text/html')
+    expect(res.body).toContain('theme-color')
+    expect(res.body).toContain('#3b82f6')
+    expect(res.body).toContain('/openapi.json')
+  })
+})

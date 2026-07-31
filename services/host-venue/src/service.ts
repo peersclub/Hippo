@@ -15,6 +15,7 @@
 import { getPool, type HostVenueStateStore, PostgresHostVenueStateStore } from '@hippo/stores'
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import { type ApiKeyRecord, verifySignature } from './hmac.js'
+import { OPENAPI_DOC } from './openapi.js'
 import { SnapshotPersister } from './persistence.js'
 import type { VenueStore } from './store.js'
 import {
@@ -289,6 +290,20 @@ export function buildService(opts: BuildOptions) {
   // Capabilities are DERIVED from live admin config, so toggling spot/perp/
   // options or maxLeverage on the settings page reflects in what the parasite
   // discovers (and may place). VenueCapabilities shape: presence == enabled.
+  // ── discovery surface (feeds `hippo scan` — the second-venue dogfood) ────
+  app.get('/openapi.json', async () => OPENAPI_DOC)
+  app.get('/', async (_req, reply) => {
+    reply.type('text/html')
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#3b82f6"><title>Assetworks Exchange</title>
+<style>body{font:16px/1.6 Inter,system-ui,sans-serif;background:#0b0d12;color:#e9ebf0;max-width:640px;margin:80px auto;padding:0 20px}a{color:#3b82f6}code{background:#171a21;padding:2px 6px;border-radius:4px}</style>
+</head><body><h1>Assetworks Exchange</h1>
+<p>Demo venue for spot and perpetual futures trading — the integration target the Hippo test-host parasites onto.</p>
+<p>API: HMAC-signed trade wire, documented at <a href="/openapi.json">/openapi.json</a>. Capabilities at <a href="/v1/capabilities">/v1/capabilities</a>.</p>
+</body></html>`
+  })
+
   app.get('/v1/capabilities', async () => {
     const c = store.config
     const capabilities: Record<string, unknown> = {}
