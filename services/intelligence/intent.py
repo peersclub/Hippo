@@ -511,6 +511,7 @@ async def classify(
             max_tokens=500,
             json_mode=True,
             timeout=LLM_INTENT_TIMEOUT,
+            purpose="interpret",
         )
         result = _validate_classification(extract_json_object(raw), text)
         if result is None:  # one retry with a sterner JSON-only instruction
@@ -524,6 +525,7 @@ async def classify(
                 max_tokens=500,
                 json_mode=True,
                 timeout=LLM_INTENT_TIMEOUT,
+                purpose="interpret",
             )
             result = _validate_classification(extract_json_object(raw), text)
         if result is None:

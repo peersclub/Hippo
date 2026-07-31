@@ -25,6 +25,8 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from usage import meter, parse_ollama_usage, parse_openai_usage
+
 log = logging.getLogger("intelligence.providers")
 
 Message = dict[str, str]
@@ -33,6 +35,9 @@ LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3:4b")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "30"))
+# stream_options.include_usage is standard on OpenRouter/vLLM but not every
+# OpenAI-compat server; LLM_STREAM_USAGE=0 drops it if a server rejects it.
+LLM_STREAM_USAGE = os.environ.get("LLM_STREAM_USAGE", "1") != "0"
 
 # After a failed LLM call, skip straight to mock for this long (avoids paying
 # a connect timeout on every request while the model is down); the next
@@ -121,17 +126,25 @@ class OpenAICompatProvider:
         # Per-call override of LLM_TIMEOUT — latency-budgeted paths (intent)
         # must fail into the mock inside their caller's deadline.
         timeout: float | None = None,
+        # Token-metering tag (interpret/research/...) — see usage.py.
+        purpose: str = "other",
     ) -> str:
         try:
             async with httpx.AsyncClient(timeout=timeout or self.timeout) as client:
                 if await self._detect_flavor(client) == "ollama":
-                    content = await self._chat_ollama_native(
+                    data = await self._chat_ollama_native(
                         client, messages, temperature, max_tokens, json_mode
                     )
+                    # Record before extracting content: the tokens were spent
+                    # even if the payload turns out malformed below.
+                    meter.record(purpose, self.model, parse_ollama_usage(data))
+                    content = data["message"]["content"]
                 else:
-                    content = await self._chat_openai(
+                    data = await self._chat_openai(
                         client, messages, temperature, max_tokens, json_mode
                     )
+                    meter.record(purpose, self.model, parse_openai_usage(data))
+                    content = data["choices"][0]["message"]["content"]
         except (httpx.HTTPError, OSError, ValueError, KeyError, IndexError, TypeError) as err:
             raise ProviderError(f"llm call failed: {err}") from err
         if not isinstance(content, str) or not content.strip():
@@ -161,7 +174,7 @@ class OpenAICompatProvider:
             headers=self._headers(),
         )
         res.raise_for_status()
-        return res.json()["choices"][0]["message"]["content"]
+        return res.json()
 
     async def _chat_ollama_native(
         self,
@@ -182,7 +195,7 @@ class OpenAICompatProvider:
             payload["format"] = "json"
         res = await client.post(f"{self._origin}/api/chat", json=payload)
         res.raise_for_status()
-        return res.json()["message"]["content"]
+        return res.json()
 
     async def chat_stream(
         self,
@@ -191,6 +204,7 @@ class OpenAICompatProvider:
         temperature: float = 0.2,
         max_tokens: int = 2000,
         json_mode: bool = False,
+        purpose: str = "other",
     ) -> AsyncIterator[str]:
         """Yield content deltas as they arrive (first token < 2s p95 is the
         PRD budget the streaming path exists for)."""
@@ -198,11 +212,11 @@ class OpenAICompatProvider:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 if await self._detect_flavor(client) == "ollama":
                     stream = self._stream_ollama_native(
-                        client, messages, temperature, max_tokens, json_mode
+                        client, messages, temperature, max_tokens, json_mode, purpose
                     )
                 else:
                     stream = self._stream_openai(
-                        client, messages, temperature, max_tokens, json_mode
+                        client, messages, temperature, max_tokens, json_mode, purpose
                     )
                 async for delta in stream:
                     yield delta
@@ -216,6 +230,7 @@ class OpenAICompatProvider:
         temperature: float,
         max_tokens: int,
         json_mode: bool,
+        purpose: str,
     ) -> AsyncIterator[str]:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -224,8 +239,13 @@ class OpenAICompatProvider:
             "max_tokens": max_tokens,
             "stream": True,
         }
+        if LLM_STREAM_USAGE:
+            # Ask for the final usage chunk (OpenRouter/vLLM support this;
+            # LLM_STREAM_USAGE=0 is the escape hatch for servers that don't).
+            payload["stream_options"] = {"include_usage": True}
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        usage: tuple[int, int] | None = None
         async with client.stream(
             "POST",
             f"{self.base_url}/chat/completions",
@@ -240,9 +260,17 @@ class OpenAICompatProvider:
                 if data == "[DONE]":
                     break
                 chunk = json.loads(data)
-                delta = chunk["choices"][0].get("delta", {}).get("content")
+                usage = parse_openai_usage(chunk) or usage
+                # The usage chunk (and some keep-alives) carry no choices.
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {}).get("content")
                 if delta:
                     yield delta
+        # Metered only on clean completion — an aborted stream's cost is
+        # unknowable client-side and is deliberately not guessed at.
+        meter.record(purpose, self.model, usage)
 
     async def _stream_ollama_native(
         self,
@@ -251,6 +279,7 @@ class OpenAICompatProvider:
         temperature: float,
         max_tokens: int,
         json_mode: bool,
+        purpose: str,
     ) -> AsyncIterator[str]:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -273,6 +302,7 @@ class OpenAICompatProvider:
                 if delta:
                     yield delta
                 if chunk.get("done"):
+                    meter.record(purpose, self.model, parse_ollama_usage(chunk))
                     break
 
     async def probe(self) -> bool:
@@ -554,6 +584,7 @@ class ProviderRouter:
         max_tokens: int = 2000,
         json_mode: bool = False,
         timeout: float | None = None,
+        purpose: str = "other",
     ) -> str:
         if not self.force_mock and time.monotonic() >= self._down_until:
             try:
@@ -563,6 +594,7 @@ class ProviderRouter:
                     max_tokens=max_tokens,
                     json_mode=json_mode,
                     timeout=timeout,
+                    purpose=purpose,
                 )
                 self._mark_llm_up()
                 return content
@@ -579,6 +611,7 @@ class ProviderRouter:
         temperature: float = 0.2,
         max_tokens: int = 2000,
         json_mode: bool = False,
+        purpose: str = "other",
     ) -> AsyncIterator[str]:
         """Stream deltas; transparent mock fallback.
 
@@ -593,6 +626,7 @@ class ProviderRouter:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 json_mode=json_mode,
+                purpose=purpose,
             )
             try:
                 first = await anext(stream)

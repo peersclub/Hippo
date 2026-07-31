@@ -291,7 +291,7 @@ async def analyze_image(
     # every vision route honors response_format; the format instructions +
     # defensive parse below carry the contract instead.
     try:
-        raw = await router.llm.chat(messages, json_mode=False)
+        raw = await router.llm.chat(messages, json_mode=False, purpose="file-analysis")
         router._mark_llm_up()
     except ProviderError as err:
         router._open_breaker(err)

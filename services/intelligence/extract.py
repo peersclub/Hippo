@@ -265,6 +265,7 @@ async def extract(
             max_tokens=500,
             json_mode=True,
             timeout=LLM_EXTRACT_TIMEOUT,
+            purpose="memory-extract",
         )
         facts = _validate_facts(extract_json_object(raw))
         if not facts and extract_json_object(raw) is None:
@@ -279,6 +280,7 @@ async def extract(
                 max_tokens=500,
                 json_mode=True,
                 timeout=LLM_EXTRACT_TIMEOUT,
+                purpose="memory-extract",
             )
             facts = _validate_facts(extract_json_object(raw))
     except Exception:

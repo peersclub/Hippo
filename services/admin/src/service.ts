@@ -904,6 +904,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       mode: string
       model: string
       cache?: { entries: number; hitRate: number }
+      usage?: unknown
     } | null = null
     try {
       const res = await fetchImpl(`${intelligenceUrl}/health`, {
@@ -925,6 +926,23 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       }
     } catch {
       /* intelligence down — rest of the dashboard still renders */
+    }
+    // Measured token usage (may 404 on an older intelligence deploy — the
+    // Pilot page falls back to its assumptions estimator when absent).
+    if (intelligence) {
+      try {
+        const res = await fetchImpl(`${intelligenceUrl}/admin/usage`, {
+          signal: AbortSignal.timeout(3_000),
+        })
+        if (res.ok) {
+          const u = (await res.json()) as { calls?: unknown }
+          // Shape-checked: an older deploy answering 200 with something else
+          // (or a bare {}) must not masquerade as measured usage.
+          if (u && typeof u.calls === 'number') intelligence.usage = u
+        }
+      } catch {
+        /* usage stays absent */
+      }
     }
 
     // Quota alerts: any planned partner at ≥80% of its MAU ceiling.
