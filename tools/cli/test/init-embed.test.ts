@@ -164,3 +164,17 @@ describe('renderEmbedMd / renderEmbedSummary', () => {
     expect(s).toContain(a.shellUrl)
   })
 })
+
+describe('partner accent', () => {
+  it('rides the tag and the shell url when provided', () => {
+    const a = draftEmbed({ venue: 'x', key: 'pk_x', accent: '#3b82f6' })
+    expect(a.tag).toContain('data-hippo-accent="#3b82f6"')
+    expect(a.shellUrl).toContain('accent=%233b82f6')
+    expect(a.accent).toBe('#3b82f6')
+  })
+  it('is absent by default — the one-line tag stays one line', () => {
+    const a = draftEmbed({ venue: 'x', key: 'pk_x' })
+    expect(a.tag).not.toContain('accent')
+    expect(a.accent).toBeNull()
+  })
+})

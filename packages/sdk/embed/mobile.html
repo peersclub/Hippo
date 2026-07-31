@@ -94,6 +94,8 @@
     if (q.get('gateway')) s.dataset.hippoGateway = q.get('gateway')
     if (q.get('locale')) s.dataset.hippoLocale = q.get('locale')
     if (theme === 'light') s.dataset.hippoTheme = 'light'
+    // Partner accent — the loader itself strictly validates #rrggbb.
+    if (q.get('accent')) s.dataset.hippoAccent = q.get('accent')
     // Inside an app there is no host page — open straight into the panel
     // unless the container explicitly asks for the pill (?open=pill).
     if (q.get('open') !== 'pill') s.dataset.hippoOpen = 'auto'

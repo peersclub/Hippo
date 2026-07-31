@@ -16,6 +16,7 @@ import { detectFramework, extractLocales, extractTitle } from './detect.js'
 import { detectTradeFeatures } from './features.js'
 import { fetchHtml, fetchJson, fetchUrl } from './fetchers.js'
 import { parseRobots } from './robots.js'
+import { extractAccent } from './theme.js'
 import type { ProbeResult, ScanResult, SiteProfile, SpecFinding } from './types.js'
 
 /** Probed in order on the apex domain; first parseable spec wins. */
@@ -71,6 +72,7 @@ export async function runScan(rawDomain: string): Promise<ScanOutcome> {
     framework: detectFramework(home.body),
     title: extractTitle(home.body),
     locales: extractLocales(home.body),
+    theme: extractAccent(home.body),
   }
 
   const specUrls = [

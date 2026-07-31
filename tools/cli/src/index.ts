@@ -210,6 +210,7 @@ program
     'https://cdn.hippo.app',
   )
   .option('--theme <theme>', 'dark | light (default: dark hero)')
+  .option('--accent <hex>', 'brand accent (#rrggbb) — hippo scan suggests one')
   .option('--locale <locale>', 'en | hi | hi-Latn | ar')
   .option('--out <file>', 'where to write the Markdown artifact', 'EMBED.md')
   .option('--inject <file>', 'HTML file to inject the tag into (before </body>, never duplicated)')
@@ -220,12 +221,18 @@ program
       gateway: string
       cdn: string
       theme?: string
+      accent?: string
       locale?: string
       out: string
       inject?: string
     }) => {
       if (opts.theme && opts.theme !== 'dark' && opts.theme !== 'light') {
         console.error(`hippo embed — unknown theme "${opts.theme}" (expected dark | light).`)
+        process.exitCode = 1
+        return
+      }
+      if (opts.accent && !/^#[0-9a-fA-F]{6}$/.test(opts.accent)) {
+        console.error(`hippo embed — accent must be #rrggbb, got "${opts.accent}".`)
         process.exitCode = 1
         return
       }
@@ -237,6 +244,7 @@ program
           gateway: opts.gateway,
           cdn: opts.cdn,
           theme: opts.theme as 'dark' | 'light' | undefined,
+          accent: opts.accent,
           locale: opts.locale,
         })
       } catch (err) {
