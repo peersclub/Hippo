@@ -85,6 +85,14 @@ export const ContextUplink = z.object({
   ...base,
   kind: z.literal('context'),
   symbol: z.string().min(3).max(20).optional(), // e.g. "BTC/USDT"
+  /**
+   * Host page-control opt-in (additive, July 2026): true when the embed set
+   * data-hippo-page-control, i.e. the host accepts host_action frames (chart
+   * timeframe / indicator commands) over the postMessage bridge. The gateway
+   * only emits host_action when this arrived true — a host that never opted
+   * in is answered in prose instead of silently no-opping.
+   */
+  pageControl: z.boolean().optional(),
 })
 
 export const FeedbackUplink = z.object({
