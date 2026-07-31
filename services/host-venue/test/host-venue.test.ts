@@ -213,6 +213,38 @@ describe('host-venue signed trade wire', () => {
     expect(store.order(o2.id)?.status).toBe(20) // SETTLED
   })
 
+  it('rests perp limit orders until price crosses (both directions)', async () => {
+    const config: AdminConfig = { ...BASE_CONFIG, feeRate: 0 }
+    const store = new VenueStore(async () => 60_000, config)
+    // Long entry below market → must rest.
+    const long = store.place(USER, {
+      market: 'perp',
+      pairName: 'BTC-USDT',
+      side: 'buy',
+      kind: 'limit',
+      qty: 0.1,
+      rate: 55_000,
+      direction: 'long',
+      leverage: 10,
+      marginMode: 'isolated',
+    })
+    // Short entry above market → must rest.
+    const short = store.place(USER, {
+      market: 'perp',
+      pairName: 'BTC-USDT',
+      side: 'sell',
+      kind: 'limit',
+      qty: 0.1,
+      rate: 65_000,
+      direction: 'short',
+      leverage: 10,
+      marginMode: 'isolated',
+    })
+    await store.sweep()
+    expect(store.order(long.id)?.status).toBe(10) // ACTIVE — resting
+    expect(store.order(short.id)?.status).toBe(10) // ACTIVE — resting
+  })
+
   it('opens and closes a perp position with realized PnL', async () => {
     let price = 60_000
     const config: AdminConfig = { ...BASE_CONFIG, feeRate: 0 }

@@ -310,33 +310,58 @@ export class SimVenueAdapter implements VenueAdapter {
     })
 
     // SIMULATION — a real venue confirms with the trader, then its webhooks
-    // land here. The fill uses the actuals captured at prepare time.
-    ticket.fillTimer = setTimeout(() => {
-      const venueOrderId = `SIM-${Math.floor(10_000_000 + Math.random() * 89_999_999)}`
-      this.handler({
-        ticketId,
-        phase: 'filled',
-        statusLine: 'FILLED',
-        venueOrderId,
-        rows: [
-          { label: 'Avg fill', value: formatPrice(ticket.price) },
-          {
-            label: 'Fees (actual)',
-            value: `${formatAmount(ticket.sizeNum * ticket.price * FEE_RATE)} USDT`,
-          },
-          { label: 'Venue order ID', value: venueOrderId },
-        ],
-      })
-      this.recordFill(ticket.req, ticket.sizeNum, ticket.price)
-      // Terminal blotter transition: FILLED at the actual price.
-      this.logOrder(ticketId, {
-        status: 'FILLED',
-        statusClass: 'filled',
-        filledPct: 100,
-        price: formatPrice(ticket.price),
-      })
-      this.tickets.delete(ticketId)
-    }, this.opts.fillDelayMs ?? 3_000)
+    // land here. The fill uses the actuals captured at prepare time. A LIMIT
+    // ticket rests until the live quote crosses its price (buy: quote at or
+    // under the limit; sell: at or over) — checked once per fill window, like
+    // the host venue's sweep. Offline (no quote source) the sim stays
+    // deterministic and fills after the delay rather than hanging forever.
+    const delay = this.opts.fillDelayMs ?? 3_000
+    const armFill = () => {
+      ticket.fillTimer = setTimeout(async () => {
+        if (!this.tickets.has(ticketId)) return // cancelled while waiting
+        if (ticket.req.orderType === 'limit') {
+          try {
+            const quote = await this.quote(ticket.req.instrument)
+            const crossed =
+              ticket.req.side === 'buy' ? quote <= ticket.price : quote >= ticket.price
+            if (!crossed) return armFill() // still resting — poll next window
+          } catch {
+            /* no quote source — deterministic fill below */
+          }
+          if (!this.tickets.has(ticketId)) return // cancelled during the quote
+        }
+        this.settleFill(ticketId, ticket)
+      }, delay)
+    }
+    armFill()
+  }
+
+  /** The terminal fill: lifecycle event, position bookkeeping, blotter row. */
+  private settleFill(ticketId: string, ticket: StoredTicket): void {
+    const venueOrderId = `SIM-${Math.floor(10_000_000 + Math.random() * 89_999_999)}`
+    this.handler({
+      ticketId,
+      phase: 'filled',
+      statusLine: 'FILLED',
+      venueOrderId,
+      rows: [
+        { label: 'Avg fill', value: formatPrice(ticket.price) },
+        {
+          label: 'Fees (actual)',
+          value: `${formatAmount(ticket.sizeNum * ticket.price * FEE_RATE)} USDT`,
+        },
+        { label: 'Venue order ID', value: venueOrderId },
+      ],
+    })
+    this.recordFill(ticket.req, ticket.sizeNum, ticket.price)
+    // Terminal blotter transition: FILLED at the actual price.
+    this.logOrder(ticketId, {
+      status: 'FILLED',
+      statusClass: 'filled',
+      filledPct: 100,
+      price: formatPrice(ticket.price),
+    })
+    this.tickets.delete(ticketId)
   }
 
   async cancel(ticketId: string): Promise<boolean> {
