@@ -6,7 +6,8 @@
  */
 import type { ResearchBrief } from '@hippo/protocol'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { SparklineSvg } from './cards.js'
+import { fileGlyph, SparklineSvg } from './cards.js'
+import { filesOpen, filesView, type LibraryFile, loadFiles, relativeTime } from './files.js'
 import { t } from './i18n.js'
 import { signOutUplink } from './identity.js'
 import { IdentityForm } from './identity-card.js'
@@ -337,6 +338,102 @@ export function OnboardingOverlay({
         <button type="button" class="obnotnow" onClick={notNow}>
           {t(locale.value, 'ob_not_now')}
         </button>
+      </div>
+    </div>
+  )
+}
+
+/** One file row in the library — icon, name, size · date, status badge, and
+ * the summary excerpt expandable on tap (only when there is one). */
+function FileRow({ file }: { file: LibraryFile }) {
+  const L = locale.value
+  const [open, setOpen] = useState(false)
+  const hasSummary = Boolean(file.summary)
+  const badge =
+    file.status === 'analyzed'
+      ? t(L, 'upload_analyzed')
+      : file.status === 'failed'
+        ? t(L, 'upload_failed')
+        : t(L, 'upload_analyzing')
+  return (
+    <div class={`filerow ${file.status}`}>
+      <button
+        type="button"
+        class="filehd"
+        aria-expanded={hasSummary ? open : undefined}
+        disabled={!hasSummary}
+        onClick={() => hasSummary && setOpen((v) => !v)}
+      >
+        <span class="fileicon" aria-hidden="true">
+          {fileGlyph(file.kind)}
+        </span>
+        <span class="filemeta">
+          <span class="filename">{file.name}</span>
+          <span class="filesub">
+            {file.sizeDisplay} · {relativeTime(file.createdAt)}
+          </span>
+        </span>
+        <span class={`filebadge ${file.status}`}>{badge}</span>
+      </button>
+      {open && file.summary && <p class="filesummary">{file.summary}</p>}
+      {file.status === 'failed' && file.reason && <p class="filereason">{file.reason}</p>}
+    </div>
+  )
+}
+
+/**
+ * Files overlay — the WhatsApp-style library of everything this trader has
+ * uploaded. Refetched on every open (server truth, no client cache): loading,
+ * error (with retry), an honest empty state, or the newest-first list. Mirrors
+ * the SettingsSheet overlay construction (focus trap, obcard sheet, ✕ close).
+ */
+export function FilesSheet() {
+  const L = locale.value
+  const view = filesView.value
+  const cardRef = useTrapFocus()
+  const close = () => {
+    filesOpen.value = false
+  }
+  return (
+    <div class="overlay">
+      <div
+        class="obcard sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(L, 'files_open')}
+        ref={cardRef}
+      >
+        <div class="shhd">
+          <b>{t(L, 'files_title')}</b>
+          <button type="button" aria-label={t(L, 'files_close')} onClick={close}>
+            ✕
+          </button>
+        </div>
+        {view.phase === 'loading' && (
+          <div class="filestate" role="status">
+            {t(L, 'files_loading')}
+          </div>
+        )}
+        {view.phase === 'error' && (
+          <div class="filestate err" role="status">
+            <p>{t(L, 'files_error')}</p>
+            <button type="button" class="shitem" onClick={() => void loadFiles()}>
+              ↻ {t(L, 'files_retry')}
+            </button>
+          </div>
+        )}
+        {view.phase === 'list' && view.files.length === 0 && (
+          <div class="filestate empty" role="status">
+            {t(L, 'files_empty')}
+          </div>
+        )}
+        {view.phase === 'list' && view.files.length > 0 && (
+          <div class="filelist">
+            {view.files.map((f) => (
+              <FileRow file={f} key={f.fileId} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

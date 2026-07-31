@@ -11,12 +11,13 @@ import { installHostBridge, SYMBOL_RE } from './bridge.js'
 import { FallbackCard, renderFrame } from './cards.js'
 import { LONG_PRESS_MS, PRESS_MOVE_SLOP_PX, roveIndex } from './chips.js'
 import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js'
+import { filesOpen, openFiles } from './files.js'
 import { resolveLocale, t } from './i18n.js'
 import { IdentityFirstRunCard } from './identity-card.js'
 import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
 import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
 import { dispatch, outbox } from './outbox.js'
-import { OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
+import { FilesSheet, OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
 import { clampToViewport, cyclePosture, isMobileViewport, openPosture } from './posture.js'
 import { initPriceSource, normalizePriceSource } from './price.js'
 import { isNearBottom } from './scroll.js'
@@ -52,7 +53,7 @@ import {
 import { isStreaming } from './streaming.js'
 import { panelCss } from './styles.js'
 import { connect, send } from './transport.js'
-import { dismissUpload, startUpload } from './upload.js'
+import { dismissUpload, retryUpload, startUploads } from './upload.js'
 
 type MountOpts = {
   shadow: ShadowRoot
@@ -174,6 +175,16 @@ function ClipSvg() {
   )
 }
 
+/** Crisp inline "files" glyph for the header button — a document stack.
+ * currentColor lets CSS drive hover/active like the other header controls. */
+function FilesSvg() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M8 2h6l4 4v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm5 1.5V7h3.5L13 3.5zM5 6H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2h-2v0H4V6z" />
+    </svg>
+  )
+}
+
 /** Client-local upload rows — byte progress while the POST runs (the wire has
  * no 'uploading' phase by design), and inline local errors for files that
  * never leave the panel (unsupported / oversized / failed send). Success rows
@@ -198,6 +209,13 @@ function UploadRows() {
           <div class="uprow err" role="status" key={u.id}>
             <span class="upname">{u.name}</span>
             <span class="upmsg">{t(L, u.errorKey ?? 'upload_send_failed')}</span>
+            {/* Retry re-POSTs the SAME file into the same row (send/network
+                failures only — local rejects have no file to retry). */}
+            {u.retry && (
+              <button type="button" class="upretry" onClick={() => retryUpload(u.id)}>
+                ↻ {t(L, 'upload_retry')}
+              </button>
+            )}
             <button
               type="button"
               class="upx"
@@ -295,11 +313,13 @@ function Composer() {
           ref={fileRef}
           type="file"
           accept=".csv,text/csv,image/png,image/jpeg,image/webp"
+          multiple
           hidden
           onChange={(e) => {
             const input = e.target as HTMLInputElement
-            const f = input.files?.[0]
-            if (f) void startUpload(f)
+            // Multi-select: each file gets its own row/chip; the queue runs
+            // them one at a time (upload.ts).
+            if (input.files && input.files.length > 0) startUploads(input.files)
             input.value = '' // re-picking the same file must fire change again
           }}
         />
@@ -652,6 +672,10 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
         shareFrame.value = null
         return
       }
+      if (filesOpen.value) {
+        filesOpen.value = false
+        return
+      }
       if (settingsOpen.value) {
         settingsOpen.value = false
         return
@@ -766,6 +790,14 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
         <div class="ctl">
           <button
             type="button"
+            title={t(L, 'files_title')}
+            aria-label={t(L, 'files_open')}
+            onClick={openFiles}
+          >
+            <FilesSvg />
+          </button>
+          <button
+            type="button"
             title={t(L, 'settings')}
             aria-label={t(L, 'settings')}
             onClick={() => {
@@ -802,7 +834,8 @@ function Panel({ onMinimize, ob }: { onMinimize: () => void; ob: OnboardingStore
       <Composer />
       {ob.active.value && <OnboardingOverlay store={ob} onNotNow={onMinimize} />}
       {!ob.active.value && shareFrame.value && <ShareOverlay frame={shareFrame.value} />}
-      {!ob.active.value && !shareFrame.value && settingsOpen.value && (
+      {!ob.active.value && !shareFrame.value && filesOpen.value && <FilesSheet />}
+      {!ob.active.value && !shareFrame.value && !filesOpen.value && settingsOpen.value && (
         <SettingsSheet
           onReplay={() => {
             settingsOpen.value = false

@@ -881,37 +881,49 @@ function StreamingBriefCard({ frame }: { frame: BriefDelta }) {
   )
 }
 
+/** Kind glyph for a file chip / row — a CSV grid vs an image frame. Mono
+ * currentColor so CSS drives the tone, like the composer paperclip. */
+export function fileGlyph(kind?: 'csv' | 'image'): string {
+  return kind === 'image' ? '▦' : '▤'
+}
+
 /**
  * Upload journey chip — the server-side phases of an uploaded file (the
  * client's own byte-progress bar lives in the composer; these frames take
  * over once the gateway has the bytes). One chip per file: the store
  * collapses upload_status frames in place by fileId, and the panel keys the
  * chip by file so phase changes never remount. `analyzing` gets a distinct
- * indeterminate treatment (shimmer across the chip) — the analysis answer
- * itself arrives as a normal research_brief below.
+ * indeterminate treatment (shimmer across the chip); the TERMINAL phases
+ * (`analyzed` / `failed`) are journaled, so this chip is the file's lasting
+ * thread presence — it survives reload/resume. The analysis answer itself
+ * arrives as a normal research_brief below.
  */
 function UploadStatusCard({ frame }: { frame: UploadStatus }) {
   const L = locale.value
   const failed = frame.phase === 'failed'
   const analyzing = frame.phase === 'analyzing'
+  const analyzed = frame.phase === 'analyzed'
+  const phaseLabel = failed
+    ? t(L, 'upload_failed')
+    : analyzed
+      ? t(L, 'upload_analyzed')
+      : analyzing
+        ? t(L, 'upload_analyzing')
+        : t(L, 'upload_received')
   return (
     <div
-      class={`upchip${analyzing ? ' analyzing' : ''}${failed ? ' failed' : ''}`}
+      class={`upchip${analyzing ? ' analyzing' : ''}${analyzed ? ' analyzed' : ''}${failed ? ' failed' : ''}`}
       role="status"
       aria-live="polite"
     >
       <span class="upicon" aria-hidden="true">
-        ▤
+        {fileGlyph(frame.kind)}
       </span>
       <span class="upname">{frame.name}</span>
       <span class="upsize">{frame.sizeDisplay}</span>
       <span class="upphase">
         {analyzing && <span class="pulse" aria-hidden="true" />}
-        {failed
-          ? t(L, 'upload_failed')
-          : analyzing
-            ? t(L, 'upload_analyzing')
-            : t(L, 'upload_received')}
+        {phaseLabel}
       </span>
       {failed && frame.reason && <span class="upreason">{frame.reason}</span>}
     </div>

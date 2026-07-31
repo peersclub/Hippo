@@ -151,6 +151,12 @@ export type LocalUpload = {
   errorKey?: MessageKey
   /** Set once the POST is accepted (202) — the join key to upload_status. */
   fileId?: string
+  /** The originating File, held so a failed send can re-POST the same bytes
+   * (network/send failures only; local rejects have no file to retry). */
+  file?: File
+  /** A retryable error offers a "Retry" affordance (re-POST); local rejects
+   * (oversize/unsupported) don't — re-sending would fail identically. */
+  retry?: boolean
 }
 export const localUploads = signal<LocalUpload[]>([])
 

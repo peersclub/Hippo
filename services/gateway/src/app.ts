@@ -12,6 +12,7 @@ import {
   InMemoryMauStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
+  InMemoryUploadedFileStore,
   InMemoryUserIdentityStore,
   InMemoryUserStore,
   type MauStore,
@@ -21,8 +22,10 @@ import {
   PostgresMauStore,
   PostgresPartnerStore,
   PostgresPlanStore,
+  PostgresUploadedFileStore,
   PostgresUserIdentityStore,
   PostgresUserStore,
+  type UploadedFileStore,
   type UserIdentityStore,
   type UserStore,
 } from '@hippo/stores'
@@ -72,6 +75,9 @@ export type GatewayOptions = {
   /** In-panel username+PIN identities (migration 015). Postgres when
    * DATABASE_URL is set, in-memory otherwise. */
   identityStore?: UserIdentityStore
+  /** Durable upload records (migration 016) — the "Files" library. Postgres
+   * when DATABASE_URL is set, in-memory otherwise. */
+  uploadedFileStore?: UploadedFileStore
   /** Override the session store (tests inject a Redis-backed one). Defaults to
    * Redis when REDIS_URL is set, else in-memory. */
   sessions?: SessionStore
@@ -117,6 +123,9 @@ export async function buildApp(opts: GatewayOptions = {}) {
   const identities =
     opts.identityStore ??
     (usePg ? new PostgresUserIdentityStore(getPool()) : new InMemoryUserIdentityStore())
+  const uploadedFiles =
+    opts.uploadedFileStore ??
+    (usePg ? new PostgresUploadedFileStore(getPool()) : new InMemoryUploadedFileStore())
 
   const sessions =
     opts.sessions ??
@@ -330,6 +339,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
     sessions,
     emit,
     analysis: opts.fileAnalysis ?? createFileAnalysisClient(),
+    files: uploadedFiles,
     log: app.log,
     ...(rateLimit ? { rateLimit } : {}),
   })
@@ -395,7 +405,18 @@ export async function buildApp(opts: GatewayOptions = {}) {
     return { revoked: sessions.revoke(req.params.id) }
   })
 
-  return { app, sessions, emit, telemetry, diagnostics, partners, plans, users, identities }
+  return {
+    app,
+    sessions,
+    emit,
+    telemetry,
+    diagnostics,
+    partners,
+    plans,
+    users,
+    identities,
+    uploadedFiles,
+  }
 }
 
 if (process.env.NODE_ENV !== 'test') {
