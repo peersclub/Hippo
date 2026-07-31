@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
 import type { OrdersSummary } from '@hippo/protocol'
+import { describe, expect, it } from 'vitest'
 import {
   emptyLabelKey,
   hasFill,

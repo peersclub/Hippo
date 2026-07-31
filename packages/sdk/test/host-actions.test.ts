@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostAction } from '@hippo/protocol'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   acceptAck,
   actionMessage,
@@ -122,9 +122,9 @@ describe('applyAck — outcome reflection', () => {
 
 describe('parseAck — untrusted host messages', () => {
   it('accepts a well-formed ok / failed ack', () => {
-    expect(parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: 'a1', ok: true })).toEqual(
-      { actionId: 'a1', ok: true, reason: undefined },
-    )
+    expect(
+      parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: 'a1', ok: true }),
+    ).toEqual({ actionId: 'a1', ok: true, reason: undefined })
     expect(
       parseAck({
         source: 'hippo-host',
@@ -143,18 +143,30 @@ describe('parseAck — untrusted host messages', () => {
     // our own outbound message must not be mistaken for an ack
     expect(parseAck({ source: 'hippo-sdk', type: 'hippo:action', actionId: 'a1' })).toBeNull()
     expect(parseAck({ source: 'hippo-host', type: 'other', actionId: 'a1', ok: true })).toBeNull()
-    expect(parseAck({ source: 'someone-else', type: 'hippo:action:result', actionId: 'a1', ok: true })).toBeNull()
+    expect(
+      parseAck({ source: 'someone-else', type: 'hippo:action:result', actionId: 'a1', ok: true }),
+    ).toBeNull()
   })
 
   it('rejects a missing/mistyped actionId or ok', () => {
     expect(parseAck({ source: 'hippo-host', type: 'hippo:action:result', ok: true })).toBeNull()
-    expect(parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: '', ok: true })).toBeNull()
-    expect(parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: 'a1' })).toBeNull()
+    expect(
+      parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: '', ok: true }),
+    ).toBeNull()
+    expect(
+      parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: 'a1' }),
+    ).toBeNull()
     expect(
       parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: 'a1', ok: 'yes' }),
     ).toBeNull()
     expect(
-      parseAck({ source: 'hippo-host', type: 'hippo:action:result', actionId: 'a1', ok: true, reason: 5 }),
+      parseAck({
+        source: 'hippo-host',
+        type: 'hippo:action:result',
+        actionId: 'a1',
+        ok: true,
+        reason: 5,
+      }),
     ).toBeNull()
   })
 })
@@ -177,7 +189,10 @@ describe('pushFrame integration', () => {
   it('renders a host_action chip in-thread AND marks it pending', () => {
     pushFrame({ kind: 'frame', frame: hostAction() })
     expect(thread.value).toHaveLength(1)
-    expect(thread.value[0]).toMatchObject({ kind: 'frame', frame: { type: 'host_action', actionId: 'a1' } })
+    expect(thread.value[0]).toMatchObject({
+      kind: 'frame',
+      frame: { type: 'host_action', actionId: 'a1' },
+    })
     expect(hostActionMap.value.a1).toEqual({ phase: 'pending' })
   })
 })

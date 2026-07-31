@@ -7,7 +7,7 @@
 import type { OrdersSnapshot } from '@hippo/protocol'
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { advertisePageControl, installHostBridge, setPageControl, SYMBOL_RE } from './bridge.js'
+import { advertisePageControl, installHostBridge, SYMBOL_RE, setPageControl } from './bridge.js'
 import { FallbackCard, renderFrame } from './cards.js'
 import { LONG_PRESS_MS, PRESS_MOVE_SLOP_PX, roveIndex } from './chips.js'
 import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js'

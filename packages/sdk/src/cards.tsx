@@ -11,8 +11,8 @@ import type {
   Interpretation,
   Lifecycle,
   OrderDraft,
-  OrderTicket,
   OrdersSummary,
+  OrderTicket,
   Positions,
   RejectionTicket,
   ResearchBrief,
@@ -34,7 +34,6 @@ import {
 import { isStale, LANDED_FLASH_MS, STALE_CHECK_INTERVAL_MS, staleAgeLabel } from './freshness.js'
 import { type HostActionPhase, hostActionMap } from './host-actions.js'
 import { type Locale, type MessageKey, t } from './i18n.js'
-import { emptyLabelKey, hasFill, orderedRows, scopeLabelKey, totalCells } from './orders-summary.js'
 import {
   cancelAffordance,
   confirmPendingSteps,
@@ -44,6 +43,7 @@ import {
   sideBadge,
   ticketStateClass,
 } from './lifecycle-view.js'
+import { emptyLabelKey, hasFill, orderedRows, scopeLabelKey, totalCells } from './orders-summary.js'
 import { dispatch } from './outbox.js'
 import { briefClipboardText, COPIED_FLASH_MS } from './share.js'
 import { connection, feedbackMap, livePrice, locale, shareFrame, thread } from './state.js'
@@ -961,7 +961,8 @@ const HOST_ACTION_PHASE_KEY: Record<HostActionPhase, MessageKey> = {
 function hostActionNote(frame: HostAction, L: Locale): string {
   if (frame.note) return frame.note
   const ind = (frame.indicator ?? '').toUpperCase()
-  if (frame.action === 'set_timeframe') return `${t(L, 'host_action_chart')} → ${frame.timeframe ?? ''}`
+  if (frame.action === 'set_timeframe')
+    return `${t(L, 'host_action_chart')} → ${frame.timeframe ?? ''}`
   if (frame.action === 'remove_indicator') return `${t(L, 'host_action_indicator')} ✕ ${ind}`
   return `${t(L, 'host_action_indicator')} → ${ind}`
 }
