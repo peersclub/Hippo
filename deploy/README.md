@@ -85,6 +85,31 @@ DATABASE_URL=<public-postgres-url> pnpm --filter @hippo/stores migrate
 Staleness check: compare `select name from schema_migrations` against
 `packages/stores/migrations/`.
 
+## Local stack (docker compose)
+
+`deploy/docker-compose.yml` (run from the repo root):
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d                      # postgres + redis + migrations
+docker compose -f deploy/docker-compose.yml --profile services up -d  # + all 8 services (container parity)
+```
+
+Default profile is infra-only — `pnpm dev` runs the services faster
+un-containerized; the `services` profile builds every Dockerfile for parity
+runs. Local-only credentials; intelligence boots in mock mode without an
+LLM key. Authored on a machine without Docker — first `--profile services`
+run may need port/env touch-ups.
+
+## Cross-process rotate/suspend enforcement
+
+`scripts/rotate-suspend-e2e.sh` proves the trust boundary across processes:
+a portal-side secret rotation and an admin-side suspend are both enforced by
+the gateway on its very next session mint (shared Postgres is the fabric).
+Creates a throwaway `e2e-rotate-<epoch>` partner and leaves it suspended as
+an audit-visible record. **Verified against the live stack 2026-07-31**
+(mint 200 → rotate → old 401 / new 200 → suspend → 401). Point the env vars
+at the compose stack for local runs.
+
 ## Frontends (Vercel)
 
 | App | URL | Root |
