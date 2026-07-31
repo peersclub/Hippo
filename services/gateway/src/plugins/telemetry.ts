@@ -35,6 +35,14 @@ function monthKey(now = new Date()): string {
   return now.toISOString().slice(0, 7) // "2026-07"
 }
 
+/** How far back the in-memory load curve reaches (hour buckets). */
+const LOAD_CURVE_HOURS = 24
+const HOUR_MS = 3_600_000
+
+/** One hour of load: every uplink processed, and the user_text subset —
+ * "queries" is the number queries/MAU divides by, so it gets its own count. */
+export type LoadBucket = { hourStartMs: number; uplinks: number; queries: number }
+
 /** Optional OTel handles — defaults to the global API (no-op with no provider,
  * so the existing tests and local dev are unaffected). Tests inject their own
  * meter/tracer wired to an in-memory exporter. */
@@ -50,6 +58,10 @@ export class Telemetry {
   private cacheMisses = 0
   private degradedSince: number | null = null
   private degradedMsTotal = 0
+  private adviceAnswered = 0
+  private adviceDeclined = 0
+  /** Hour-bucketed load, keyed by bucket start (ms). Pruned on write+read. */
+  private loadBuckets = new Map<number, { uplinks: number; queries: number }>()
 
   private readonly tracer: Tracer
   private readonly intentDuration: Histogram
@@ -85,8 +97,30 @@ export class Telemetry {
   onFirstToken?: (durationMs: number) => void
   onTurnLatency?: (durationMs: number) => void
 
-  recordTurn(kind: string): void {
+  recordTurn(kind: string, now = Date.now()): void {
     this.turns[kind] = (this.turns[kind] ?? 0) + 1
+    const hour = now - (now % HOUR_MS)
+    const bucket = this.loadBuckets.get(hour) ?? { uplinks: 0, queries: 0 }
+    bucket.uplinks += 1
+    if (kind === 'user_text') bucket.queries += 1
+    this.loadBuckets.set(hour, bucket)
+    this.pruneLoad(now)
+  }
+
+  private pruneLoad(now: number): void {
+    const cutoff = now - LOAD_CURVE_HOURS * HOUR_MS
+    for (const hour of this.loadBuckets.keys()) {
+      if (hour < cutoff) this.loadBuckets.delete(hour)
+    }
+  }
+
+  /** The last 24h of load, oldest first. Only hours with traffic appear —
+   * the consumer fills gaps (an empty hour is honest zero, not missing data). */
+  loadCurve(now = Date.now()): LoadBucket[] {
+    this.pruneLoad(now)
+    return [...this.loadBuckets.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([hourStartMs, b]) => ({ hourStartMs, ...b }))
   }
 
   /** Total turn latency (uplink received → turn processing settled) for the
@@ -109,8 +143,12 @@ export class Telemetry {
     this.onFirstToken?.(durationMs)
   }
 
-  /** Advice-turn outcome — the decline rate the compliance story rests on. */
+  /** Advice-turn outcome — the decline rate the compliance story rests on.
+   * Counted in-process too so the snapshot (and the pilot dashboard) can
+   * report it without an OTel collector. */
   recordAdvice(declined: boolean): void {
+    if (declined) this.adviceDeclined += 1
+    else this.adviceAnswered += 1
     this.adviceTurns.add(1, { outcome: declined ? 'declined' : 'answered' })
   }
 
@@ -215,6 +253,15 @@ export class Telemetry {
         misses: this.cacheMisses,
         hitRate: cacheTotal === 0 ? null : this.cacheHits / cacheTotal,
       },
+      advice: {
+        answered: this.adviceAnswered,
+        declined: this.adviceDeclined,
+        declineRate:
+          this.adviceAnswered + this.adviceDeclined === 0
+            ? null
+            : this.adviceDeclined / (this.adviceAnswered + this.adviceDeclined),
+      },
+      loadCurve: this.loadCurve(),
       degraded: {
         active: this.degradedSince !== null,
         seconds: Math.round((this.degradedMsTotal + liveDegradedMs) / 1000),
