@@ -68,6 +68,12 @@ function normalizeLocale(raw: string): string {
       host.style.cssText = 'position:fixed;z-index:2147483000;inset:auto 0 0 auto;'
       // Optional light theme — a pure token swap in the panel (default: dark).
       if (script.dataset.hippoTheme === 'light') host.dataset.theme = 'light'
+      // Partner accent (data-hippo-accent) — strict #rrggbb only (the value
+      // lands in CSS), overriding the panel's single accent token.
+      const accent = /^#[0-9a-fA-F]{6}$/.test(script.dataset.hippoAccent ?? '')
+        ? (script.dataset.hippoAccent as string)
+        : ''
+      if (accent) host.style.setProperty('--hippo-amber', accent)
       // Locale + direction. dir on the host propagates RTL into the shadow tree.
       host.dataset.locale = config.locale
       if (RTL.has(config.locale)) host.setAttribute('dir', 'rtl')

@@ -69,6 +69,7 @@ export function renderReport(r: ScanResult): string {
     `| Framework | ${r.site.framework.name}${r.site.framework.evidence ? ` — ${code(r.site.framework.evidence)}` : ''} |`,
     `| Title | ${r.site.title ?? '—'} |`,
     `| Locales | ${r.site.locales.length > 0 ? r.site.locales.join(', ') : 'none declared'} |`,
+    `| Brand accent | ${r.site.theme ? `\`${r.site.theme.accent}\` (${r.site.theme.source}${r.site.theme.variable ? `: ${r.site.theme.variable}` : ''}) — pass to \`hippo embed --accent\`` : 'not detected'} |`,
     `| Server | ${[r.site.server, r.site.poweredBy].filter(Boolean).join(' · ') || 'not disclosed'} |`,
     '',
     `**CSP posture:** ${cspLine(r)}`,

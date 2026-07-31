@@ -35,6 +35,8 @@ export interface EmbedInputs {
   cdn?: string
   /** 'light' is the only non-default theme the loader reads (default: dark hero). */
   theme?: 'dark' | 'light'
+  /** Brand accent (#rrggbb) — replaces the default amber inside the panel. */
+  accent?: string
   /** en | hi | hi-Latn | ar — the loader normalizes anything else to en. */
   locale?: string
 }
@@ -53,6 +55,7 @@ export interface EmbedArtifacts {
   gateway: string
   cdn: string
   theme: 'dark' | 'light'
+  accent: string | null
   locale: string | null
   loaderUrl: string
   /** The one-line web tag. */
@@ -88,6 +91,7 @@ export function buildEmbedTag(inputs: EmbedInputs): string {
   attrs.push(`data-hippo-key="${escapeAttr(inputs.key)}"`)
   if (gateway !== DEFAULT_GATEWAY) attrs.push(`data-hippo-gateway="${escapeAttr(gateway)}"`)
   if (inputs.theme === 'light') attrs.push('data-hippo-theme="light"')
+  if (inputs.accent) attrs.push(`data-hippo-accent="${escapeAttr(inputs.accent)}"`)
   if (inputs.locale && inputs.locale !== 'en')
     attrs.push(`data-hippo-locale="${escapeAttr(inputs.locale)}"`)
   return `<script ${attrs.join(' ')}></script>`
@@ -105,6 +109,7 @@ export function buildShellUrl(inputs: EmbedInputs): string {
   url.searchParams.set('key', inputs.key)
   if (gateway !== DEFAULT_GATEWAY) url.searchParams.set('gateway', gateway)
   if (inputs.theme === 'light') url.searchParams.set('theme', 'light')
+  if (inputs.accent) url.searchParams.set('accent', inputs.accent)
   if (inputs.locale && inputs.locale !== 'en') url.searchParams.set('locale', inputs.locale)
   return url.toString()
 }
@@ -144,6 +149,7 @@ export function draftEmbed(inputs: EmbedInputs): EmbedArtifacts {
     gateway,
     cdn,
     theme: inputs.theme === 'light' ? 'light' : 'dark',
+    accent: inputs.accent ?? null,
     locale: inputs.locale ?? null,
     loaderUrl: `${cdn}/loader.js`,
     tag: buildEmbedTag(inputs),

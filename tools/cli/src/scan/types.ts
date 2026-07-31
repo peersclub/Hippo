@@ -37,6 +37,8 @@ export interface SiteProfile {
   framework: FrameworkDetection
   title: string | null
   locales: string[]
+  /** Brand accent extracted from the homepage (theming hint); null = unclear. */
+  theme: import('./theme.js').ThemeHints | null
 }
 
 export interface RobotsInfo {
