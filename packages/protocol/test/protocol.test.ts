@@ -429,3 +429,84 @@ describe('dynamic features — identity / upload_status / identity_claim (additi
     expect(mk({ mode: 'signin', username: 'victor_t', pin: 'abcd' }).success).toBe(false)
   })
 })
+
+describe('host interaction — host_action / orders_summary / context.pageControl (additive)', () => {
+  it('parses host_action for each allowlisted action and rejects unknown actions', () => {
+    const tf = Frame.safeParse({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_1',
+      action: 'set_timeframe',
+      timeframe: '5m',
+      note: 'Chart → 5m',
+    })
+    expect(tf.success).toBe(true)
+    const ind = Frame.safeParse({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_2',
+      action: 'apply_indicator',
+      indicator: 'rsi',
+    })
+    expect(ind.success).toBe(true)
+    const bad = Frame.safeParse({ ...base, type: 'host_action', actionId: 'ha_3', action: 'navigate' })
+    expect(bad.success).toBe(false) // page control is a closed allowlist, never open navigation
+    const badTf = Frame.safeParse({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_4',
+      action: 'set_timeframe',
+      timeframe: '7m',
+    })
+    expect(badTf.success).toBe(false)
+    const badInd = Frame.safeParse({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_5',
+      action: 'apply_indicator',
+      indicator: 'RSI overlay!',
+    })
+    expect(badInd.success).toBe(false) // indicator is a strict slug — no free text toward the host
+  })
+
+  it('parses orders_summary with scope, totals and open-string statuses', () => {
+    const ok = Frame.safeParse({
+      ...base,
+      type: 'orders_summary',
+      scope: 'session',
+      asOfIso: '2026-07-31T05:00:00Z',
+      orders: [
+        {
+          orderId: 'o_1',
+          symbol: 'BTC/USDT',
+          side: 'buy',
+          kind: 'LMT 60,000',
+          qty: '0.3',
+          price: '60,000',
+          status: 'WORKING',
+          filledPct: 40,
+        },
+        { orderId: 'o_2', symbol: 'ETH/USDT', side: 'sell', kind: 'MKT', qty: '1', status: 'FILLED' },
+      ],
+      totals: { open: 1, filled: 1, cancelled: 0 },
+    })
+    expect(ok.success).toBe(true)
+    const badScope = Frame.safeParse({
+      ...base,
+      type: 'orders_summary',
+      scope: 'today',
+      asOfIso: '2026-07-31T05:00:00Z',
+      orders: [],
+      totals: { open: 0, filled: 0, cancelled: 0 },
+    })
+    expect(badScope.success).toBe(false)
+  })
+
+  it('context uplink carries the optional pageControl opt-in', () => {
+    const mk = (extra: object) =>
+      Uplink.safeParse({ v: 1, sessionId: 's_1', ts: 1_752_480_000_000, kind: 'context', ...extra })
+    expect(mk({ symbol: 'BTC/USDT', pageControl: true }).success).toBe(true)
+    expect(mk({}).success).toBe(true) // still valid without it — additive
+    expect(mk({ pageControl: 'yes' }).success).toBe(false)
+  })
+})

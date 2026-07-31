@@ -344,6 +344,65 @@ export const UploadStatusFrame = z.object({
   reason: z.string().optional(),
 })
 
+/**
+ * Host page action (additive, July 2026) — the server asking the HOST PAGE to
+ * change something on screen ("switch the chart to 5m", "apply RSI"). The SDK
+ * never touches the host DOM: it forwards a validated action over the existing
+ * postMessage bridge and the host applies it — or ignores it. Only flows when
+ * the host opted in (embed attr → ContextUplink.pageControl), so a page that
+ * never asked can never be driven. `action` is a closed set (the SDK must know
+ * how to forward each); `indicator` is an open slug the HOST validates against
+ * what its chart actually supports — growth on the host side breaks nothing.
+ */
+export const HostActionFrame = z.object({
+  ...base,
+  type: z.literal('host_action'),
+  actionId: z.string(), // correlates the host's ack back to this frame
+  action: z.enum(['set_timeframe', 'apply_indicator', 'remove_indicator']),
+  timeframe: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']).optional(),
+  indicator: z
+    .string()
+    .regex(/^[a-z0-9_-]{1,24}$/)
+    .optional(),
+  /** Server-authored one-liner for the in-panel chip, e.g. "Chart → 5m". */
+  note: z.string().optional(),
+})
+
+/**
+ * Consolidated orders view (additive, July 2026) — the full answer to "show
+ * all my orders" / "orders this session". Distinct from OrdersSnapshotFrame
+ * (the compact open-orders pill): this is a scope-labeled card with totals and
+ * per-order rows. `status` and `kind` are open strings by design (stage
+ * precedent — venue vocabulary grows without breaking a parser); money stays
+ * strings per the canonical order model.
+ */
+export const OrdersSummaryFrame = z.object({
+  ...base,
+  type: z.literal('orders_summary'),
+  scope: z.enum(['all', 'session']),
+  asOfIso: z.string(),
+  orders: z
+    .array(
+      z.object({
+        orderId: z.string(),
+        symbol: z.string(), // "BTC/USDT"
+        side: z.enum(['buy', 'sell']),
+        kind: z.string(), // e.g. "MKT", "LMT 60,000", "CLOSE LONG 10×"
+        qty: z.string(),
+        price: z.string().optional(),
+        status: z.string(), // e.g. "WORKING", "FILLED", "CANCELLED"
+        filledPct: z.number().min(0).max(100).optional(),
+        tsIso: z.string().optional(),
+      }),
+    )
+    .max(50),
+  totals: z.object({
+    open: z.number().int().nonnegative(),
+    filled: z.number().int().nonnegative(),
+    cancelled: z.number().int().nonnegative(),
+  }),
+})
+
 export const Frame = z.discriminatedUnion('type', [
   ResearchBriefFrame,
   OrderTicketFrame,
@@ -364,6 +423,8 @@ export const Frame = z.discriminatedUnion('type', [
   LearnedMemoryFrame,
   IdentityFrame,
   UploadStatusFrame,
+  HostActionFrame,
+  OrdersSummaryFrame,
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
@@ -382,6 +443,8 @@ export type Interpretation = z.infer<typeof InterpretationFrame>
 export type LearnedMemory = z.infer<typeof LearnedMemoryFrame>
 export type Identity = z.infer<typeof IdentityFrame>
 export type UploadStatus = z.infer<typeof UploadStatusFrame>
+export type HostAction = z.infer<typeof HostActionFrame>
+export type OrdersSummary = z.infer<typeof OrdersSummaryFrame>
 export type OrderDraft = z.infer<typeof OrderDraftFrame>
 export type PriceTick = z.infer<typeof PriceTickFrame>
 export type Skeleton = z.infer<typeof SkeletonFrame>
