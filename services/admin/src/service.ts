@@ -54,6 +54,7 @@ import {
   sessionCookie,
   verifyPassword,
 } from './opauth.js'
+import { createRateLimiter, type RateLimitOptions } from './rate-limit.js'
 
 export type AdminServiceOptions = {
   partners: PartnerStore
@@ -76,6 +77,8 @@ export type AdminServiceOptions = {
   mauStore?: MauStore
   /** fetch override for tests. */
   fetchImpl?: typeof fetch
+  /** Per-IP limiter; false disables (tests). Env-tunable in prod. */
+  rateLimit?: RateLimitOptions | false
 }
 
 export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
@@ -98,6 +101,24 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } })
 
   // ── request hardening ────────────────────────────────────────────────────
+  // Coarse per-IP abuse guard (same limiter as the gateway). /health is
+  // exempt — deploy probes must never be throttled.
+  const rateLimit =
+    opts.rateLimit === false
+      ? undefined
+      : createRateLimiter(
+          opts.rateLimit ?? {
+            max: Number(process.env.RATE_LIMIT_MAX ?? 300),
+            windowMs: Number(process.env.RATE_LIMIT_WINDOW ?? 60_000),
+          },
+        )
+  if (rateLimit) {
+    app.addHook('onRequest', async (req, reply) => {
+      if (req.url === '/health') return
+      await rateLimit(req, reply)
+    })
+  }
+
   // CSRF belt-and-braces on top of SameSite=Strict: mutating requests with an
   // Origin header must match our own host.
   app.addHook('onRequest', async (req, reply) => {

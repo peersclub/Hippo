@@ -17,7 +17,7 @@ const INVITE_TOKEN = 'invite-token-plaintext-abc123'
 
 /** Two partners with one claimed admin each — every test asserts against the
  * kbx tenant and uses the second (oX) tenant as the cross-tenant tripwire. */
-async function testPortal() {
+async function testPortal(overrides: Partial<Parameters<typeof buildPortalService>[0]> = {}) {
   const partners = new InMemoryPartnerStore()
   await partners.create({
     partnerId: 'kbx',
@@ -93,6 +93,7 @@ async function testPortal() {
     jwtSecret: JWT_SECRET,
     mauStore,
     sdkUrl: 'https://cdn.test/hippo-loader.js',
+    ...overrides,
   })
   return { app, partners, plans, users, partnerAdmins, audit }
 }
@@ -398,5 +399,24 @@ describe('session cookie Secure flag', () => {
     withEnv('1', 'development', () => {
       expect(sessionCookie('tok')).toContain('; Secure')
     })
+  })
+})
+
+describe('per-IP rate limit', () => {
+  it('429s beyond the window max with Retry-After; /health stays exempt', async () => {
+    const { app } = await testPortal({ rateLimit: { max: 3, windowMs: 60_000 } })
+    for (let i = 0; i < 3; i++) {
+      const res = await app.inject({ method: 'GET', url: '/auth/me' })
+      expect(res.statusCode).not.toBe(429) // 401 (no session) but never throttled
+      expect(res.headers['x-ratelimit-limit']).toBe('3')
+    }
+    const blocked = await app.inject({ method: 'GET', url: '/auth/me' })
+    expect(blocked.statusCode).toBe(429)
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0)
+    // Deploy probes are never throttled.
+    for (let i = 0; i < 5; i++) {
+      expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200)
+    }
+    await app.close()
   })
 })
