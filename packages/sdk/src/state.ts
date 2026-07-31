@@ -11,6 +11,7 @@ import type {
 import { computed, signal } from '@preact/signals'
 import { resolveChips } from './chips.js'
 import type { FeedbackState } from './feedback.js'
+import { forwardHostAction } from './host-actions.js'
 import { isRtl, type Locale, type MessageKey } from './i18n.js'
 import type { Posture } from './posture.js'
 import {
@@ -396,6 +397,14 @@ export function pushFrame(item: ThreadItem) {
     if (f.status === 'ok') identityUsername.value = f.username ?? null
     else if (f.status === 'signed_out') identityUsername.value = null
     return
+  }
+
+  // Host page-control: forward the action to the host page over the
+  // postMessage bridge and arm the ack timeout (idempotent per actionId, so a
+  // replay can't re-post). The SDK never touches the host DOM — it only posts
+  // the message; the chip renders in-thread, so fall through to append it.
+  if (t === 'host_action' && item.kind === 'frame' && item.frame.type === 'host_action') {
+    forwardHostAction(item.frame)
   }
 
   const prev = thread.value

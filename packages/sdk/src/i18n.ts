@@ -142,6 +142,19 @@ export type MessageKey =
   | 'files_close'
   | 'journey_placed'
   | 'order_in_flight'
+  | 'host_action_chart'
+  | 'host_action_indicator'
+  | 'host_action_pending'
+  | 'host_action_applied'
+  | 'host_action_failed'
+  | 'host_action_timeout'
+  | 'orders_summary_all'
+  | 'orders_summary_session'
+  | 'orders_total_working'
+  | 'orders_total_filled'
+  | 'orders_total_cancelled'
+  | 'orders_summary_empty_all'
+  | 'orders_summary_empty_session'
 
 type Catalog = Record<MessageKey, string>
 
@@ -268,6 +281,19 @@ const en: Catalog = {
   files_close: 'Close files',
   journey_placed: 'PLACED',
   order_in_flight: 'ORDER IN FLIGHT — AWAITING THE VENUE…',
+  host_action_chart: 'Chart',
+  host_action_indicator: 'Indicator',
+  host_action_pending: 'Sending to chart…',
+  host_action_applied: 'Applied ✓',
+  host_action_failed: "Host didn't apply this",
+  host_action_timeout: 'No response from page',
+  orders_summary_all: 'All orders',
+  orders_summary_session: 'This session',
+  orders_total_working: 'Working',
+  orders_total_filled: 'Filled',
+  orders_total_cancelled: 'Cancelled',
+  orders_summary_empty_all: 'No orders yet',
+  orders_summary_empty_session: 'No orders this session',
 }
 
 // First pass — pending native review.
@@ -392,6 +418,19 @@ const hi: Catalog = {
   files_close: 'फ़ाइलें बंद करें',
   journey_placed: 'भेजा गया',
   order_in_flight: 'ऑर्डर भेजा गया — वेन्यू की प्रतीक्षा…',
+  host_action_chart: 'चार्ट',
+  host_action_indicator: 'इंडिकेटर',
+  host_action_pending: 'चार्ट को भेजा जा रहा…',
+  host_action_applied: 'लागू ✓',
+  host_action_failed: 'होस्ट ने इसे लागू नहीं किया',
+  host_action_timeout: 'पेज से कोई जवाब नहीं',
+  orders_summary_all: 'सभी ऑर्डर',
+  orders_summary_session: 'इस सत्र में',
+  orders_total_working: 'सक्रिय',
+  orders_total_filled: 'पूरा',
+  orders_total_cancelled: 'रद्द',
+  orders_summary_empty_all: 'अभी कोई ऑर्डर नहीं',
+  orders_summary_empty_session: 'इस सत्र में कोई ऑर्डर नहीं',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -523,6 +562,20 @@ const hiLatn: Catalog = {
   // Lifecycle vocabulary stays in English product terms, like FILL above.
   journey_placed: 'PLACED',
   order_in_flight: 'Order bhej diya — venue ka wait…',
+  // Product terms (chart, indicator) stay in English, like the rest above.
+  host_action_chart: 'Chart',
+  host_action_indicator: 'Indicator',
+  host_action_pending: 'Chart ko bhej rahe…',
+  host_action_applied: 'Applied ✓',
+  host_action_failed: 'Host ne ise apply nahi kiya',
+  host_action_timeout: 'Page se koi jawab nahi',
+  orders_summary_all: 'Saare orders',
+  orders_summary_session: 'Is session mein',
+  orders_total_working: 'Working',
+  orders_total_filled: 'Filled',
+  orders_total_cancelled: 'Cancelled',
+  orders_summary_empty_all: 'Abhi koi order nahi',
+  orders_summary_empty_session: 'Is session mein koi order nahi',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -650,6 +703,19 @@ const ar: Catalog = {
   files_close: 'إغلاق الملفات',
   journey_placed: 'أُرسل',
   order_in_flight: 'أُرسل أمرك — في انتظار المنصّة…',
+  host_action_chart: 'الرسم البياني',
+  host_action_indicator: 'المؤشر',
+  host_action_pending: 'يُرسَل إلى الرسم البياني…',
+  host_action_applied: 'تم التطبيق ✓',
+  host_action_failed: 'لم تطبّق الصفحة هذا',
+  host_action_timeout: 'لا استجابة من الصفحة',
+  orders_summary_all: 'كل الأوامر',
+  orders_summary_session: 'هذه الجلسة',
+  orders_total_working: 'نشط',
+  orders_total_filled: 'منفّذ',
+  orders_total_cancelled: 'ملغى',
+  orders_summary_empty_all: 'لا أوامر بعد',
+  orders_summary_empty_session: 'لا أوامر في هذه الجلسة',
 }
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }

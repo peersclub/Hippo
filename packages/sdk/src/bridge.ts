@@ -25,6 +25,7 @@
  * 'client' WS via its signal subscription) and sends a `context` uplink.
  */
 
+import { acceptAck, applyAck } from './host-actions.js'
 import { formatPriceDisplay } from './price.js'
 import { livePrice, pageSymbol } from './state.js'
 import { send } from './transport.js'
@@ -38,6 +39,44 @@ export const MAX_DISPLAY_LEN = 24
 export type BridgeContext = {
   symbol?: string
   price?: { last: number; lastDisplay?: string }
+}
+
+/**
+ * Host page-control opt-in (data-hippo-page-control). When true, the SDK
+ * advertises `pageControl` on its context uplinks — the gateway emits
+ * host_action frames ONLY after that arrived true — and accepts the host's
+ * acks. Set once at mount from the embed dataset (panel.tsx). Module-scoped,
+ * not a render signal: nothing in the UI depends on it directly.
+ */
+let pageControl = false
+export function setPageControl(on: boolean): void {
+  pageControl = on
+}
+
+/** The `context` uplink payload, stamped with pageControl when the host opted
+ * in. Shared by the symbol-change send and the session-start advertise so both
+ * carry the flag; pure + exported so its shape is unit-testable. */
+export function contextPayload(opts: { symbol?: string } = {}): {
+  kind: 'context'
+  symbol?: string
+  pageControl?: true
+} {
+  return {
+    kind: 'context',
+    ...(opts.symbol ? { symbol: opts.symbol } : {}),
+    ...(pageControl ? { pageControl: true } : {}),
+  }
+}
+
+/**
+ * Advertise the host's page-control opt-in to the gateway. mountPanel calls
+ * this once the session is live (after connect); a no-symbol context is still
+ * valid — pageControl is the payload. No-op when the host never opted in, so a
+ * page that didn't ask can never be driven.
+ */
+export function advertisePageControl(): void {
+  if (!pageControl) return
+  void send(contextPayload({ symbol: pageSymbol.value ?? undefined }))
 }
 
 /**
@@ -80,14 +119,25 @@ export function installHostBridge(): void {
   installed = true
   window.addEventListener('message', (ev: MessageEvent) => {
     try {
+      // Host page-control ack (hippo:action:result) — same untrusted-input
+      // posture as context, plus an origin gate: we posted the action to our
+      // own origin, so the host acks from there. Wrong origin/source/actionId
+      // is dropped; a valid ack settles the chip.
+      const ack = acceptAck(ev.origin, window.location.origin, ev.data)
+      if (ack) {
+        applyAck(ack)
+        return
+      }
       const ctx = parseBridgeMessage(ev.data)
       if (!ctx) return
       if (ctx.symbol && ctx.symbol !== pageSymbol.value) {
         pageSymbol.value = ctx.symbol // 'client' mode resubscribes off this
         // Tell the server which market the trader is looking at now. Context,
         // never a command — nothing executes from it (and the gateway
-        // re-validates the symbol against its own listings).
-        void send({ kind: 'context', symbol: ctx.symbol })
+        // re-validates the symbol against its own listings). Re-carries the
+        // pageControl opt-in so a symbol change keeps the gateway willing to
+        // emit host_action frames.
+        void send(contextPayload({ symbol: ctx.symbol }))
       }
       if (ctx.price) {
         // An explicit host price applies to the message's symbol, else the

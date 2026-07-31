@@ -334,6 +334,38 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .pos-row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;font-family:var(--hippo-font-mono);font-size:11px}
 .pos-row+.pos-row{border-top:1px dashed rgba(var(--hippo-white-rgb),.09)}
 .pos-row .neg{color:var(--hippo-down)}.pos-row .pos{color:var(--hippo-up)}
+/* host page-control chip — the server asked the host page to change the chart;
+   the SDK only forwards + reflects the ack (it never touches the host DOM) */
+.hostact{align-self:flex-start;display:flex;align-items:center;gap:8px;max-width:96%;
+  font-family:var(--hippo-font-mono);font-size:10.5px;padding:8px 12px;border-radius:var(--hippo-radius-pill);
+  background:var(--hippo-card);border:1px solid var(--hippo-hairline);color:var(--hippo-text-mid)}
+.hostact .haicon{color:var(--hippo-amber)}
+.hostact .hanote{color:var(--hippo-text-hi);font-weight:500}
+.hostact .haphase{margin-inline-start:auto;display:flex;align-items:center;gap:6px;
+  font-size:9px;letter-spacing:.08em;color:var(--hippo-text-faint)}
+.hostact.applied{border-color:rgba(var(--hippo-up-rgb),.4)}
+.hostact.applied .haphase{color:var(--hippo-up)}
+.hostact.failed{border-color:rgba(var(--hippo-down-rgb),.4)}
+.hostact.failed .haphase{color:var(--hippo-down)}
+.hostact.timeout .haphase{color:var(--hippo-amber)}
+/* consolidated orders card — full "show my orders" answer (scope + totals +
+   rows). Reuses .oside / .fillbar so it reads like the rest of the order UI */
+.osumm{align-self:flex-start;max-width:96%;width:100%;border-radius:15px;padding:13px;
+  background:var(--hippo-card);border:1px solid rgba(var(--hippo-white-rgb),.08);display:flex;flex-direction:column;gap:10px}
+.osumm-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.osumm-scope{font-family:var(--hippo-font-display);font-weight:600;font-size:13px;color:var(--hippo-text-hi)}
+.osumm-totals{display:flex;gap:10px;font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-text-faint)}
+.osumm-total b{color:var(--hippo-amber);font-weight:600}
+.osumm-empty{font-family:var(--hippo-font-body);font-size:11.5px;color:var(--hippo-text-dim)}
+.osumm-list{display:flex;flex-direction:column;gap:9px}
+.osumm-row{display:flex;flex-direction:column;gap:5px}
+.osumm-row+.osumm-row{border-top:1px dashed rgba(var(--hippo-white-rgb),.09);padding-top:9px}
+.osumm-line{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-family:var(--hippo-font-mono);font-size:10.5px;color:var(--hippo-text-hi)}
+.osumm-sym{font-weight:600}
+.osumm-kind{font-size:9px;color:var(--hippo-text-dim);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:2px 7px}
+.osumm-qty,.osumm-price{color:var(--hippo-text-mid)}
+.osumm-status{margin-inline-start:auto;font-size:9px;letter-spacing:.08em;color:var(--hippo-text-faint)}
+.osumm-fill{margin-top:2px}
 /* banner */
 .banner{display:flex;gap:9px;padding:10px 13px;font-size:11px;line-height:1.5;border-radius:12px}
 .banner.degraded{background:rgba(var(--hippo-amber-rgb),.1);border:1px solid rgba(var(--hippo-amber-rgb),.3);color:var(--hippo-amber-tint)}
