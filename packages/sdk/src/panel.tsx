@@ -7,7 +7,7 @@
 import type { OrdersSnapshot } from '@hippo/protocol'
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { installHostBridge, SYMBOL_RE } from './bridge.js'
+import { advertisePageControl, installHostBridge, setPageControl, SYMBOL_RE } from './bridge.js'
 import { FallbackCard, renderFrame } from './cards.js'
 import { LONG_PRESS_MS, PRESS_MOVE_SLOP_PX, roveIndex } from './chips.js'
 import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js'
@@ -968,11 +968,32 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
   installHostBridge()
   initPriceSource(normalizePriceSource(config.priceSource))
 
+  // Host page-control opt-in: the embed sets data-hippo-page-control when the
+  // host page accepts chart-control actions over the postMessage bridge. Read
+  // it straight from the embed script (the zero-dep loader stays untouched /
+  // under its size gate) and advertise it once the session is live, so the
+  // gateway is willing to emit host_action frames.
+  setPageControl(readPageControl())
+
   // Connect eagerly (hover-preload warms the session too) — but only a click opens.
   void connect({
     gateway: config.gateway,
     key: config.key,
     tokenUrl: config.tokenUrl || undefined,
     symbol: pageSymbol.value ?? undefined,
-  })
+  }).then(advertisePageControl)
+}
+
+/** Whether the embed opted into host page-control (data-hippo-page-control).
+ * Present-and-truthy = on; read from the embed script so the loader needn't
+ * carry the flag through config. Untrusted DOM — never throws. */
+function readPageControl(): boolean {
+  try {
+    const el = document.querySelector('script[data-hippo-page-control]')
+    if (!el) return false
+    const v = el.getAttribute('data-hippo-page-control')
+    return v !== '0' && v !== 'false'
+  } catch {
+    return false
+  }
 }

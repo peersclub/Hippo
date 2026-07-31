@@ -7,10 +7,12 @@ import type {
   Banner,
   BriefDelta,
   Frame,
+  HostAction,
   Interpretation,
   Lifecycle,
   OrderDraft,
   OrderTicket,
+  OrdersSummary,
   Positions,
   RejectionTicket,
   ResearchBrief,
@@ -30,7 +32,9 @@ import {
   feedbackTransition,
 } from './feedback.js'
 import { isStale, LANDED_FLASH_MS, STALE_CHECK_INTERVAL_MS, staleAgeLabel } from './freshness.js'
-import { t } from './i18n.js'
+import { type HostActionPhase, hostActionMap } from './host-actions.js'
+import { type Locale, type MessageKey, t } from './i18n.js'
+import { emptyLabelKey, hasFill, orderedRows, scopeLabelKey, totalCells } from './orders-summary.js'
 import {
   cancelAffordance,
   confirmPendingSteps,
@@ -945,6 +949,99 @@ function UserEchoCard({ frame }: { frame: UserEcho }) {
   return <div class="umsg">{frame.text}</div>
 }
 
+const HOST_ACTION_PHASE_KEY: Record<HostActionPhase, MessageKey> = {
+  pending: 'host_action_pending',
+  applied: 'host_action_applied',
+  failed: 'host_action_failed',
+  timeout: 'host_action_timeout',
+}
+
+/** The chip's note — server-authored when present, else composed from the
+ * action so an older gateway that omits `note` still reads clearly. */
+function hostActionNote(frame: HostAction, L: Locale): string {
+  if (frame.note) return frame.note
+  const ind = (frame.indicator ?? '').toUpperCase()
+  if (frame.action === 'set_timeframe') return `${t(L, 'host_action_chart')} → ${frame.timeframe ?? ''}`
+  if (frame.action === 'remove_indicator') return `${t(L, 'host_action_indicator')} ✕ ${ind}`
+  return `${t(L, 'host_action_indicator')} → ${ind}`
+}
+
+/**
+ * Host page-control chip — reflects a host_action the SDK forwarded to the host
+ * page (state.ts posts the message + arms the timeout; the phase lives in the
+ * hostActionMap signal so it survives minimize/reopen). The SDK never touches
+ * the chart — this chip only mirrors what the page reported back:
+ * pending → applied ✓ / "host didn't apply this" (+reason) / "no response".
+ */
+function HostActionCard({ frame }: { frame: HostAction }) {
+  const L = locale.value
+  const st = hostActionMap.value[frame.actionId] ?? { phase: 'pending' as const }
+  const phaseLabel = t(L, HOST_ACTION_PHASE_KEY[st.phase])
+  return (
+    <div class={`hostact ${st.phase}`} role="status" aria-live="polite">
+      <span class="haicon" aria-hidden="true">
+        ◈
+      </span>
+      <span class="hanote">{hostActionNote(frame, L)}</span>
+      <span class="haphase">
+        {st.phase === 'pending' && <span class="pulse" aria-hidden="true" />}
+        {phaseLabel}
+        {st.phase === 'failed' && st.reason ? ` · ${st.reason}` : ''}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Consolidated orders card — the full "show my orders" answer (scope + totals +
+ * per-order rows), distinct from the compact open-orders pill (OrdersSnapshot).
+ * Presentation logic (scope label, totals, newest-first ordering, empty state)
+ * lives in orders-summary.ts; this only draws, reusing .oside / .fillbar so it
+ * reads like the rest of the order UI.
+ */
+function OrdersSummaryCard({ frame }: { frame: OrdersSummary }) {
+  const L = locale.value
+  const rows = orderedRows(frame.orders)
+  return (
+    <div class="osumm">
+      <div class="osumm-hd">
+        <span class="osumm-scope">{t(L, scopeLabelKey(frame.scope))}</span>
+        <span class="osumm-totals">
+          {totalCells(frame.totals).map((c) => (
+            <span class="osumm-total" key={c.key}>
+              <b>{c.value}</b> {t(L, c.key)}
+            </span>
+          ))}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div class="osumm-empty">{t(L, emptyLabelKey(frame.scope))}</div>
+      ) : (
+        <div class="osumm-list">
+          {rows.map((o) => (
+            <div class="osumm-row" key={o.orderId}>
+              <div class="osumm-line">
+                <span class={`oside ${o.side}`}>{o.side === 'buy' ? 'BUY' : 'SELL'}</span>
+                <span class="osumm-sym">{o.symbol}</span>
+                <span class="osumm-kind">{o.kind}</span>
+                <span class="osumm-qty">{o.qty}</span>
+                {o.price && <span class="osumm-price">{o.price}</span>}
+                <span class="osumm-status">{o.status}</span>
+              </div>
+              {hasFill(o.filledPct) && (
+                <div class="fillbar osumm-fill">
+                  {/* Width IS the server's fillPct — the bar never guesses. */}
+                  <span style={{ width: `${o.filledPct}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function FallbackCard({ frame }: { frame: UnknownFrame }) {
   const fb = frame.fallback
   if (!fb) return null
@@ -992,6 +1089,10 @@ export function renderFrame(frame: Frame): JSX.Element | null {
       return <UploadStatusCard frame={frame} />
     case 'user_echo':
       return <UserEchoCard frame={frame} />
+    case 'host_action':
+      return <HostActionCard frame={frame} />
+    case 'orders_summary':
+      return <OrdersSummaryCard frame={frame} />
     default:
       return null // orders_snapshot, pulse, price_tick, learned_memory & identity are handled by stores, never rendered in-thread
   }
