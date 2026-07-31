@@ -152,6 +152,27 @@ export type Portfolio = {
   openOrders: OpenOrder[]
 }
 
+/**
+ * One row of the CONSOLIDATED orders blotter (listOrders) — every status, not
+ * just open. `status` is the venue display string; `statusClass` buckets it so
+ * the gateway can total open/filled/cancelled without parsing prose. Money
+ * stays a string (canonical order model). Mirrors @hippo/protocol
+ * OrdersSummaryFrame's per-order fields plus the bucketing tag the frame omits.
+ */
+export type OrderRecordStatus = 'open' | 'filled' | 'cancelled'
+export type OrderRecord = {
+  orderId: string
+  symbol: string // "BTC/USDT"
+  side: OrderSide
+  kind: string // e.g. "MKT", "LMT 60,000"
+  qty: string
+  price?: string
+  status: string // display, e.g. "WORKING", "FILLED", "CANCELLED"
+  statusClass: OrderRecordStatus
+  filledPct?: number
+  tsIso?: string
+}
+
 /** Structured logger surface adapters report through (a fastify logger fits). */
 export type AdapterLog = {
   info: (obj: object, msg?: string) => void
@@ -182,6 +203,13 @@ export interface VenueAdapter {
   /** true if the ticket was still cancellable venue-side. */
   cancel(ticketId: string): Promise<boolean>
   portfolio(partnerId: string, userId: string): Promise<Portfolio>
+  /**
+   * The full orders blotter — open + filled + cancelled — for orders_query.
+   * Optional: adapters that can only reach open orders omit it, and the seam
+   * route degrades to the open-orders subset (the gateway's card note then says
+   * what's included). Newest-first is preferred but the gateway re-sorts.
+   */
+  listOrders?(partnerId: string, userId: string): Promise<OrderRecord[]>
   onEvent(handler: (event: LifecycleEvent) => void): void
   /** Optional: receive the service's logger (wired by buildService) so
    * venue-API failures the adapter absorbs are still visible to operators. */

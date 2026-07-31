@@ -111,6 +111,67 @@ describe('host-venue signed trade wire', () => {
     expect(orderId).toBeGreaterThan(0)
   })
 
+  it('lists ALL orders (settled + cancelled), unlike open-orders', async () => {
+    const { app, store } = makeApp()
+    // One order that settles, one that is cancelled.
+    const filled = sign({
+      pairName: 'BTC-USDT',
+      orderType: 0,
+      tradeType: 20,
+      qty: 0.1,
+      rate: 60_000,
+      clientOrderId: 't_filled',
+    })
+    await app.inject({ method: 'POST', url: '/api/v1/trade/orders', ...filled })
+    await store.sweep() // → SETTLED
+    const resting = store.place(USER, {
+      market: 'spot',
+      pairName: 'ETH-USDT',
+      side: 'buy',
+      kind: 'limit',
+      qty: 1,
+      rate: 100, // far below market → rests
+      clientOrderId: 't_rest',
+    })
+    store.cancel(resting.id) // → CANCELED
+
+    // open-orders is empty (settled dropped out, cancelled dropped out)…
+    const open = sign({})
+    const openRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/trade/orders/open',
+      ...open,
+    })
+    expect(openRes.json().data.orders).toHaveLength(0)
+
+    // …but orders/all retains both, newest first, with terminal statuses.
+    const all = sign({})
+    const allRes = await app.inject({ method: 'POST', url: '/api/v1/trade/orders/all', ...all })
+    expect(allRes.statusCode).toBe(200)
+    const rows = allRes.json().data.orders as Array<Record<string, unknown>>
+    expect(rows).toHaveLength(2)
+    const byClient = new Map(rows.map((r) => [r.clientOrderId, r]))
+    expect(byClient.get('t_filled')).toMatchObject({ status: 20 }) // SETTLED
+    expect(byClient.get('t_rest')).toMatchObject({ status: 50 }) // CANCELED
+    expect(rows[0]).toHaveProperty('createdAt')
+  })
+
+  it('rejects the orders/all listing without a valid signature', async () => {
+    const { app } = makeApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/trade/orders/all',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': KEY,
+        'x-timestamp': new Date().toISOString(),
+        'x-signature': 'deadbeef',
+      },
+      payload: '{}',
+    })
+    expect(res.statusCode).toBe(401)
+  })
+
   it('rejects an order that exceeds available balance', async () => {
     const { app } = makeApp()
     const { payload, headers } = sign({

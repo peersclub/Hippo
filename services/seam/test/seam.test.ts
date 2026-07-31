@@ -262,6 +262,95 @@ describe('seam service HTTP surface', () => {
   })
 })
 
+describe('seam consolidated orders — GET /v1/orders', () => {
+  it('401s without the internal token', async () => {
+    const app = guarded()
+    const res = await app.inject({ method: 'GET', url: '/v1/orders/koinbx-dev/u1' })
+    expect(res.statusCode).toBe(401)
+    await app.close()
+  })
+
+  it('is empty for a fresh user, then lists the order across its lifecycle', async () => {
+    const app = guarded(new SimVenueAdapter({ fillDelayMs: 20 }))
+
+    // Fresh user: real state only, nothing fabricated.
+    let res = await app.inject({ method: 'GET', url: '/v1/orders/koinbx-dev/u1', headers: HDR })
+    expect(res.json()).toEqual({ orders: [] })
+
+    // Prepare + confirm → the order is retained as WORKING.
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
+    const { ticketId } = prep.json() as { ticketId: string }
+    await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
+    })
+    res = await app.inject({ method: 'GET', url: '/v1/orders/koinbx-dev/u1', headers: HDR })
+    let orders = (res.json() as { orders: Record<string, unknown>[] }).orders
+    expect(orders).toHaveLength(1)
+    expect(orders[0]).toMatchObject({
+      orderId: ticketId,
+      symbol: 'BTC/USDT',
+      side: 'buy',
+      kind: 'MKT',
+      status: 'WORKING',
+      statusClass: 'open',
+    })
+
+    // After the fill: the SAME order is retained, now FILLED (unlike the
+    // open-orders view, which drops it). This is the whole point of listOrders.
+    await new Promise((r) => setTimeout(r, 60))
+    res = await app.inject({ method: 'GET', url: '/v1/orders/koinbx-dev/u1', headers: HDR })
+    orders = (res.json() as { orders: Record<string, unknown>[] }).orders
+    expect(orders).toHaveLength(1)
+    expect(orders[0]).toMatchObject({
+      orderId: ticketId,
+      status: 'FILLED',
+      statusClass: 'filled',
+      filledPct: 100,
+    })
+
+    // Tenancy: another user's blotter stays empty.
+    res = await app.inject({ method: 'GET', url: '/v1/orders/koinbx-dev/u2', headers: HDR })
+    expect(res.json()).toEqual({ orders: [] })
+    await app.close()
+  })
+
+  it('retains a cancelled order as CANCELLED', async () => {
+    const app = guarded(new SimVenueAdapter({ fillDelayMs: 10_000 }))
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
+    const { ticketId } = prep.json() as { ticketId: string }
+    await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
+    })
+    await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/cancel`,
+      headers: HDR,
+      payload: {},
+    })
+    const res = await app.inject({ method: 'GET', url: '/v1/orders/koinbx-dev/u1', headers: HDR })
+    const orders = (res.json() as { orders: Record<string, unknown>[] }).orders
+    expect(orders).toHaveLength(1)
+    expect(orders[0]).toMatchObject({ orderId: ticketId, statusClass: 'cancelled' })
+    await app.close()
+  })
+})
+
 describe('seam trust boundary — INTERNAL_API_TOKEN guard', () => {
   // Every mutating/reading trading route + /internal/audit is guarded.
   const routes: Array<{ method: 'GET' | 'POST'; url: string; payload?: unknown }> = [
@@ -269,6 +358,7 @@ describe('seam trust boundary — INTERNAL_API_TOKEN guard', () => {
     { method: 'POST', url: '/v1/tickets/t_x/confirm', payload: { callbackUrl: CALLBACK } },
     { method: 'POST', url: '/v1/tickets/t_x/cancel', payload: {} },
     { method: 'GET', url: '/v1/portfolio/koinbx-dev/u1' },
+    { method: 'GET', url: '/v1/orders/koinbx-dev/u1' },
     { method: 'GET', url: '/internal/audit' },
   ]
 

@@ -42,6 +42,27 @@ export type VenueEvent = {
   rows?: Array<{ label: string; value: string }>
 }
 
+/**
+ * One order in the consolidated blotter (GET /v1/orders) — every status, not
+ * just open (open + filled + cancelled). `status` is the venue display string;
+ * `statusClass` buckets it so the gateway can total open/filled/cancelled
+ * without parsing prose. Money stays a string (canonical order model). The
+ * shape mirrors @hippo/protocol OrdersSummaryFrame's per-order fields plus the
+ * bucketing tag the frame doesn't carry. */
+export type OrderRecordStatus = 'open' | 'filled' | 'cancelled'
+export type OrderRecord = {
+  orderId: string
+  symbol: string // "BTC/USDT"
+  side: 'buy' | 'sell'
+  kind: string // e.g. "MKT", "LMT 60,000"
+  qty: string
+  price?: string
+  status: string // display, e.g. "WORKING", "FILLED", "CANCELLED"
+  statusClass: OrderRecordStatus
+  filledPct?: number
+  tsIso?: string
+}
+
 export type SeamPortfolio = {
   positions: Array<{
     instrument: string
@@ -77,6 +98,10 @@ export interface SeamClient {
   cancel(ticketId: string): Promise<void>
   /** Rejects when the seam is down — portfolio is never served stale. */
   portfolio(partnerId: string, userId: string): Promise<SeamPortfolio>
+  /** ALL orders for the user's venue account (open + filled + cancelled), newest
+   * first where the venue timestamps them — the consolidated blotter behind
+   * orders_query. Rejects when the seam is down. */
+  listOrders(partnerId: string, userId: string): Promise<OrderRecord[]>
   /** What the venue supports per capability (GET /v1/capabilities). Cached
    *  briefly client-side — capabilities change rarely, drafts are frequent. */
   capabilities(): Promise<VenueCapabilities>
@@ -132,6 +157,13 @@ export function createSeamClient(
         `${baseUrl}/v1/portfolio/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
         { method: 'GET' },
       ),
+    listOrders: async (partnerId, userId) => {
+      const { orders } = await json<{ orders: OrderRecord[] }>(
+        `${baseUrl}/v1/orders/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
+        { method: 'GET' },
+      )
+      return orders
+    },
     capabilities: async () => {
       if (capsCache && capsCache.expiresAt > Date.now()) return capsCache.value
       const value = await json<VenueCapabilities>(`${baseUrl}/v1/capabilities`, { method: 'GET' })

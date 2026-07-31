@@ -95,6 +95,12 @@ function toOpenRow(o: Order) {
   }
 }
 
+/** Full-history order row (all statuses) the parasite's listOrders reads. Adds
+ *  the creation timestamp + avg fill price the open-orders row never needed. */
+function toAllRow(o: Order) {
+  return { ...toOpenRow(o), createdAt: o.createdAt, avgFillPrice: o.avgFillPrice }
+}
+
 export function buildService(opts: BuildOptions) {
   const { store, keys } = opts
   const uiUserId = opts.uiUserId ?? 'trader-1'
@@ -207,6 +213,15 @@ export function buildService(opts: BuildOptions) {
     if (!userId) return reply
     const pairName = (req.body as { pairName?: string })?.pairName
     return { status: true, data: { orders: store.openOrders(userId, pairName).map(toOpenRow) } }
+  })
+
+  // Full orders blotter (all statuses) — the book of record behind the
+  // parasite's consolidated orders_summary. openOrders lists only ACTIVE+
+  // PARTIAL; this returns settled and cancelled too, newest first.
+  app.post('/api/v1/trade/orders/all', async (req, reply) => {
+    const userId = authed(req, reply)
+    if (!userId) return reply
+    return { status: true, data: { orders: store.allOrders(userId).map(toAllRow) } }
   })
 
   app.post('/api/v1/trade/balance', async (req, reply) => {

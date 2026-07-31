@@ -33,6 +33,7 @@ import { createIdentityHandler } from './identity.js'
 import type {
   BriefResponse,
   DeclineResponse,
+  HostActionIntent,
   IntelligenceClient,
   IntentResult,
   LearnedFactCandidate,
@@ -43,7 +44,7 @@ import type { MarketClient, MarketSnapshot } from './market.js'
 import { asOfDisplay, cacheAgeDisplay, normalizeSymbol, symbolFromText } from './market.js'
 import type { LearnedFact, MemoryClient, Persona } from './memory.js'
 import { composeMemory } from './memory-compose.js'
-import type { SeamClient } from './seam.js'
+import type { OrderRecord, SeamClient } from './seam.js'
 
 /** Below this intent confidence we don't trust the route and nudge instead. */
 const LOW_CONFIDENCE = 0.4
@@ -185,9 +186,40 @@ function defaultInterpretation(intent: string): string {
       return "This asks for a call — I'll share facts, not advice."
     case 'portfolio':
       return 'Checking your own positions.'
+    case 'host_action':
+      return 'Adjusting the chart on the page.'
+    case 'orders_query':
+      return 'Pulling together your orders.'
     default:
       return 'Working on your request.'
   }
+}
+
+/** Human labels for the supported indicator slugs — used in the server-authored
+ * host_action note ("Indicator → RSI") and the ack copy. Pure. */
+const INDICATOR_LABEL: Record<string, string> = {
+  sma20: 'SMA 20',
+  sma50: 'SMA 50',
+  ema20: 'EMA 20',
+  rsi: 'RSI',
+  vol: 'Volume',
+}
+
+/** Server-authored one-liner for the host_action chip, e.g. "Chart → 5m",
+ * "Indicator → RSI", "Removed → Volume". Pure. */
+function hostActionNote(ha: HostActionIntent): string {
+  if (ha.action === 'set_timeframe') return `Chart → ${ha.timeframe}`
+  const label = INDICATOR_LABEL[ha.indicator ?? ''] ?? (ha.indicator ?? 'indicator').toUpperCase()
+  return ha.action === 'apply_indicator' ? `Indicator → ${label}` : `Removed → ${label}`
+}
+
+/** Bucket order records into open/filled/cancelled totals over the FULL set
+ * (before any 50-row bound), so the card's totals stay true even when the row
+ * list is truncated. Pure. */
+function ordersTotals(records: OrderRecord[]): { open: number; filled: number; cancelled: number } {
+  const totals = { open: 0, filled: 0, cancelled: 0 }
+  for (const r of records) totals[r.statusClass] += 1
+  return totals
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
@@ -682,6 +714,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
 
     ticketSessions.set(ticket.ticketId, session)
+    // Append-only record of orders this session created — the basis for
+    // orders_query scope 'session'. session.tickets is pruned on terminal
+    // events, so it can't serve this; this set is never pruned.
+    if (!session.createdTicketIds) session.createdTicketIds = new Set()
+    session.createdTicketIds.add(ticket.ticketId)
     session.tickets.set(ticket.ticketId, {
       side: ticket.side,
       instrument: ticket.instrument,
@@ -1141,6 +1178,115 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   }
 
+  // ── host actions (chart control) ───────────────────────────────────────
+
+  /**
+   * host_action intent → drive the host page's chart, but ONLY when the host
+   * opted in (ContextUplink.pageControl). Opted in: emit a validated host_action
+   * frame (fresh actionId, server-authored note) plus a short acknowledgment.
+   * Not opted in, or an unsupported indicator: an honest one-line notice — never
+   * a silently-dropped frame, never a guess.
+   */
+  function handleHostAction(session: Session, ha: HostActionIntent | undefined): void {
+    if (!ha) {
+      emit(session, {
+        type: 'banner',
+        kind: 'info',
+        title: 'Chart control',
+        text: 'I couldn\'t tell which chart change you meant — try "switch to 5m" or "apply RSI".',
+      })
+      return
+    }
+    if (session.pageControl !== true) {
+      // The host page never turned on chart control, so a host_action frame
+      // would be silently dropped. Say so instead of no-opping.
+      emit(session, {
+        type: 'banner',
+        kind: 'info',
+        title: 'Chart control is off',
+        text: "This page hasn't enabled chart control, so I can't change the chart from here. You can still switch it on the page itself.",
+      })
+      return
+    }
+    if ((ha.action === 'apply_indicator' || ha.action === 'remove_indicator') && !ha.indicator) {
+      // A supported indicator couldn't be resolved — decline honestly.
+      emit(session, {
+        type: 'banner',
+        kind: 'info',
+        title: 'Indicator not recognised',
+        text: 'I can add or remove RSI, volume, and 20/50 moving averages (SMA/EMA) — I left the chart as-is because that one is not one I know.',
+      })
+      return
+    }
+    const note = hostActionNote(ha)
+    emit(session, {
+      type: 'host_action',
+      actionId: `ha_${randomUUID().replaceAll('-', '').slice(0, 12)}`,
+      action: ha.action,
+      ...(ha.timeframe ? { timeframe: ha.timeframe } : {}),
+      ...(ha.indicator ? { indicator: ha.indicator } : {}),
+      note,
+    })
+    // Short user-visible acknowledgment (the one-line notice surface).
+    emit(session, {
+      type: 'banner',
+      kind: 'info',
+      title: 'Chart updated',
+      text: `${note}. Tell me if you want anything else on the chart.`,
+    })
+  }
+
+  // ── consolidated orders (orders_query) ─────────────────────────────────
+
+  /**
+   * orders_query intent → the full orders blotter. Reads ALL orders (open +
+   * filled + cancelled) from the seam, filters to scope, computes totals over
+   * the FULL scoped set BEFORE the 50-row bound (so totals stay true even when
+   * truncated), and emits orders_summary. Empty result still emits the frame
+   * (empty orders + zero totals) so the SDK renders its empty state.
+   */
+  async function handleOrdersQuery(session: Session, scope: 'all' | 'session'): Promise<void> {
+    let records: OrderRecord[]
+    try {
+      records = await seam.listOrders(session.partner.partnerId, userKey(session))
+    } catch (err) {
+      log.error({ err }, 'seam listOrders unavailable')
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Orders temporarily unavailable',
+        reason: `${session.partner.venueName} isn't answering order queries right now. Your funds and orders are unaffected — try again in a moment.`,
+      })
+      return
+    }
+    const created = session.createdTicketIds
+    const scoped =
+      scope === 'session' ? records.filter((r) => created?.has(r.orderId) ?? false) : records
+    const totals = ordersTotals(scoped)
+    // Newest first by venue timestamp (records without one sort last), then
+    // bound to the protocol's 50-row cap — totals above are already truthful.
+    const bounded = [...scoped]
+      .sort((a, b) => (b.tsIso ?? '').localeCompare(a.tsIso ?? ''))
+      .slice(0, 50)
+      .map((r) => ({
+        orderId: r.orderId,
+        symbol: r.symbol,
+        side: r.side,
+        kind: r.kind,
+        qty: r.qty,
+        ...(r.price !== undefined ? { price: r.price } : {}),
+        status: r.status,
+        ...(r.filledPct !== undefined ? { filledPct: r.filledPct } : {}),
+        ...(r.tsIso !== undefined ? { tsIso: r.tsIso } : {}),
+      }))
+    emit(session, {
+      type: 'orders_summary',
+      scope,
+      asOfIso: new Date().toISOString(),
+      orders: bounded,
+      totals,
+    })
+  }
+
   // ── per-turn routing ───────────────────────────────────────────────────
 
   async function processTurn(session: Session, text: string): Promise<void> {
@@ -1477,6 +1623,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         return
       }
 
+      case 'host_action': {
+        // No network call, no venue call — chart control is server-side truth
+        // gated only on the host's opt-in.
+        handleHostAction(session, intentRes.hostAction)
+        return
+      }
+
+      case 'orders_query': {
+        await handleOrdersQuery(session, intentRes.ordersQuery?.scope ?? 'all')
+        return
+      }
+
       default:
         emit(session, nudgeFrame(session))
         return
@@ -1618,6 +1776,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             session.symbol = symbol
             if (session.liveTransient) watchTicker(session)
           }
+          // Host page-control opt-in — mirrors the symbol store above. Only
+          // when true will a host_action turn emit a frame; a page that never
+          // opted in is answered in prose (handleHostAction).
+          if (typeof uplink.pageControl === 'boolean') session.pageControl = uplink.pageControl
           return
         }
         case 'settings': {
