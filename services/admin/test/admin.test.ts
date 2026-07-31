@@ -624,6 +624,49 @@ describe('live sessions proxy + partner detail + quota alerts', () => {
     expect(alerts[0]).toMatchObject({ partnerId: 'koinbx-dev', mau: 5, quota: 5, pct: 100 })
     await app.close()
   })
+
+  it('metrics presents the internal token to the gateway and returns per-partner MAU rows', async () => {
+    const seenHeaders: Array<Record<string, string>> = []
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes('/internal/metrics')) {
+        seenHeaders.push((init?.headers ?? {}) as Record<string, string>)
+        return new Response(JSON.stringify({ mau: { byPartner: { 'koinbx-dev': 2 } } }), {
+          status: 200,
+        })
+      }
+      return new Response('{}', { status: 200 })
+    }) as typeof fetch
+
+    const { app, plans } = await testAdmin({ fetchImpl, internalToken: 'itok' })
+    const cookie = await login(app)
+    await plans.create({
+      planId: 'pilot',
+      name: 'Pilot',
+      tier: 'pilot',
+      mauQuota: 100,
+      priceMonthlyUsd: null,
+      entitlements: {},
+    })
+    await app.inject({
+      method: 'POST',
+      url: '/v1/partners/koinbx-dev/plan',
+      headers: { cookie },
+      payload: { planId: 'pilot' },
+    })
+
+    const res = await app.inject({ method: 'GET', url: '/v1/metrics', headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    const { partnerMau } = res.json()
+    expect(partnerMau).toHaveLength(1)
+    expect(partnerMau[0]).toMatchObject({
+      partnerId: 'koinbx-dev',
+      mau: 2,
+      quota: 100,
+    })
+    // The gateway metrics surface is guarded now — the proxy must authenticate.
+    expect(seenHeaders[0]?.['x-hippo-internal-token']).toBe('itok')
+    await app.close()
+  })
 })
 
 describe('login protection', () => {
@@ -1008,9 +1051,9 @@ describe('memory-config (super-admin scope documents)', () => {
     expect((call?.init?.headers as Record<string, string>)['x-hippo-internal-token']).toBe('itok')
     // audited with the scope level
     const rows = await audit.list({})
-    expect(rows.rows.some((r) => r.action === 'memory_config.set' && r.detail.level === 'global')).toBe(
-      true,
-    )
+    expect(
+      rows.rows.some((r) => r.action === 'memory_config.set' && r.detail.level === 'global'),
+    ).toBe(true)
   })
 
   it('a plain operator (not owner) is 403 on memory-config', async () => {
@@ -1025,7 +1068,11 @@ describe('memory-config (super-admin scope documents)', () => {
       url: '/auth/login',
       payload: { email: 'op2@hippo.dev', password: 'another good passphrase' },
     })
-    const cookie = ((Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'][0] : res.headers['set-cookie']) ?? '').split(';')[0]
+    const cookie = (
+      (Array.isArray(res.headers['set-cookie'])
+        ? res.headers['set-cookie'][0]
+        : res.headers['set-cookie']) ?? ''
+    ).split(';')[0]
     const got = await app.inject({
       method: 'GET',
       url: '/v1/memory-config/global',

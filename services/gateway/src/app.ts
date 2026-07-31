@@ -367,7 +367,13 @@ export async function buildApp(opts: GatewayOptions = {}) {
   app.get('/health', async () => ({ ok: true, service: 'gateway' }))
 
   // In-memory counters for dev; OTel + telemetry_events replace this in pods.
-  app.get('/internal/metrics', async () => telemetry.snapshot())
+  // Guarded like every /internal surface — MAU-by-partner and load numbers
+  // are operator data, not public data (was unauthenticated until the pilot
+  // dashboard work; the admin service presents the internal token now).
+  app.get('/internal/metrics', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    return telemetry.snapshot()
+  })
 
   // ── operator diagnostics (admin "Tech" page) ─────────────────────────────
   // Latency percentiles (recomputed on read), downstream call log, live load,

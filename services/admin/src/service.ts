@@ -856,7 +856,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     let sessions: unknown[] = []
     try {
       const [metricsRes, sessionsRes] = await Promise.all([
-        fetchImpl(`${gatewayUrl}/internal/metrics`, { signal: AbortSignal.timeout(3_000) }),
+        gatewayFetch('/internal/metrics'),
         gatewayFetch(`/internal/sessions?partnerId=${encodeURIComponent(partner.partnerId)}`),
       ])
       if (metricsRes.ok) {
@@ -891,9 +891,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     if (!op) return reply
     let gateway: unknown = null
     try {
-      const res = await fetchImpl(`${gatewayUrl}/internal/metrics`, {
-        signal: AbortSignal.timeout(3_000),
-      })
+      const res = await gatewayFetch('/internal/metrics')
       if (res.ok) gateway = await res.json()
     } catch {
       /* gateway down — counts still render */
@@ -948,12 +946,27 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       quota: number
       pct: number
     }> = []
+    // Full per-partner MAU-vs-quota rows for the Pilot page (alerts keep the
+    // ≥80% cut). Quota is null on quota-less plans — utilization is honest —.
+    const partnerMau: Array<{
+      partnerId: string
+      venueName: string
+      status: string
+      mau: number
+      quota: number | null
+    }> = []
     const partnerRows = await partners.list()
     for (const p of partnerRows) {
-      if (!p.planId || p.status !== 'active') continue
-      const plan = await plans.get(p.planId)
-      if (plan?.mauQuota == null) continue
+      const plan = p.planId ? await plans.get(p.planId) : null
       const mau = byPartner[p.partnerId] ?? 0
+      partnerMau.push({
+        partnerId: p.partnerId,
+        venueName: p.venueName,
+        status: p.status,
+        mau,
+        quota: plan?.mauQuota ?? null,
+      })
+      if (p.status !== 'active' || plan?.mauQuota == null) continue
       const pct = Math.round((mau / plan.mauQuota) * 100)
       if (pct >= 80)
         alerts.push({
@@ -965,11 +978,13 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
         })
     }
     alerts.sort((a, b) => b.pct - a.pct)
+    partnerMau.sort((a, b) => b.mau - a.mau)
 
     return {
       gateway,
       intelligence,
       alerts,
+      partnerMau,
       counts: {
         partners: partnerRows.length,
         // Self-serve `hippo register` signups waiting on operator approval.

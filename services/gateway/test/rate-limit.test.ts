@@ -3,7 +3,7 @@
  * routes, /health and the SSE stream are never throttled.
  */
 import { describe, expect, it } from 'vitest'
-import { testApp } from './helpers.js'
+import { TEST_INTERNAL_TOKEN, testApp } from './helpers.js'
 
 const mint = { method: 'POST' as const, url: '/v1/session', payload: { partnerKey: 'pk_demo' } }
 
@@ -42,7 +42,15 @@ describe('rate limiting', () => {
     // Unrelated surfaces stay open.
     for (let i = 0; i < 5; i++) {
       expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200)
-      expect((await app.inject({ method: 'GET', url: '/internal/metrics' })).statusCode).toBe(200)
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: '/internal/metrics',
+            headers: { 'x-hippo-internal-token': TEST_INTERNAL_TOKEN },
+          })
+        ).statusCode,
+      ).toBe(200)
     }
     await app.close()
   })

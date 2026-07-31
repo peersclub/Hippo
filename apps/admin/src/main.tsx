@@ -11,6 +11,7 @@ import { MemoryConfigPage } from './pages/memory-config.js'
 import { OperatorsPage } from './pages/operators.js'
 import { PartnerDetailPage } from './pages/partner-detail.js'
 import { PartnersPage } from './pages/partners.js'
+import { PilotPage } from './pages/pilot.js'
 import { PlansPage } from './pages/plans.js'
 import { SessionsPage } from './pages/sessions.js'
 import { TechPage } from './pages/tech.js'
@@ -20,6 +21,7 @@ import { ConfirmHost, Toasts } from './ui.js'
 
 const NAV = [
   ['dashboard', 'Dashboard'],
+  ['pilot', 'Pilot'],
   ['partners', 'Partners'],
   ['plans', 'Plans'],
   ['users', 'Users'],
@@ -52,6 +54,8 @@ function Page() {
       )
     case 'sessions':
       return <SessionsPage />
+    case 'pilot':
+      return <PilotPage />
     case 'tech':
       return <TechPage />
     case 'memory':
