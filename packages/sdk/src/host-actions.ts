@@ -118,8 +118,7 @@ export function acceptAck(origin: string, expectedOrigin: string, data: unknown)
  * ignored, so the first terminal outcome wins (like the feedback reducer).
  */
 export function applyAck(ack: HostAck): void {
-  const cur = hostActionMap.value[ack.actionId]
-  if (!cur || cur.phase !== 'pending') return
+  if (hostActionMap.value[ack.actionId]?.phase !== 'pending') return
   const timer = timers[ack.actionId]
   if (timer !== undefined) {
     clearTimeout(timer)
