@@ -10,8 +10,11 @@
  * Every prepare/confirm/cancel/delivery is appended to the audit log with an
  * idempotency key (BE doc §7) — the seam is the compliance-critical surface.
  * Venue lifecycle events are pushed to the caller's `callbackUrl` (the
- * gateway's /internal/venue-events); one retry, then the audit records the
- * failure — the gateway's poll reconciler is the production backstop.
+ * gateway's /internal/venue-events); an immediate retry, then a backoff
+ * redelivery queue (the safety net for a gateway that was briefly down —
+ * there is NO gateway-side poll back into the seam). Every failure and
+ * eventual redelivery lands in the audit trail. Events queued in memory die
+ * with the pod; the durable audit row is the post-mortem trail for that case.
  */
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import {
@@ -64,6 +67,12 @@ export type ServiceOptions = {
    * store to prove entries survive a pod swap.
    */
   auditStore?: SeamAuditStore
+  /**
+   * Backoff schedule (ms) for redelivering venue events after the immediate
+   * retry fails — the seam-side safety net for a gateway that was briefly
+   * down or restarting. Tests inject tiny delays.
+   */
+  redeliveryScheduleMs?: number[]
 }
 
 /**
@@ -279,6 +288,17 @@ export function buildService(
     void deliver(callbackUrl, event)
   })
 
+  // After the immediate retry, redeliver on a widening backoff — a gateway
+  // mid-restart comes back within seconds, so most "lost" fills land on the
+  // first or second redelivery. Bounded so a dead gateway can't grow an
+  // unbounded queue; when the schedule is exhausted the failure is terminal
+  // (loud log + audit row). Per-event timers: a later event for the same
+  // ticket may deliver before an earlier redelivery — the gateway's
+  // terminal-aware routing tolerates that.
+  const redeliverySchedule = opts.redeliveryScheduleMs ?? [5_000, 30_000, 120_000, 600_000]
+  let queuedRedeliveries = 0
+  const MAX_QUEUED_REDELIVERIES = 1_000
+
   async function deliver(url: string, event: LifecycleEvent, attempt = 1): Promise<void> {
     try {
       const res = await fetch(url, {
@@ -294,19 +314,41 @@ export function buildService(
         signal: AbortSignal.timeout(3_000),
       })
       if (!res.ok) throw new Error(`callback ${res.status}`)
-      record({ kind: 'event_delivered', ticketId: event.ticketId, detail: event.phase })
+      const redelivered = attempt > 2
+      record({
+        kind: redelivered ? 'event_redelivered' : 'event_delivered',
+        ticketId: event.ticketId,
+        detail: redelivered ? `${event.phase} (attempt ${attempt})` : event.phase,
+      })
     } catch (err) {
-      if (attempt < 2) return deliver(url, event, attempt + 1) // one retry
-      // The gateway missed a lifecycle event (e.g. the trader never sees
-      // FILLED) — that must be loud, not just a row in the in-memory audit.
+      if (attempt < 2) return deliver(url, event, attempt + 1) // immediate retry
+      const backoffIdx = attempt - 2 // first backoff slot after the retry
+      const delay = redeliverySchedule[backoffIdx]
+      if (delay !== undefined && queuedRedeliveries < MAX_QUEUED_REDELIVERIES) {
+        queuedRedeliveries += 1
+        record({
+          kind: 'event_delivery_failed',
+          ticketId: event.ticketId,
+          detail: `${String(err)} — redelivery in ${delay}ms (attempt ${attempt})`,
+        })
+        const timer = setTimeout(() => {
+          queuedRedeliveries -= 1
+          void deliver(url, event, attempt + 1)
+        }, delay)
+        if (typeof timer.unref === 'function') timer.unref()
+        return
+      }
+      // Schedule exhausted (or queue full): the gateway missed a lifecycle
+      // event (e.g. the trader never sees FILLED) — that must be loud, not
+      // just a row in the audit.
       app.log.error(
-        { err, ticketId: event.ticketId, phase: event.phase, url },
-        'venue event delivery failed after retry',
+        { err, ticketId: event.ticketId, phase: event.phase, url, attempt },
+        'venue event delivery failed — redelivery exhausted',
       )
       record({
         kind: 'event_delivery_failed',
         ticketId: event.ticketId,
-        detail: String(err),
+        detail: `terminal: ${String(err)} (attempt ${attempt})`,
       })
     }
   }

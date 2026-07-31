@@ -92,6 +92,8 @@ export type SeamAuditKind =
   | 'confirm'
   | 'cancel'
   | 'event_delivered'
+  /** A delivery that failed its live attempts landed on a later backoff try. */
+  | 'event_redelivered'
   | 'event_delivery_failed'
 
 /**

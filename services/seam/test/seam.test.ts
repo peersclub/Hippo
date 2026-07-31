@@ -148,6 +148,105 @@ const HDR = { 'x-hippo-internal-token': TOKEN }
 const guarded = (adapter = new SimVenueAdapter({ fillDelayMs: 10 })) =>
   buildService(adapter, { internalToken: TOKEN, callbackAllowedOrigins: 'http://gateway.test' })
 
+describe('venue-event redelivery (gateway briefly down)', () => {
+  it('a delivery that fails live attempts lands on a backoff redelivery, audited', async () => {
+    // Callback endpoint down for the first 3 hits (initial + retry + first
+    // backoff), then healthy — the trader still gets the fill.
+    let callbackHits = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const u = String(url)
+        if (u.includes('/v1/snapshot'))
+          return new Response(JSON.stringify({ last: 61_240 }), { status: 200 })
+        if (u.includes('/callback')) {
+          callbackHits += 1
+          if (callbackHits <= 3) return new Response('boom', { status: 503 })
+          deliveries.push(JSON.parse(String(init?.body)) as LifecycleEvent)
+          return new Response('{}', { status: 200 })
+        }
+        return new Response('not found', { status: 404 })
+      }),
+    )
+    const audit = new InMemorySeamAuditStore()
+    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }), {
+      internalToken: TOKEN,
+      callbackAllowedOrigins: 'http://gateway.test',
+      auditStore: audit,
+      redeliveryScheduleMs: [20, 40], // tiny backoff for the test
+    })
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
+    const { ticketId } = prep.json() as { ticketId: string }
+    await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
+    })
+    // BOTH events (awaiting_confirm + filled) must land before the test ends
+    // — a still-armed straggler timer would fire into the next test's stubs.
+    await vi.waitFor(
+      () => {
+        expect(deliveries.map((e) => e.phase).sort()).toEqual(['awaiting_confirm', 'filled'])
+      },
+      { timeout: 2_000, interval: 20 },
+    )
+    const kinds = (await audit.list({ ticketId })).rows.map((r) => r.kind)
+    expect(kinds).toContain('event_delivery_failed')
+    expect(kinds).toContain('event_redelivered')
+    // No delivery gave up: nothing audited as terminal.
+    const details = (await audit.list({ ticketId })).rows.map((r) => r.detail ?? '')
+    expect(details.some((d) => d.startsWith('terminal:'))).toBe(false)
+    await app.close()
+  })
+
+  it('gives up loudly when the backoff schedule is exhausted', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        if (String(url).includes('/v1/snapshot'))
+          return new Response(JSON.stringify({ last: 61_240 }), { status: 200 })
+        return new Response('down', { status: 503 }) // callback never recovers
+      }),
+    )
+    const audit = new InMemorySeamAuditStore()
+    const app = buildService(new SimVenueAdapter({ fillDelayMs: 10 }), {
+      internalToken: TOKEN,
+      callbackAllowedOrigins: 'http://gateway.test',
+      auditStore: audit,
+      redeliveryScheduleMs: [10],
+    })
+    const prep = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: prepareBody,
+    })
+    const { ticketId } = prep.json() as { ticketId: string }
+    await app.inject({
+      method: 'POST',
+      url: `/v1/tickets/${ticketId}/confirm`,
+      headers: HDR,
+      payload: { callbackUrl: CALLBACK },
+    })
+    // Drain fully: both events (placement ack + fill) must reach terminal
+    // before the test ends, so no timer outlives this fetch stub.
+    await vi.waitFor(
+      async () => {
+        const details = (await audit.list({ ticketId })).rows.map((r) => r.detail ?? '')
+        expect(details.filter((d) => d.startsWith('terminal:')).length).toBe(2)
+      },
+      { timeout: 2_000, interval: 20 },
+    )
+    await app.close()
+  })
+})
+
 describe('seam service HTTP surface', () => {
   it('prepare → confirm → filled event delivered to the callbackUrl, all audited', async () => {
     const app = guarded()
