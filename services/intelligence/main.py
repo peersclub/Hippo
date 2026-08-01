@@ -79,9 +79,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="hippo-intelligence", lifespan=lifespan)
 
 
+class HistoryItemIn(BaseModel):
+    """One prior thread turn (conversation threading). Interpret-stage context
+    ONLY — history never reaches the research stage or its cache key."""
+
+    role: Literal["user", "assistant"]
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class IntentRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     language: str | None = None
+    # Additive (conversation threading): bounded thread context assembled by
+    # the gateway — last few user messages + assistant answer headlines. Used
+    # so the restructured query resolves coreference and stands alone.
+    history: list[HistoryItemIn] | None = Field(default=None, max_length=16)
 
 
 class PersonaIn(BaseModel):
@@ -111,7 +123,12 @@ async def classify_intent(req: IntentRequest) -> dict[str, Any]:
     start = time.perf_counter()
     with tracer.start_as_current_span("hippo.intent.classify") as span:
         try:
-            result = await intent_engine.classify(req.text, router, req.language)
+            result = await intent_engine.classify(
+                req.text,
+                router,
+                req.language,
+                history=[h.model_dump() for h in req.history] if req.history else None,
+            )
         except Exception:  # last-ditch: deterministic rules never raise
             log.exception("intent pipeline error; serving rule classification")
             result = intent_engine.rule_classify(req.text)
