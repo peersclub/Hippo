@@ -5,7 +5,7 @@
  * The wire contract is pinned — the intelligence service implements exactly
  * this; anything the gateway needs beyond it goes through a contract bump on
  * both sides:
- *   POST {INTEL}/v1/intent   {text, language?} → IntentResult
+ *   POST {INTEL}/v1/intent   {text, language?, history?} → IntentResult
  *   POST {INTEL}/v1/respond  {text, intent, symbol?} → BriefResponse | DeclineResponse
  *   GET  {INTEL}/health      {ok, mode, model}
  */
@@ -46,6 +46,13 @@ export type HostActionIntent = {
 /** Consolidated-orders intent (orders_query). "my orders" defaults to 'all';
  * this-session/today wording → 'session'. */
 export type OrdersQueryIntent = { scope: 'all' | 'session' }
+
+/** One prior thread turn, assembled by the orchestrator from the session's
+ * frame journal (user echoes + assistant answer HEADLINES, never brief
+ * bodies). Feeds the INTERPRET stage only — history must never reach the
+ * research stage or its cache key, so the fleet-wide answer cache (keyed on
+ * the canonical restructured question) keeps its hit-rate economics. */
+export type HistoryItem = { role: 'user' | 'assistant'; text: string }
 
 export type OrderIntent = {
   /** Absent/'spot' = spot; 'futures_perp' routes to the seam's plan path. */
@@ -123,8 +130,10 @@ export type RespondStreamEvent =
   | { event: 'decline'; data: DeclineResponse }
 
 export interface IntelligenceClient {
-  /** Rejects on timeout (3s), network error or non-2xx — callers fall back. */
-  intent(req: { text: string; language?: string }): Promise<IntentResult>
+  /** Rejects on timeout (3s), network error or non-2xx — callers fall back.
+   * `history` (additive) is the bounded thread context for coreference —
+   * interpret-stage only; omit it entirely on a first turn. */
+  intent(req: { text: string; language?: string; history?: HistoryItem[] }): Promise<IntentResult>
   /** Rejects on timeout (30s), network error or non-2xx. */
   respond(req: { text: string; intent: string; symbol?: string }): Promise<RespondResult>
   /**

@@ -26,13 +26,14 @@ import { randomUUID } from 'node:crypto'
 import type { VenueCapabilities } from '@hippo/protocol'
 import type { UserIdentityStore } from '@hippo/stores'
 import type { DraftFields, Session, SessionStore } from '../plugins/auth.js'
-import type { EmitFrame, FrameDraft } from '../plugins/sse.js'
+import type { EmitFrame, FrameDraft, JournalEntry } from '../plugins/sse.js'
 import { emitTransient } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
 import { createIdentityHandler } from './identity.js'
 import type {
   BriefResponse,
   DeclineResponse,
+  HistoryItem,
   HostActionIntent,
   IntelligenceClient,
   IntentResult,
@@ -220,6 +221,72 @@ function ordersTotals(records: OrderRecord[]): { open: number; filled: number; c
   const totals = { open: 0, filled: 0, cancelled: 0 }
   for (const r of records) totals[r.statusClass] += 1
   return totals
+}
+
+// ── conversation history (interpret-stage context) ─────────────────────────
+
+/** History bounds: last N exchanges, headline-only, total chars capped —
+ * enough for coreference, never a transcript. The intelligence service
+ * re-bounds defensively on its side. */
+const HISTORY_MAX_EXCHANGES = 6
+const HISTORY_MAX_CHARS = 1200
+const HISTORY_ITEM_MAX_CHARS = 240
+
+/**
+ * Assemble the bounded thread history for the interpret stage from the
+ * session's frame journal. Per exchange: the user_echo text, plus ONE
+ * assistant line — the research_brief HEADLINE when the turn produced a brief
+ * (never the paragraphs: headlines carry the referent, bodies carry cost),
+ * else the interpretation summary. The trailing exchange is the IN-FLIGHT
+ * turn (its echo lands before processTurn runs) and is always dropped, so a
+ * first turn yields []. Newest exchanges win the char budget. Pure.
+ *
+ * The result feeds ONLY the intent call. It must never be threaded into
+ * /v1/respond or anything that touches the answer cache key — the cache stays
+ * keyed on the self-contained restructured question.
+ */
+export function assembleHistory(entries: JournalEntry[]): HistoryItem[] {
+  type Exchange = { user: string; assistant?: string; assistantIsHeadline?: boolean }
+  const exchanges: Exchange[] = []
+  for (const { frame } of entries) {
+    const f = frame as { type: string } & Record<string, unknown>
+    if (f.type === 'user_echo' && typeof f.text === 'string') {
+      exchanges.push({ user: f.text })
+      continue
+    }
+    const current = exchanges[exchanges.length - 1]
+    if (!current) continue // pre-first-turn frames (orders_snapshot, identity…)
+    if (f.type === 'research_brief' && typeof f.headline === 'string') {
+      current.assistant = f.headline
+      current.assistantIsHeadline = true
+    } else if (
+      f.type === 'interpretation' &&
+      typeof f.summary === 'string' &&
+      !current.assistantIsHeadline
+    ) {
+      current.assistant = f.summary
+    }
+  }
+  exchanges.pop() // the in-flight turn's own echo — never its own context
+  const items: HistoryItem[] = []
+  for (const ex of exchanges.slice(-HISTORY_MAX_EXCHANGES)) {
+    items.push({ role: 'user', text: ex.user.slice(0, HISTORY_ITEM_MAX_CHARS) })
+    if (ex.assistant) {
+      items.push({ role: 'assistant', text: ex.assistant.slice(0, HISTORY_ITEM_MAX_CHARS) })
+    }
+  }
+  // Total-char cap: newest items survive, oldest drop first.
+  let total = 0
+  const kept: HistoryItem[] = []
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (!item) continue
+    total += item.text.length
+    if (total > HISTORY_MAX_CHARS) break
+    kept.push(item)
+  }
+  kept.reverse()
+  return kept
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
@@ -1296,8 +1363,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // Span + latency around intent classification (intent-p95 rate-card number).
     const span = telemetry.startSpan('hippo.turn')
     const intentStart = Date.now()
+    // Thread context for coreference ("what about ETH?" after a BTC turn) —
+    // interpret stage ONLY. First turn assembles to [] and the field is
+    // omitted; research calls below never see it.
+    const history = assembleHistory(session.journal.after(0))
     try {
-      intentRes = await intel.intent({ text, language: session.language })
+      intentRes = await intel.intent({
+        text,
+        language: session.language,
+        ...(history.length > 0 ? { history } : {}),
+      })
       telemetry.markHealthy()
       // Recovered: a future degradation episode gets its banner again.
       session.degradedBannerShown = false
