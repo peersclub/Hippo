@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildService } from '../src/service.js'
 import { SimVenueAdapter } from '../src/sim-venue.js'
 import type {
+  FuturesPerpPlan,
   Portfolio,
   PreparedTicket,
   PrepareRequest,
@@ -112,5 +113,153 @@ describe('capability framework', () => {
     })
     expect(res.statusCode).toBe(422)
     expect(res.json().error).toMatch(/not supported/i)
+  })
+})
+
+describe('protective exits (attached stop-loss / take-profit)', () => {
+  const protectedPlan = (o: Partial<FuturesPerpPlan> = {}): FuturesPerpPlan => ({
+    ...perpPlan,
+    stopLossPrice: '55000',
+    takeProfitPrice: '70000',
+    ...o,
+  })
+
+  it('sim + spot-only venues advertise protectiveExits truthfully', async () => {
+    const simCaps = await new SimVenueAdapter().capabilities()
+    expect(simCaps.spot?.protectiveExits).toBe(true)
+    expect(simCaps.futures_perp?.protectiveExits).toBe(true)
+    // The bare spot-only adapter never advertises it — the gate below relies on that.
+    expect((await new SpotOnlyAdapter().capabilities()).spot?.protectiveExits).toBeUndefined()
+  })
+
+  it('perp ticket carries server-authored "Stop loss" / "Take profit" rows', async () => {
+    const ticket = await new SimVenueAdapter().prepareOrder(protectedPlan())
+    const rows = new Map(ticket.rows.map((r) => [r.label, r.value]))
+    expect(rows.get('Stop loss')).toBe('55,000')
+    expect(rows.get('Take profit')).toBe('70,000')
+  })
+
+  it('spot BUY ticket carries the rows too; spot SELL rejects protection outright', async () => {
+    const sim = new SimVenueAdapter()
+    const ticket = await sim.prepareOrder({
+      capability: 'spot',
+      partnerId: 'p',
+      userId: 'u1',
+      side: 'buy',
+      size: '0.1',
+      instrument: 'BTC/USDT',
+      orderType: 'market',
+      stopLossPrice: '55000',
+      takeProfitPrice: '70000',
+    })
+    const labels = ticket.rows.map((r) => r.label)
+    expect(labels).toContain('Stop loss')
+    expect(labels).toContain('Take profit')
+
+    await expect(
+      sim.prepareOrder({
+        capability: 'spot',
+        partnerId: 'p',
+        userId: 'u1',
+        side: 'sell',
+        size: '0.1',
+        instrument: 'BTC/USDT',
+        orderType: 'market',
+        stopLossPrice: '55000',
+      }),
+    ).rejects.toThrow(/buy orders only/i)
+  })
+
+  it('validation matrix — long: stop < entry < tp; short: tp < entry < stop (quote 60,000)', async () => {
+    const sim = new SimVenueAdapter()
+    // long, stop above entry → reject
+    await expect(sim.prepareOrder(protectedPlan({ stopLossPrice: '61000' }))).rejects.toThrow(
+      /stop-loss.*below the entry/i,
+    )
+    // long, tp below entry → reject
+    await expect(sim.prepareOrder(protectedPlan({ takeProfitPrice: '59000' }))).rejects.toThrow(
+      /take-profit.*above the entry/i,
+    )
+    // short: the matrix flips
+    const short = (o: Partial<FuturesPerpPlan>) =>
+      protectedPlan({
+        direction: 'short',
+        stopLossPrice: undefined,
+        takeProfitPrice: undefined,
+        ...o,
+      })
+    await expect(sim.prepareOrder(short({ stopLossPrice: '59000' }))).rejects.toThrow(
+      /stop-loss.*above the entry/i,
+    )
+    await expect(sim.prepareOrder(short({ takeProfitPrice: '61000' }))).rejects.toThrow(
+      /take-profit.*below the entry/i,
+    )
+    // happy paths both directions
+    await expect(sim.prepareOrder(protectedPlan())).resolves.toBeTruthy()
+    await expect(
+      sim.prepareOrder(short({ stopLossPrice: '65000', takeProfitPrice: '50000' })),
+    ).resolves.toBeTruthy()
+    // non-numeric junk is an honest reject, never a silent drop
+    await expect(sim.prepareOrder(protectedPlan({ stopLossPrice: 'abc' }))).rejects.toThrow(
+      /invalid stop-loss/i,
+    )
+    // a close can't carry protection — the close IS the exit
+    await expect(
+      sim.prepareOrder(protectedPlan({ action: 'close', reduceOnly: true })),
+    ).rejects.toThrow(/opening orders only/i)
+  })
+
+  it('validates against the LIMIT entry when given (not the live quote)', async () => {
+    // Limit entry 50,000 with stop 55,000: fine vs the 60k quote, nonsense vs
+    // the actual entry — the seam must validate against the trader's price.
+    await expect(
+      new SimVenueAdapter().prepareOrder(
+        protectedPlan({ orderType: 'limit', limitPrice: '50000', stopLossPrice: '55000' }),
+      ),
+    ).rejects.toThrow(/stop-loss.*below the entry/i)
+  })
+
+  it('HTTP: parse accepts the plan fields; a venue without protectiveExits 422s instead of dropping them', async () => {
+    // Sim advertises protectiveExits → accepted, rows present.
+    const simApp = buildService(new SimVenueAdapter(), { internalToken: TOKEN })
+    const ok = await simApp.inject({
+      method: 'POST',
+      url: '/v1/prepare-order',
+      headers: HDR,
+      payload: JSON.stringify(protectedPlan()),
+    })
+    expect(ok.statusCode).toBe(200)
+    expect(ok.json().rows.map((r: { label: string }) => r.label)).toContain('Stop loss')
+
+    // Spot-only venue without the flag: the SAME plan (spot-shaped) must be
+    // rejected loudly — silently stripping a stop-loss is the one
+    // unacceptable outcome.
+    const bareApp = buildService(new SpotOnlyAdapter(), { internalToken: TOKEN })
+    const res = await bareApp.inject({
+      method: 'POST',
+      url: '/v1/prepare-order',
+      headers: HDR,
+      payload: JSON.stringify({
+        capability: 'spot',
+        partnerId: 'p',
+        userId: 'u1',
+        side: 'buy',
+        size: '0.1',
+        instrument: 'BTC/USDT',
+        orderType: 'market',
+        stopLossPrice: '55000',
+      }),
+    })
+    expect(res.statusCode).toBe(422)
+    expect(res.json().error).toMatch(/stop-loss\/take-profit is not supported/i)
+
+    // Wrong TYPE on the wire (number, not money-string) → 400 invalid plan.
+    const badType = await simApp.inject({
+      method: 'POST',
+      url: '/v1/prepare-order',
+      headers: HDR,
+      payload: JSON.stringify(protectedPlan({ stopLossPrice: 55000 as unknown as string })),
+    })
+    expect(badType.statusCode).toBe(400)
   })
 })

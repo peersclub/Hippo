@@ -19,6 +19,7 @@
  *      clientOrderId and match on it — we don't need to have placed it ourselves.
  */
 import { createHmac, randomUUID } from 'node:crypto'
+import { type ProtectiveExits, protectiveRows, validateProtectiveExits } from './protective.js'
 import type {
   AdapterLog,
   FuturesPerpPlan,
@@ -89,6 +90,9 @@ type StoredTicket = {
     marginMode: 'isolated' | 'cross'
     reduceOnly: boolean
   }
+  /** Validated protective exits — passed to the host on confirm as
+   *  stopLossPrice/takeProfitPrice; the host spawns the OCO children. */
+  exits?: ProtectiveExits
 }
 
 type HostEnvelope<T> = { status: boolean; data?: T; error?: string }
@@ -208,6 +212,15 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     const price = isLimit ? Number(req.limitPrice) : await this.quote(req.instrument)
     if (!Number.isFinite(price) || price <= 0) throw new Error('invalid price')
 
+    // Protective exits on spot: buy orders only (a "protection" on a sell
+    // would open exposure, not close it) — validated against the entry price.
+    if (
+      req.side === 'sell' &&
+      (req.stopLossPrice !== undefined || req.takeProfitPrice !== undefined)
+    )
+      throw new Error('attached stop-loss/take-profit is supported on spot buy orders only')
+    const exits = validateProtectiveExits(req, price, true)
+
     const estCost = sizeNum * price
     const baseAsset = req.instrument.split('/')[0] ?? req.instrument
     const ticketId = `t_${randomUUID().replaceAll('-', '').slice(0, 10)}`
@@ -219,8 +232,16 @@ export class AssetworksVenueAdapter implements VenueAdapter {
         label: 'Est. value',
         value: `${formatAmount(estCost)} ${req.instrument.split('/')[1] ?? ''}`.trim(),
       },
+      ...protectiveRows(exits, formatPrice),
     ]
-    this.tickets.set(ticketId, { req, price, sizeNum, pairName: toPairName(req.instrument), rows })
+    this.tickets.set(ticketId, {
+      req,
+      price,
+      sizeNum,
+      pairName: toPairName(req.instrument),
+      rows,
+      ...(exits ? { exits } : {}),
+    })
     return {
       ticketId,
       side: req.side,
@@ -245,7 +266,10 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     } catch {
       /* fall through */
     }
-    return { spot: {}, futures_perp: { maxLeverage: 50, marginModes: ['isolated', 'cross'] } }
+    return {
+      spot: { protectiveExits: true },
+      futures_perp: { maxLeverage: 50, marginModes: ['isolated', 'cross'], protectiveExits: true },
+    }
   }
 
   /** Capability-tagged prepare. Spot reuses prepare(); futures_perp builds a
@@ -269,6 +293,14 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     const entry = isLimit ? Number(plan.limitPrice) : await this.quote(plan.instrument)
     if (!Number.isFinite(entry) || entry <= 0) throw new Error('invalid price')
 
+    // Protective exits attach to an OPENING order only — a close IS the exit.
+    if (
+      plan.action !== 'open' &&
+      (plan.stopLossPrice !== undefined || plan.takeProfitPrice !== undefined)
+    )
+      throw new Error('attached stop-loss/take-profit applies to opening orders only')
+    const exits = validateProtectiveExits(plan, entry, plan.direction === 'long')
+
     const liquidation =
       plan.direction === 'long' ? entry * (1 - 1 / plan.leverage) : entry * (1 + 1 / plan.leverage)
     const margin = (sizeNum * entry) / plan.leverage
@@ -286,6 +318,7 @@ export class AssetworksVenueAdapter implements VenueAdapter {
       { label: isLimit ? 'Limit entry' : 'Est. entry', value: formatPrice(entry) },
       { label: 'Est. liquidation price', value: formatPrice(liquidation) },
       { label: 'Est. margin', value: `${formatAmount(margin)} ${quoteAsset}` },
+      ...protectiveRows(exits, formatPrice),
     ]
     this.tickets.set(ticketId, {
       req: {
@@ -307,6 +340,7 @@ export class AssetworksVenueAdapter implements VenueAdapter {
         marginMode: plan.marginMode,
         reduceOnly: plan.reduceOnly,
       },
+      ...(exits ? { exits } : {}),
     })
     return {
       ticketId,
@@ -339,6 +373,10 @@ export class AssetworksVenueAdapter implements VenueAdapter {
       orderBody.marginMode = ticket.perp.marginMode
       orderBody.reduceOnly = ticket.perp.reduceOnly
     }
+    // Protective exits ride the SAME placement body — the venue creates the
+    // OCO children when the entry fills (venue-native conditional orders).
+    if (ticket.exits?.stopLoss !== undefined) orderBody.stopLossPrice = ticket.exits.stopLoss
+    if (ticket.exits?.takeProfit !== undefined) orderBody.takeProfitPrice = ticket.exits.takeProfit
 
     if (surface === 'js_callback') {
       // Hand off — the HOST asks the trader to confirm and places on approval.

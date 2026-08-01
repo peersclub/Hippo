@@ -86,6 +86,16 @@ export const OPENAPI_DOC = {
                   leverage: { type: 'number' },
                   marginMode: { type: 'string', enum: ['isolated', 'cross'] },
                   reduceOnly: { type: 'boolean' },
+                  stopLossPrice: {
+                    type: 'number',
+                    description:
+                      'Attached stop-loss trigger — a venue-native conditional close created when the entry fills (OCO with takeProfitPrice)',
+                  },
+                  takeProfitPrice: {
+                    type: 'number',
+                    description:
+                      'Attached take-profit — a resting reduce-only limit created when the entry fills (OCO with stopLossPrice)',
+                  },
                 },
               },
             },

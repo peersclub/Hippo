@@ -22,7 +22,11 @@ export const ORDER_STATUS = {
 
 export type Market = 'spot' | 'perp'
 export type Side = 'buy' | 'sell'
-export type OrderKind = 'market' | 'limit'
+/** 'stop' is a venue-native conditional close (protective exits): it RESTS
+ *  until price crosses ADVERSELY (sell stop: last ≤ rate; buy stop: last ≥
+ *  rate), then fills at market with taker slippage. Never placed over the
+ *  wire — only auto-created as a child of a filled entry. */
+export type OrderKind = 'market' | 'limit' | 'stop'
 export type Direction = 'long' | 'short'
 export type MarginMode = 'isolated' | 'cross'
 
@@ -103,6 +107,17 @@ export type Order = {
   leverage?: number
   marginMode?: MarginMode
   reduceOnly?: boolean
+  // ── protective exits (attached stop-loss / take-profit) ──
+  /** Requested on the ENTRY order; children are spawned when it fills. */
+  stopLossPrice?: number
+  takeProfitPrice?: number
+  /** Set on auto-created protective CHILDREN: the entry order that spawned
+   *  this one. Children never reserve funds (the entry's fill provides them)
+   *  and are cancelled when the position closes by any other means. */
+  parentId?: number
+  /** OCO link: when this child fills, the sibling is cancelled (and vice
+   *  versa) — a position can never be double-closed by its own protection. */
+  ocoSiblingId?: number
   createdAt: number
   settleAfter: number // now + workingWindowMs
 }
@@ -148,6 +163,10 @@ export type PlaceRequest = {
   leverage?: number
   marginMode?: MarginMode
   reduceOnly?: boolean
+  /** Protective exits attached to the entry (venue-native conditional
+   *  children, spawned when the entry fills). Optional numeric prices. */
+  stopLossPrice?: number
+  takeProfitPrice?: number
 }
 
 /** Any change worth pushing to the host UI over SSE. */

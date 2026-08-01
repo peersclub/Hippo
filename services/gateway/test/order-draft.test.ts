@@ -367,6 +367,272 @@ describe('draft_action: submit re-validates, then runs the classic prepare flow'
   })
 })
 
+describe('protective exits (attached stop-loss / take-profit) through the draft flow', () => {
+  /** Perp intent that carries protective exits ("long 0.5 eth 10x with stop
+   * at 2500 and tp at 4000"). */
+  const protectedIntent = () =>
+    stubIntel({
+      intent: (): IntentResult => ({
+        intent: 'action',
+        confidence: 0.9,
+        language: 'en',
+        order: {
+          capability: 'futures_perp',
+          side: 'buy',
+          direction: 'long',
+          leverage: 10,
+          marginMode: 'cross',
+          size: '0.5',
+          instrument: 'ETH/USDT',
+          orderType: 'market',
+          stopLossPrice: '2500',
+          takeProfitPrice: '4000',
+        },
+      }),
+    })
+
+  it('intent with stop/tp → the draft frame carries BOTH fields prefilled', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: protectedIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, {
+      kind: 'user_text',
+      text: 'long 0.5 eth 10x with stop at 2500 and tp at 4000',
+    })
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    const draft = frameOfType<DraftFrame>(session, 'order_draft')
+    expect(draft.stopLossPrice).toBe('2500')
+    expect(draft.takeProfitPrice).toBe('4000')
+    await app.close()
+  })
+
+  it('venue advertises protectiveExits → fields present (empty) even without parsed values; absent otherwise', async () => {
+    // Supported venue: empty-string fields signal "inputs available".
+    const { app, sessions } = await testApp({ intel: perpIntent() })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'long 0.5 eth 10x' })
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    const draft = frameOfType<DraftFrame>(session, 'order_draft')
+    expect(draft.stopLossPrice).toBe('')
+    expect(draft.takeProfitPrice).toBe('')
+    await app.close()
+
+    // Venue WITHOUT protectiveExits: the frame must omit the fields entirely
+    // (frame presence drives the SDK inputs — the server decides).
+    const bareSeam = stubSeam({
+      spot: {},
+      futures_perp: { maxLeverage: 20, marginModes: ['isolated', 'cross'] },
+    })
+    const { app: app2, sessions: sessions2 } = await testApp({
+      intel: perpIntent(),
+      seam: bareSeam,
+    })
+    const session2 = await createSession(app2, sessions2)
+    await sendTurn(app2, session2.id, { kind: 'user_text', text: 'long 0.5 eth 10x' })
+    await waitForJournal(session2, (t) => t.includes('order_draft'))
+    const draft2 = frameOfType<DraftFrame>(session2, 'order_draft')
+    expect(draft2.stopLossPrice).toBeUndefined()
+    expect(draft2.takeProfitPrice).toBeUndefined()
+    await app2.close()
+  })
+
+  it('DESIGN CHOICE: stop/tp asked on a venue without protectiveExits → the ORDER is declined, nothing drops silently', async () => {
+    const bareSeam = stubSeam({
+      spot: {},
+      futures_perp: { maxLeverage: 20, marginModes: ['isolated', 'cross'] },
+    })
+    const { app, sessions } = await testApp({ intel: protectedIntent(), seam: bareSeam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, {
+      kind: 'user_text',
+      text: 'long 0.5 eth 10x with stop at 2500 and tp at 4000',
+    })
+    await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    const rejection = frameOfType<{ reason: string }>(session, 'rejection_ticket')
+    expect(rejection.reason).toMatch(/doesn't support attached stop-loss\/take-profit/i)
+    // No draft, no prepare: the protective half was never silently dropped.
+    const types = session.journal.after(0).map((e) => e.frame.type)
+    expect(types).not.toContain('order_draft')
+    expect(bareSeam.prepares).toHaveLength(0)
+    await app.close()
+  })
+
+  it('submit round-trip: edited stop/tp ride the plan to the seam verbatim', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: protectedIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'long 0.5 eth with stops' })
+    await submitDraft(app, session, { stopLossPrice: '2600', takeProfitPrice: '3900' })
+    expect(seam.prepares).toHaveLength(1)
+    expect(seam.prepares[0]).toMatchObject({
+      capability: 'futures_perp',
+      instrument: 'ETH/USDT',
+      direction: 'long',
+      stopLossPrice: '2600',
+      takeProfitPrice: '3900',
+    })
+    await app.close()
+  })
+
+  it('submit with EMPTY stop/tp strings omits them from the plan (blank inputs are not zeros)', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: perpIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'long 0.5 eth 10x' })
+    await submitDraft(app, session, { stopLossPrice: '', takeProfitPrice: ' ' })
+    expect(seam.prepares).toHaveLength(1)
+    const plan = seam.prepares[0] as Record<string, unknown>
+    expect(plan.stopLossPrice).toBeUndefined()
+    expect(plan.takeProfitPrice).toBeUndefined()
+    await app.close()
+  })
+
+  it('tamper rejection: stop above tp on a long → rejection_ticket, seam never called', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: perpIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'long 0.5 eth 10x' })
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    const draft = frameOfType<DraftFrame>(session, 'order_draft')
+    await sendTurn(app, session.id, {
+      kind: 'draft_action',
+      draftId: draft.draftId,
+      action: 'submit',
+      params: {
+        instrument: 'ETH/USDT',
+        orderType: 'market',
+        size: '0.5',
+        leverage: 10,
+        stopLossPrice: '4000',
+        takeProfitPrice: '2500',
+      },
+    })
+    await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    const rejection = frameOfType<{ reason: string }>(session, 'rejection_ticket')
+    expect(rejection.reason).toMatch(/stop-loss must be below the take-profit/i)
+    expect(seam.prepares).toHaveLength(0)
+    await app.close()
+  })
+
+  it('tamper rejection: non-numeric / non-positive protective prices → rejection_ticket', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: perpIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'long 0.5 eth 10x' })
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    const draft = frameOfType<DraftFrame>(session, 'order_draft')
+    await sendTurn(app, session.id, {
+      kind: 'draft_action',
+      draftId: draft.draftId,
+      action: 'submit',
+      params: {
+        instrument: 'ETH/USDT',
+        orderType: 'market',
+        size: '0.5',
+        leverage: 10,
+        stopLossPrice: '-2500',
+      },
+    })
+    await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    const rejection = frameOfType<{ reason: string }>(session, 'rejection_ticket')
+    expect(rejection.reason).toMatch(/positive price/i)
+    expect(seam.prepares).toHaveLength(0)
+    await app.close()
+  })
+
+  it('tamper rejection: stop/tp injected against a venue without protectiveExits → rejected server-side', async () => {
+    // The frame never offered the inputs (no fields), but a tampered client
+    // sends them anyway — the gateway re-validates against capabilities.
+    const bareSeam = stubSeam({
+      spot: {},
+      futures_perp: { maxLeverage: 20, marginModes: ['isolated', 'cross'] },
+    })
+    const { app, sessions } = await testApp({ intel: perpIntent(), seam: bareSeam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'long 0.5 eth 10x' })
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    const draft = frameOfType<DraftFrame>(session, 'order_draft')
+    await sendTurn(app, session.id, {
+      kind: 'draft_action',
+      draftId: draft.draftId,
+      action: 'submit',
+      params: {
+        instrument: 'ETH/USDT',
+        orderType: 'market',
+        size: '0.5',
+        leverage: 10,
+        stopLossPrice: '2500',
+      },
+    })
+    await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    const rejection = frameOfType<{ reason: string }>(session, 'rejection_ticket')
+    expect(rejection.reason).toMatch(/doesn't support attached stop-loss\/take-profit/i)
+    expect(bareSeam.prepares).toHaveLength(0)
+    await app.close()
+  })
+
+  it('limit entry sanity: a stop that would trigger immediately against the limit price is rejected', async () => {
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: perpIntent(), seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'long 0.5 eth 10x at 3000' })
+    await waitForJournal(session, (t) => t.includes('order_draft'))
+    const draft = frameOfType<DraftFrame>(session, 'order_draft')
+    await sendTurn(app, session.id, {
+      kind: 'draft_action',
+      draftId: draft.draftId,
+      action: 'submit',
+      params: {
+        instrument: 'ETH/USDT',
+        orderType: 'limit',
+        limitPrice: '3000',
+        size: '0.5',
+        leverage: 10,
+        stopLossPrice: '3200', // above a long's limit entry
+      },
+    })
+    await waitForJournal(session, (t) => t.includes('rejection_ticket'))
+    const rejection = frameOfType<{ reason: string }>(session, 'rejection_ticket')
+    expect(rejection.reason).toMatch(/would trigger immediately/i)
+    expect(seam.prepares).toHaveLength(0)
+    await app.close()
+  })
+
+  it('spot order with stop/tp routes through the capability plan path (fields intact)', async () => {
+    const spotProtected = stubIntel({
+      intent: (): IntentResult => ({
+        intent: 'action',
+        confidence: 0.9,
+        language: 'en',
+        order: {
+          side: 'buy',
+          size: '0.1',
+          instrument: 'BTC/USDT',
+          orderType: 'market',
+          stopLossPrice: '55000',
+          takeProfitPrice: '70000',
+        },
+      }),
+    })
+    const seam = stubSeam()
+    const { app, sessions } = await testApp({ intel: spotProtected, seam })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, {
+      kind: 'user_text',
+      text: 'buy 0.1 btc with stop at 55k and tp at 70k',
+    })
+    await submitDraft(app, session, {})
+    expect(seam.prepares).toHaveLength(1)
+    expect(seam.prepares[0]).toMatchObject({
+      capability: 'spot',
+      instrument: 'BTC/USDT',
+      stopLossPrice: '55000',
+      takeProfitPrice: '70000',
+    })
+    await app.close()
+  })
+})
+
 describe('session symbol context', () => {
   it('mint accepts a symbol and stores it normalized; a bad symbol is ignored', async () => {
     const { app, sessions } = await testApp()

@@ -328,4 +328,93 @@ describe('AssetworksVenueAdapter', () => {
       statusClass: 'cancelled',
     })
   })
+
+  it('protective exits: validated at prepare (rows), passed on the wire body at confirm', async () => {
+    const placedBodies: Array<Record<string, unknown>> = []
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url)
+      if (u.includes('/v1/snapshot'))
+        return new Response(JSON.stringify({ last: 61_240 }), { status: 200 })
+      if (u.endsWith('/admin/config'))
+        return new Response(JSON.stringify({ confirmSurface: 'api' }), { status: 200 })
+      if (u.endsWith('/api/v1/trade/orders')) {
+        placedBodies.push(JSON.parse(String(init?.body ?? '{}')))
+        return new Response(
+          JSON.stringify({ status: true, data: { orderId: 7, qty: 0.5, rate: 61_240 } }),
+          { status: 200 },
+        )
+      }
+      if (u.endsWith('/api/v1/trade/orders/open'))
+        return new Response(JSON.stringify({ status: true, data: { orders: [] } }), {
+          status: 200,
+        })
+      return new Response('nf', { status: 404 })
+    }) as unknown as typeof fetch
+    const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
+
+    const ticket = await adapter.prepareOrder({
+      capability: 'futures_perp',
+      partnerId: 'p',
+      userId: 'u1',
+      instrument: 'BTC/USDT',
+      direction: 'long',
+      action: 'open',
+      leverage: 10,
+      marginMode: 'isolated',
+      size: '0.5',
+      reduceOnly: false,
+      orderType: 'market',
+      stopLossPrice: '55000',
+      takeProfitPrice: '70000',
+    })
+    // Server-authored rows the SDK renders verbatim.
+    const rows = new Map(ticket.rows.map((r) => [r.label, r.value]))
+    expect(rows.get('Stop loss')).toBe('55,000')
+    expect(rows.get('Take profit')).toBe('70,000')
+
+    await adapter.confirm(ticket.ticketId)
+    // The placement body carried BOTH protective prices as wire numerics —
+    // the host spawns the OCO children from exactly these.
+    expect(placedBodies).toHaveLength(1)
+    expect(placedBodies[0]).toMatchObject({
+      market: 'perp',
+      direction: 'long',
+      stopLossPrice: 55_000,
+      takeProfitPrice: 70_000,
+    })
+    await adapter.cancel(ticket.ticketId) // stop the reconciler timer
+  })
+
+  it('protective exits: nonsense levels are rejected at prepare — nothing reaches the venue', async () => {
+    const fetchImpl = makeFetch({ surface: 'api', openSequence: [[]] }) as unknown as typeof fetch
+    const adapter = new AssetworksVenueAdapter({ ...CREDS, fetchImpl })
+    await expect(
+      adapter.prepareOrder({
+        capability: 'futures_perp',
+        partnerId: 'p',
+        userId: 'u1',
+        instrument: 'BTC/USDT',
+        direction: 'short',
+        action: 'open',
+        leverage: 5,
+        marginMode: 'isolated',
+        size: '0.5',
+        reduceOnly: false,
+        orderType: 'market',
+        stopLossPrice: '50000', // below a short's entry — must be ABOVE
+      }),
+    ).rejects.toThrow(/stop-loss.*above the entry/i)
+    // Spot sell can't carry protection.
+    await expect(
+      adapter.prepare({
+        partnerId: 'p',
+        userId: 'u1',
+        side: 'sell',
+        size: '0.1',
+        instrument: 'BTC/USDT',
+        orderType: 'market',
+        takeProfitPrice: '70000',
+      }),
+    ).rejects.toThrow(/buy orders only/i)
+  })
 })

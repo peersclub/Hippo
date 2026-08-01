@@ -31,6 +31,10 @@ export type PrepareRequest = {
   instrument: string
   orderType: OrderType
   limitPrice?: string
+  /** Protective exits (August 2026) — populated only via the SpotPlan path
+   * (prepare-order); the legacy /v1/prepare wire never carries them. */
+  stopLossPrice?: string
+  takeProfitPrice?: string
 }
 
 /**
@@ -48,6 +52,11 @@ export type SpotPlan = {
   instrument: string
   orderType: OrderType
   limitPrice?: string
+  /** Protective exits (mirrors @hippo/protocol SpotOrder, August 2026) —
+   * money as STRINGS, exactly like limitPrice. Validated by the adapter
+   * (long: stop < entry < tp) and gated on the venue's protectiveExits. */
+  stopLossPrice?: string
+  takeProfitPrice?: string
 }
 
 export type FuturesPerpPlan = {
@@ -65,6 +74,10 @@ export type FuturesPerpPlan = {
   reduceOnly: boolean
   orderType: OrderType
   limitPrice?: string
+  /** Protective exits (mirrors @hippo/protocol FuturesPerpOrder, August 2026).
+   * long: stop < entry < tp; short: tp < entry < stop — adapter-validated. */
+  stopLossPrice?: string
+  takeProfitPrice?: string
 }
 
 export type OptionsPlan = {
@@ -88,10 +101,16 @@ export type OrderPlan = SpotPlan | FuturesPerpPlan | OptionsPlan
  * Per-venue capability params — mirrors @hippo/protocol VenueCapabilities.
  * A capability is ENABLED for a venue iff its params object is present.
  */
-export type SpotParamsShape = Record<string, never>
+export type SpotParamsShape = {
+  /** Presence = the venue accepts attached stop-loss / take-profit prices
+   * (mirrors @hippo/protocol SpotParams.protectiveExits). */
+  protectiveExits?: true
+}
 export type FuturesPerpParamsShape = {
   maxLeverage: number
   marginModes: Array<'isolated' | 'cross'>
+  /** Presence = attached stop-loss / take-profit supported on perp orders. */
+  protectiveExits?: true
 }
 export type OptionsParamsShape = { settlement?: 'cash' | 'physical' }
 export type VenueCapabilitiesShape = {

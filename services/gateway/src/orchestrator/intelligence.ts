@@ -87,6 +87,12 @@ export type OrderIntent = {
   instrument: string
   orderType: 'market' | 'limit'
   limitPrice?: string
+  /** Protective exits (August 2026) — attached stop-loss / take-profit
+   * trigger prices as STRINGS, exactly like limitPrice. Offered/accepted only
+   * when the venue advertises protectiveExits; otherwise the turn is declined
+   * honestly rather than silently dropping the protection. */
+  stopLossPrice?: string
+  takeProfitPrice?: string
   // futures_perp only:
   direction?: 'long' | 'short'
   leverage?: number

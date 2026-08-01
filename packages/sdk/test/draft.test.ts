@@ -7,6 +7,7 @@ import {
   type DraftEdit,
   initialLeverage,
   maxLeverageOf,
+  protectiveEnabled,
   sizeValid,
 } from '../src/draft.js'
 
@@ -57,6 +58,8 @@ const baseEdit: DraftEdit = {
   orderType: 'market',
   size: '0.05',
   limitPrice: '',
+  stopLossPrice: '',
+  takeProfitPrice: '',
   leverage: 10,
   maxLeverage: 50,
   marginMode: undefined,
@@ -110,5 +113,39 @@ describe('assembleDraftParams — the echoed edit', () => {
     const p = assembleDraftParams({ ...baseEdit, capability: 'futures_perp' })
     expect(p.leverage).toBe(10)
     expect(p.marginMode).toBeUndefined()
+  })
+
+  it('carries stop-loss / take-profit when non-empty (trimmed), on spot and perp alike', () => {
+    const spot = assembleDraftParams({
+      ...baseEdit,
+      stopLossPrice: ' 60000 ',
+      takeProfitPrice: '75000',
+    })
+    expect(spot.stopLossPrice).toBe('60000')
+    expect(spot.takeProfitPrice).toBe('75000')
+    const perp = assembleDraftParams({
+      ...baseEdit,
+      capability: 'futures_perp',
+      stopLossPrice: '60000',
+    })
+    expect(perp.stopLossPrice).toBe('60000')
+    expect(perp.takeProfitPrice).toBeUndefined()
+  })
+
+  it('omits empty/blank protective fields — the server never sees ""', () => {
+    const p = assembleDraftParams({ ...baseEdit, stopLossPrice: '  ', takeProfitPrice: '' })
+    expect(p.stopLossPrice).toBeUndefined()
+    expect(p.takeProfitPrice).toBeUndefined()
+  })
+})
+
+describe('protectiveEnabled — frame presence drives the stop/tp inputs', () => {
+  it('inputs render when the server put EITHER field on the frame (even empty)', () => {
+    expect(protectiveEnabled({ stopLossPrice: '', takeProfitPrice: '' })).toBe(true)
+    expect(protectiveEnabled({ stopLossPrice: '60000' })).toBe(true)
+    expect(protectiveEnabled({ takeProfitPrice: '75000' })).toBe(true)
+  })
+  it('inputs hidden when the frame carries neither (venue lacks protectiveExits)', () => {
+    expect(protectiveEnabled({})).toBe(false)
   })
 })

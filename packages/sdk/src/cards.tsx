@@ -31,7 +31,13 @@ import {
   cancelAlertUplink,
   showCancelChip,
 } from './alerts-view.js'
-import { assembleDraftParams, initialLeverage, maxLeverageOf, sizeValid } from './draft.js'
+import {
+  assembleDraftParams,
+  initialLeverage,
+  maxLeverageOf,
+  protectiveEnabled,
+  sizeValid,
+} from './draft.js'
 import {
   FEEDBACK_REASONS,
   type FeedbackEvent,
@@ -391,6 +397,11 @@ function OrderDraftCard({ frame }: { frame: OrderDraft }) {
   const [orderType, setOrderType] = useState<'market' | 'limit'>(frame.orderType)
   const [size, setSize] = useState(frame.size)
   const [limitPrice, setLimitPrice] = useState(frame.limitPrice ?? '')
+  // Protective exits: inputs exist only when the SERVER put the fields on the
+  // frame (venue supports attaching them) — frame presence drives it.
+  const protective = protectiveEnabled(frame)
+  const [stopLossPrice, setStopLossPrice] = useState(frame.stopLossPrice ?? '')
+  const [takeProfitPrice, setTakeProfitPrice] = useState(frame.takeProfitPrice ?? '')
   const [leverage, setLeverage] = useState(() => initialLeverage(frame))
   const [marginMode, setMarginMode] = useState(frame.marginMode ?? frame.marginModes[0])
   const [phase, setPhase] = useState<'editing' | 'busy' | 'sent' | 'dismissed'>('editing')
@@ -428,6 +439,8 @@ function OrderDraftCard({ frame }: { frame: OrderDraft }) {
         orderType,
         size,
         limitPrice,
+        stopLossPrice: protective ? stopLossPrice : '',
+        takeProfitPrice: protective ? takeProfitPrice : '',
         leverage,
         maxLeverage: maxLev,
         marginMode,
@@ -544,6 +557,32 @@ function OrderDraftCard({ frame }: { frame: OrderDraft }) {
             aria-label={`${t(L, 'draft_size')} (${frame.sizeAsset})`}
           />
         </label>
+        {protective && (
+          <div class="drow">
+            <label class="dfield">
+              <span class="dlab">{t(L, 'draft_stop_loss')}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={stopLossPrice}
+                disabled={busyOrSent}
+                onInput={(e) => setStopLossPrice((e.target as HTMLInputElement).value)}
+                aria-label={t(L, 'draft_stop_loss')}
+              />
+            </label>
+            <label class="dfield">
+              <span class="dlab">{t(L, 'draft_take_profit')}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={takeProfitPrice}
+                disabled={busyOrSent}
+                onInput={(e) => setTakeProfitPrice((e.target as HTMLInputElement).value)}
+                aria-label={t(L, 'draft_take_profit')}
+              />
+            </label>
+          </div>
+        )}
         {perp && (
           <label class="dfield">
             <span class="dlab">

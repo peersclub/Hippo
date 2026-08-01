@@ -6,6 +6,7 @@
  * class behind the same interface for full-fidelity, real-HTTP testing.
  */
 import { randomUUID } from 'node:crypto'
+import { protectiveRows, validateProtectiveExits } from './protective.js'
 import type {
   FuturesPerpPlan,
   LifecycleEvent,
@@ -22,8 +23,8 @@ import type {
 /** Sim enables all three framework capabilities with generous dev params, so
  *  every capability can be exercised without a real venue. */
 const SIM_CAPABILITIES: VenueCapabilitiesShape = {
-  spot: {},
-  futures_perp: { maxLeverage: 100, marginModes: ['isolated', 'cross'] },
+  spot: { protectiveExits: true },
+  futures_perp: { maxLeverage: 100, marginModes: ['isolated', 'cross'], protectiveExits: true },
   options: { settlement: 'cash' },
 }
 
@@ -93,6 +94,16 @@ export class SimVenueAdapter implements VenueAdapter {
     const price = isLimit ? Number(req.limitPrice) : await this.quote(req.instrument)
     if (!Number.isFinite(price) || price <= 0) throw new Error('invalid price')
 
+    // Protective exits on spot: buy orders only, sanity-checked against entry.
+    // The sim carries them on the ticket rows (honest display); its fill sim
+    // fills the ENTRY only — it does not simulate the venue's OCO children.
+    if (
+      req.side === 'sell' &&
+      (req.stopLossPrice !== undefined || req.takeProfitPrice !== undefined)
+    )
+      throw new Error('attached stop-loss/take-profit is supported on spot buy orders only')
+    const exits = validateProtectiveExits(req, price, true)
+
     // Est. cost = size × price × (1 + fee). Display strings are built HERE —
     // the SDK draws what the server sends; it never computes money.
     const estCost = sizeNum * price * (1 + FEE_RATE)
@@ -115,6 +126,7 @@ export class SimVenueAdapter implements VenueAdapter {
           value: formatPrice(price),
         },
         { label: 'Est. cost incl. fees', value: `${formatAmount(estCost)} USDT` },
+        ...protectiveRows(exits, formatPrice),
       ],
     }
   }
@@ -149,6 +161,16 @@ export class SimVenueAdapter implements VenueAdapter {
     const isLimit = plan.orderType === 'limit'
     const entry = isLimit ? Number(plan.limitPrice) : await this.quote(plan.instrument)
     if (!Number.isFinite(entry) || entry <= 0) throw new Error('invalid price')
+
+    // Protective exits: opening orders only (a close IS the exit), validated
+    // against the entry per direction. Rows-only in the sim — the fill sim
+    // fills the entry; it does not simulate the venue's OCO children.
+    if (
+      plan.action !== 'open' &&
+      (plan.stopLossPrice !== undefined || plan.takeProfitPrice !== undefined)
+    )
+      throw new Error('attached stop-loss/take-profit applies to opening orders only')
+    const exits = validateProtectiveExits(plan, entry, plan.direction === 'long')
 
     // Liquidation APPROXIMATION (isolated, ignoring maintenance margin/fees/
     // funding): an isolated position exhausts its margin ~1/leverage against it.
@@ -191,6 +213,7 @@ export class SimVenueAdapter implements VenueAdapter {
         { label: 'Est. liquidation price', value: formatPrice(liquidation) },
         { label: 'Est. margin', value: `${formatAmount(margin)} ${quoteAsset}` },
         ...(plan.reduceOnly ? [{ label: 'Reduce only', value: 'Yes' }] : []),
+        ...protectiveRows(exits, formatPrice),
       ],
     }
   }

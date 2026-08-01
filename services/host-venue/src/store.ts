@@ -178,6 +178,8 @@ export class VenueStore {
     if (this.config.rejectRate > 0 && this.rand() < this.config.rejectRate)
       throw new Error('order rejected by the venue (simulated)')
 
+    this.validateProtectiveExits(req)
+
     const [base, quote] = split(req.pairName)
 
     if (req.market === 'spot') this.reserveSpot(userId, req, base, quote)
@@ -200,12 +202,48 @@ export class VenueStore {
       leverage: req.leverage,
       marginMode: req.marginMode,
       reduceOnly: req.reduceOnly,
+      stopLossPrice: req.stopLossPrice,
+      takeProfitPrice: req.takeProfitPrice,
       createdAt: now,
       settleAfter: now + (this.config.fillMode === 'instant' ? 0 : this.config.workingWindowMs),
     }
     this.orders.set(order.id, order)
     this.emit({ type: 'order', order })
     return order
+  }
+
+  /** Sanity-check attached stop-loss / take-profit against the entry price.
+   *  Long (perp long / spot buy): stop < entry < tp. Short: tp < entry < stop.
+   *  Spot SELL orders reject protective exits outright — after a spot sell the
+   *  trader holds quote, so a "protective" child would open exposure, not
+   *  close it. Throws a human message (same contract as the policy gates). */
+  private validateProtectiveExits(req: PlaceRequest): void {
+    const { stopLossPrice: sl, takeProfitPrice: tp } = req
+    if (sl === undefined && tp === undefined) return
+    if (sl !== undefined && (!Number.isFinite(sl) || sl <= 0))
+      throw new Error('invalid stop-loss price')
+    if (tp !== undefined && (!Number.isFinite(tp) || tp <= 0))
+      throw new Error('invalid take-profit price')
+    if (req.reduceOnly)
+      throw new Error('protective exits cannot be attached to a closing (reduce-only) order')
+    const isLong = req.market === 'perp' ? req.direction !== 'short' : req.side === 'buy'
+    if (req.market === 'spot' && req.side === 'sell')
+      throw new Error('protective exits are supported on buy orders only for spot')
+    if (isLong) {
+      if (sl !== undefined && sl >= req.rate)
+        throw new Error(`stop-loss (${sl}) must be below the entry price (${req.rate}) for a long`)
+      if (tp !== undefined && tp <= req.rate)
+        throw new Error(
+          `take-profit (${tp}) must be above the entry price (${req.rate}) for a long`,
+        )
+    } else {
+      if (sl !== undefined && sl <= req.rate)
+        throw new Error(`stop-loss (${sl}) must be above the entry price (${req.rate}) for a short`)
+      if (tp !== undefined && tp >= req.rate)
+        throw new Error(
+          `take-profit (${tp}) must be below the entry price (${req.rate}) for a short`,
+        )
+    }
   }
 
   private reserveSpot(userId: string, req: PlaceRequest, base: string, quote: string): void {
@@ -252,7 +290,8 @@ export class VenueStore {
     const o = this.orders.get(id)
     if (!o || (o.status !== ORDER_STATUS.ACTIVE && o.status !== ORDER_STATUS.PARTIAL)) return false
     let price = o.rate
-    if (o.kind === 'market') {
+    if (o.kind !== 'limit') {
+      // market + stop are takers: live price with slippage.
       try {
         price = this.fillPrice(o, await this.getPrice(o.pairName))
       } catch {
@@ -276,6 +315,9 @@ export class VenueStore {
   }
 
   private releaseReserve(o: Order): void {
+    // Protective children never reserved anything (the entry's fill provides
+    // the funds/position they act on), so there is nothing to release.
+    if (o.parentId !== undefined) return
     const remaining = o.qty - o.filledQty
     if (remaining <= 0) return
     const [base, quote] = split(o.pairName)
@@ -335,6 +377,10 @@ export class VenueStore {
 
   private marketable(o: Order, price: number): boolean {
     if (o.kind === 'market') return true
+    // Stop: ARMS on the ADVERSE side — the inverse of the limit rule. A sell
+    // stop (protecting a long) triggers when the market falls TO or THROUGH
+    // the trigger; a buy stop (protecting a short) when it rises to it.
+    if (o.kind === 'stop') return o.side === 'buy' ? price >= o.rate : price <= o.rate
     // Limit: crosses when the market reaches the trader's price or better.
     return o.side === 'buy' ? price <= o.rate : price >= o.rate
   }
@@ -352,6 +398,12 @@ export class VenueStore {
     if (o.filledQty >= o.qty - 1e-9) {
       o.status = ORDER_STATUS.SETTLED
       this.emit({ type: 'fill', order: o })
+      // OCO: a filled protective child retires its sibling — the position
+      // must never be double-closed by its own protection.
+      if (o.ocoSiblingId !== undefined) this.cancel(o.ocoSiblingId)
+      // Entry filled with protective exits attached → spawn the children.
+      if (o.stopLossPrice !== undefined || o.takeProfitPrice !== undefined)
+        this.spawnProtectiveChildren(o)
     } else {
       o.status = ORDER_STATUS.PARTIAL
       // Hold the next slice one more window so the reconciler sees PARTIAL.
@@ -361,7 +413,8 @@ export class VenueStore {
   }
 
   /** Market orders fill at the live price moved against the taker by the
-   *  configured slippage; limit orders fill at their resting rate (the maker). */
+   *  configured slippage; limit orders fill at their resting rate (the maker).
+   *  Stops are TAKERS once triggered — they close at market with slippage. */
   private fillPrice(o: Order, price: number): number {
     if (o.kind === 'limit') return o.rate
     const s = this.config.slippagePct
@@ -386,7 +439,9 @@ export class VenueStore {
         this.slot(o.userId, quote).total -= notional + fee
         this.slot(o.userId, base).total += qty
       } else {
-        this.slot(o.userId, base).reserved -= qty
+        // Protective children never reserved the base (avoiding a double
+        // reserve across the OCO pair), so only non-children release one.
+        if (o.parentId === undefined) this.slot(o.userId, base).reserved -= qty
         this.slot(o.userId, base).total -= qty
         this.slot(o.userId, quote).total += notional - fee
       }
@@ -419,8 +474,14 @@ export class VenueStore {
       this.slot(o.userId, quote).total += pnl
       existing.size = round(existing.size - closeQty)
       existing.margin = round(existing.margin - releasedMargin)
-      if (existing.size <= 1e-9) this.positions.delete(key)
-      else this.positions.set(key, existing)
+      if (existing.size <= 1e-9) {
+        this.positions.delete(key)
+        // The position is gone — by a protective child, a manual close, or
+        // anything else. Any surviving protective children are now orphans
+        // that would OPEN exposure if they ever triggered: cancel them. The
+        // order doing the closing is excluded (its fill is still settling).
+        this.cancelProtectiveChildren(o.userId, o.pairName, o.id)
+      } else this.positions.set(key, existing)
     } else {
       // Opening / adding: reserve already locked at placement; average in.
       const addMargin = (qty * price) / lev
@@ -449,6 +510,76 @@ export class VenueStore {
     void this.openPositions(o.userId).then((positions) =>
       this.emit({ type: 'positions', positions }),
     )
+  }
+
+  // ── protective exits (attached stop-loss / take-profit, OCO) ────────────
+  /**
+   * The entry filled and the position/holding exists — create the venue-native
+   * protective children:
+   *   • TAKE-PROFIT: a resting REDUCE-ONLY LIMIT at the tp price. It rides the
+   *     normal sweep (fills as a MAKER when price crosses favourably).
+   *   • STOP: kind 'stop' — rests until price crosses ADVERSELY, then closes
+   *     at market with taker slippage (see marketable/fillPrice).
+   * The pair is OCO-linked; either fill cancels the sibling, and a position
+   * closed by any other means cancels both (applyPerpFill). Children never
+   * reserve funds — the filled entry provides the position (perp) or the base
+   * holding (spot). NOTE (spot): with no reserve, a trader who manually sells
+   * the base out from under the children can strand them; the OCO pair itself
+   * stays consistent. Perp children are reduce-only, so they can never exceed
+   * the live position.
+   */
+  private spawnProtectiveChildren(entry: Order): void {
+    const closeSide: Order['side'] =
+      entry.market === 'perp' ? (entry.side === 'buy' ? 'sell' : 'buy') : 'sell'
+    const now = Date.now()
+    const child = (kind: 'limit' | 'stop', rate: number, tag: 'tp' | 'sl'): Order => ({
+      id: this.nextOrderId++,
+      clientOrderId: entry.clientOrderId ? `${entry.clientOrderId}:${tag}` : undefined,
+      userId: entry.userId,
+      market: entry.market,
+      pairName: entry.pairName,
+      side: closeSide,
+      kind,
+      qty: entry.qty,
+      filledQty: 0,
+      rate,
+      status: ORDER_STATUS.ACTIVE,
+      ...(entry.market === 'perp'
+        ? {
+            direction: entry.direction,
+            leverage: entry.leverage,
+            marginMode: entry.marginMode,
+            reduceOnly: true,
+          }
+        : {}),
+      parentId: entry.id,
+      createdAt: now,
+      settleAfter: now, // armed immediately — the price condition gates the fill
+    })
+    const tp =
+      entry.takeProfitPrice !== undefined ? child('limit', entry.takeProfitPrice, 'tp') : undefined
+    const sl =
+      entry.stopLossPrice !== undefined ? child('stop', entry.stopLossPrice, 'sl') : undefined
+    if (tp && sl) {
+      tp.ocoSiblingId = sl.id
+      sl.ocoSiblingId = tp.id
+    }
+    for (const o of [tp, sl]) {
+      if (!o) continue
+      this.orders.set(o.id, o)
+      this.emit({ type: 'order', order: o })
+    }
+  }
+
+  /** Cancel every open protective child on (user, pair) except `excludeId` —
+   *  called when the perp position closes by any means. */
+  private cancelProtectiveChildren(userId: string, pairName: string, excludeId: number): void {
+    for (const o of this.orders.values()) {
+      if (o.parentId === undefined || o.id === excludeId) continue
+      if (o.userId !== userId || o.pairName !== pairName) continue
+      if (o.status !== ORDER_STATUS.ACTIVE && o.status !== ORDER_STATUS.PARTIAL) continue
+      this.cancel(o.id)
+    }
   }
 
   // ── js_callback handoffs ────────────────────────────────────────────────

@@ -77,7 +77,8 @@ assistant. Respond with STRICT JSON only — one object, no prose, no markdown:
  "restructuredQuery": "<the query rewritten crisply for the answer engine — resolve pronouns, expand tickers, keep the user's intent; NEVER invent facts or add advice>",
  "order": {"side": "buy"|"sell", "size": "<string>",
            "instrument": "<BASE/QUOTE like BTC/USDT>",
-           "orderType": "market"|"limit", "limitPrice": "<string>"},
+           "orderType": "market"|"limit", "limitPrice": "<string>",
+           "stopLossPrice": "<string>", "takeProfitPrice": "<string>"},
  "hostAction": {"action": "set_timeframe"|"apply_indicator"|"remove_indicator",
                 "timeframe": "1m"|"5m"|"15m"|"1h"|"4h"|"1d",
                 "indicator": "sma20"|"sma50"|"ema20"|"rsi"|"vol"},
@@ -89,7 +90,10 @@ Rules:
 - "action": wants to place/modify a trade. Include "order" ONLY when side,
   size and instrument are all explicit; normalize instrument to BASE/USDT;
   omit "limitPrice" unless a limit price is given; omit "order" entirely when
-  any parameter is missing or vague (e.g. "half my position").
+  any parameter is missing or vague (e.g. "half my position"). Include
+  "stopLossPrice"/"takeProfitPrice" ONLY when the user names a stop-loss /
+  take-profit level ("with stop at 60k", "sl 60k tp 75k" — expand "60k" to
+  "60000"); NEVER invent protection levels.
 - "advice": asks what THEY should do — buy/sell/hold calls, predictions,
   "is this the dip", allocation or timing questions.
 - "portfolio": asks about their own positions, balance, P&L, history.
