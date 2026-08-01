@@ -25,6 +25,7 @@
 import { randomUUID } from 'node:crypto'
 import type { VenueCapabilities } from '@hippo/protocol'
 import type { UserIdentityStore } from '@hippo/stores'
+import type { AlertsEngine } from '../alerts.js'
 import type { DraftFields, Session, SessionStore } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft, JournalEntry } from '../plugins/sse.js'
 import { emitTransient } from '../plugins/sse.js'
@@ -91,6 +92,10 @@ export type OrchestratorDeps = {
   seam: SeamClient
   /** In-panel username+PIN identities (identity_claim uplink, migration 015). */
   identity: UserIdentityStore
+  /** Price alerts engine (src/alerts.ts) — conversational arm/cancel plus the
+   * session-start sweep of undelivered triggered alerts. The poll loop itself
+   * is started in app.ts; the orchestrator only routes into it. */
+  alerts: AlertsEngine
   emit: EmitFrame
   telemetry: Telemetry
   log: Log
@@ -192,6 +197,8 @@ function defaultInterpretation(intent: string): string {
       return 'Adjusting the chart on the page.'
     case 'orders_query':
       return 'Pulling together your orders.'
+    case 'alert':
+      return 'Managing your price alerts.'
     default:
       return 'Working on your request.'
   }
@@ -337,7 +344,7 @@ function formatFractionSize(n: number): string {
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
-  const { intel, market, memory, seam, identity, emit, telemetry, log, sessions } = deps
+  const { intel, market, memory, seam, identity, alerts, emit, telemetry, log, sessions } = deps
 
   // In-panel username+PIN identity (identity_claim → identity frames). Owns
   // hashing, rate limiting and the sub→identity links; adoption flips what
@@ -2139,6 +2146,25 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         return
       }
 
+      case 'alert': {
+        // Conversational price alerts (src/alerts.ts owns every rule: cap,
+        // cross resolution against the live price, ownership, server-authored
+        // conditionLabel). No payload → honest one-line ask, never a guess.
+        const ai = intentRes.alertIntent
+        if (!ai) {
+          emit(session, {
+            type: 'banner',
+            kind: 'info',
+            title: 'Price alerts',
+            text: 'Tell me the level and the asset — like "alert me when BTC goes above 70,000".',
+          })
+          return
+        }
+        if (ai.action === 'cancel') await alerts.cancelConversational(session, ai.symbol)
+        else await alerts.arm(session, ai)
+        return
+      }
+
       default:
         emit(session, nudgeFrame(session))
         return
@@ -2178,6 +2204,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         // memoryLab; no-op otherwise). Fire-and-forget; the journal replay
         // re-delivers it on reconnect, the SDK keeps only the latest.
         void emitLearnedMemory(session)
+        // Price alerts that TRIGGERED while this user had no live session:
+        // deliver them now and mark delivered. Runs AFTER identity restore so
+        // the sweep keys to the effective (identity-adopted) user, and on
+        // EVERY connect — a reconnect may have missed a trigger too (the
+        // journal only replays what was emitted into it). Best-effort.
+        void alerts.sweepOnConnect(session)
       })
       // Live price ticker for the session's symbol — transient frames to the
       // connected socket only, never the journal.
@@ -2374,6 +2406,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // come back as journaled `identity` frames.
           identityHandler.handleClaim(session, uplink).catch((err) => {
             log.error({ err }, 'identity claim failed')
+          })
+          return
+        }
+        case 'alert_action': {
+          // Command, not conversation: no echo, no thinking, no classify.
+          // Cancel is the only alert verb on the wire; a non-armed/unknown/
+          // foreign alertId is an idempotent no-op ack — never a crash.
+          telemetry.recordUplink('alert_cancel')
+          alerts.cancelById(session, uplink.alertId).catch((err) => {
+            log.error({ err, alertId: uplink.alertId }, 'alert cancel failed')
           })
           return
         }

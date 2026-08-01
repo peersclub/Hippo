@@ -6,6 +6,16 @@ export {
   PostgresAuditStore,
   PostgresOperatorStore,
 } from './admin-store.js'
+export {
+  ALERTS_LIST_CAP,
+  type Alert,
+  type AlertCondition,
+  type AlertState,
+  type AlertStore,
+  InMemoryAlertStore,
+  MAX_ARMED_ALERTS_PER_USER,
+  PostgresAlertStore,
+} from './alert-store.js'
 export { closePool, getPool } from './db.js'
 export {
   type HostVenueStateStore,

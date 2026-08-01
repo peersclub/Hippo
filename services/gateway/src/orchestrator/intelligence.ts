@@ -32,6 +32,8 @@ export type IntentKind =
   // Host-interaction wave (July 2026): chart control + consolidated orders.
   | 'host_action'
   | 'orders_query'
+  // Price alerts (August 2026): conversational create/cancel of durable alerts.
+  | 'alert'
 
 /** Host-action intent (host_action). `action` is an open string mirroring
  * @hippo/protocol HostActionFrame (wave 2): the orchestrator gates emission on
@@ -58,6 +60,18 @@ export type OrdersQueryIntent = { scope: 'all' | 'session' }
  * research stage or its cache key, so the fleet-wide answer cache (keyed on
  * the canonical restructured question) keeps its hit-rate economics. */
 export type HistoryItem = { role: 'user' | 'assistant'; text: string }
+
+/** Price-alert intent (alert). `direction: 'cross'` ("crosses"/"hits") is
+ * resolved GATEWAY-SIDE against the live price at creation (target > current →
+ * above, else below) — the intent service never needs market data. A cancel
+ * carries an optional symbol ("cancel my btc alert"); the orchestrator matches
+ * it against the user's armed alerts. */
+export type AlertIntent = {
+  action: 'create' | 'cancel'
+  symbol?: string
+  direction?: 'above' | 'below' | 'cross'
+  price?: number
+}
 
 export type OrderIntent = {
   /** Absent/'spot' = spot; 'futures_perp' routes to the seam's plan path. */
@@ -99,6 +113,8 @@ export type IntentResult = {
   hostAction?: HostActionIntent
   /** Orders-blotter scope when intent is 'orders_query' (additive). */
   ordersQuery?: OrdersQueryIntent
+  /** Price-alert payload when intent is 'alert' (additive). */
+  alertIntent?: AlertIntent
   /** Stage-1 "understanding" (additive): a one-line restatement for the
    * research-view card, and a crisp rewrite forwarded to the answer engine.
    * Absent from older intelligence builds — callers default gracefully. */
