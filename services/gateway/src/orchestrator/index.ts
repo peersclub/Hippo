@@ -335,6 +335,14 @@ function parseDisplayNumber(display: string): number | null {
   return Number.isFinite(n) ? Math.abs(n) : null
 }
 
+/** The trading pair inside a venue POSITION display string. Live rows are
+ * display-shaped ("BTC-USDT 5x LONG"), not canonical instruments — the first
+ * token is the pair, with venue-native separators. Pure. */
+function pairOfPositionRow(display: string): string {
+  const token = display.trim().split(/\s+/)[0] ?? display
+  return token.toUpperCase().replaceAll('-', '/').replaceAll('_', '/')
+}
+
 /** Resolved fractional size → order-size string, rounded to the venue's
  * 8-decimal display convention with trailing zeros trimmed (the sim venue's
  * maximumFractionDigits:8; real venues re-validate at prepare). Pure. */
@@ -944,7 +952,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       })
       return null
     }
-    const position = positions.find((p) => p.instrument === instrument)
+    // Venue rows carry DISPLAY instruments ("BTC-USDT 5x LONG"), so match on
+    // the normalized pair — an exact === against "BTC/USDT" never fires live.
+    // When the phrasing named a direction ("close half my LONG"), prefer the
+    // row that carries it; else the first pair match wins.
+    const pairMatches = positions.filter((p) => pairOfPositionRow(p.instrument) === instrument)
+    const wantDir = order.direction?.toUpperCase()
+    const position =
+      (wantDir && pairMatches.find((p) => p.instrument.toUpperCase().includes(wantDir))) ??
+      pairMatches[0]
     const held = position ? parseDisplayNumber(position.size) : null
     if (held === null || held <= 0) {
       // The honest decline — never a zero-size order.
