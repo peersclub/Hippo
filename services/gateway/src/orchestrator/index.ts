@@ -31,6 +31,7 @@ import { emitTransient } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
 import { createIdentityHandler } from './identity.js'
 import type {
+  AmendIntent,
   BriefResponse,
   DeclineResponse,
   HistoryItem,
@@ -287,6 +288,25 @@ export function assembleHistory(entries: JournalEntry[]): HistoryItem[] {
   }
   kept.reverse()
   return kept
+}
+
+/** First numeric value in a venue display string ("0.31 BTC", "1,234.5 SOL",
+ * "−0.5 BTC"), as an absolute number — position sizes are magnitudes here;
+ * direction lives elsewhere. null when no finite number can be read. Pure. */
+function parseDisplayNumber(display: string): number | null {
+  const cleaned = display.replaceAll(',', '').replaceAll('−', '-')
+  const m = cleaned.match(/-?\d+(?:\.\d+)?/)
+  if (!m) return null
+  const n = Number(m[0])
+  return Number.isFinite(n) ? Math.abs(n) : null
+}
+
+/** Resolved fractional size → order-size string, rounded to the venue's
+ * 8-decimal display convention with trailing zeros trimmed (the sim venue's
+ * maximumFractionDigits:8; real venues re-validate at prepare). Pure. */
+function formatFractionSize(n: number): string {
+  const fixed = n.toFixed(8)
+  return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
 }
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
@@ -613,6 +633,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
    * about it (never "nothing was sent"). */
   const confirmedTickets = new Set<string>()
 
+  /** Replacement (amend) tickets → the venue orderId they replace. On this
+   * ticket's confirm the OLD order is cancelled FIRST, then the new one is
+   * placed — both legs through existing seam surfaces, both audited by the
+   * seam's cancel/confirm audit kinds. Consumed at confirm/cancel time. */
+  const amendReplaces = new Map<string, string>()
+
   /** Post-confirm venue-event backstop: if the seam's callback delivery fails
    * (it retries exactly once, then only audits) the trader must never sit on
    * "WAITING FOR YOUR CONFIRM" forever. Env-tunable so tests can shrink it;
@@ -737,7 +763,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   }
 
-  async function prepareTicket(session: Session, order: OrderIntent, text: string) {
+  async function prepareTicket(
+    session: Session,
+    order: OrderIntent,
+    text: string,
+    opts: { replacesOrderId?: string } = {},
+  ) {
     // The seam owns quoting, fees and validation (per-venue adapter). The
     // gateway forwards the prepared ticket verbatim — it never computes money.
     let ticket: import('./seam.js').PreparedTicket
@@ -781,6 +812,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
 
     ticketSessions.set(ticket.ticketId, session)
+    // Replacement ticket (conversational amend): remember which venue order
+    // it replaces — confirm cancels that one first — and say so on the card
+    // (server-authored row; the SDK renders rows verbatim).
+    if (opts.replacesOrderId !== undefined) {
+      amendReplaces.set(ticket.ticketId, opts.replacesOrderId)
+      ticket.rows = [...ticket.rows, { label: 'Replaces', value: `Order #${opts.replacesOrderId}` }]
+    }
     // Append-only record of orders this session created — the basis for
     // orders_query scope 'session'. session.tickets is pruned on terminal
     // events, so it can't serve this; this set is never pruned.
@@ -809,6 +847,225 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       cta: `Review & confirm in ${session.partner.venueName} →`,
       footnote: `Hippo prepared this order. ${session.partner.venueName} will ask you to confirm before anything executes.`,
     })
+  }
+
+  // ── fractional close/reduce ("sell half my SOL") ─────────────────────────
+
+  /**
+   * Resolve a fractional close/reduce order against the LIVE position via the
+   * seam's portfolio: size = fraction × current position size, rounded to the
+   * venue's 8-decimal convention. Returns the order with a concrete size, or
+   * null after emitting an honest decline (no position / seam down / dust).
+   * Fraction 1.0 uses the full position size — exactly the existing "close".
+   */
+  async function resolveFractionalOrder(
+    session: Session,
+    order: OrderIntent,
+  ): Promise<OrderIntent | null> {
+    const venue = session.partner.venueName
+    const fraction = order.sizeFraction ?? 0
+    // The instrument may be "" when the phrasing named no asset ("close half
+    // my long") — fall back to the page's symbol, same convention as drafts.
+    const instrument = normalizeSymbol(order.instrument) ?? defaultSymbol(session)
+    const base = instrument.split('/')[0] ?? instrument
+    if (!(fraction > 0 && fraction <= 1)) {
+      // Defensive: the intelligence service already rejects out-of-range
+      // fractions, but a bad wire value must never become a guessed size.
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason: `I couldn't read that as a fraction of your ${base} position — try "sell half my ${base}" or give an explicit size. Nothing was sent to the venue.`,
+      })
+      return null
+    }
+    let positions: import('./seam.js').SeamPortfolio['positions']
+    try {
+      ;({ positions } = await seam.portfolio(session.partner.partnerId, userKey(session)))
+    } catch (err) {
+      log.error({ err, instrument }, 'seam portfolio unavailable for fractional sizing')
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason: `${venue} isn't answering position queries right now, so I can't size a fraction of your ${base} position. Nothing was sent to the venue.`,
+      })
+      return null
+    }
+    const position = positions.find((p) => p.instrument === instrument)
+    const held = position ? parseDisplayNumber(position.size) : null
+    if (held === null || held <= 0) {
+      // The honest decline — never a zero-size order.
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'No position to reduce',
+        reason: `You have no open ${base} position on ${venue} to reduce. Nothing was sent to the venue.`,
+      })
+      return null
+    }
+    const size = formatFractionSize(fraction >= 1 ? held : fraction * held)
+    if (Number(size) <= 0) {
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason: `That fraction of your ${base} position rounds to zero at the venue's precision. Nothing was sent to the venue.`,
+      })
+      return null
+    }
+    return { ...order, instrument, size }
+  }
+
+  // ── conversational amend ("move my limit to 61k") ────────────────────────
+
+  /**
+   * v1 amend = replacement ticket, no new protocol: exactly one open order →
+   * prepare a new ticket at the amended price/size carrying a "Replaces order
+   * #<id>" row; on that ticket's confirm the old venue order is cancelled
+   * FIRST, then the new one is placed (confirmHandoff routes to
+   * confirmAmendHandoff via amendReplaces). Zero open orders → honest notice;
+   * several → ask which one, listing them. Never a guess.
+   */
+  async function handleAmend(session: Session, amend: AmendIntent, text: string): Promise<void> {
+    const venue = session.partner.venueName
+    let records: OrderRecord[]
+    try {
+      records = await seam.listOrders(session.partner.partnerId, userKey(session))
+    } catch (err) {
+      log.error({ err }, 'seam listOrders unavailable for amend')
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not amended',
+        reason: `${venue} isn't answering order queries right now, so I can't find the order to change. Your working order is untouched — try again in a moment.`,
+      })
+      return
+    }
+    const open = records.filter((r) => r.statusClass === 'open')
+    if (open.length === 0) {
+      emit(session, {
+        type: 'banner',
+        kind: 'info',
+        title: 'No working order',
+        text: `You have no working order on ${venue} to amend — nothing was changed.`,
+      })
+      return
+    }
+    if (open.length > 1) {
+      const list = open
+        .slice(0, 5)
+        .map((r) => `#${r.orderId} ${r.side.toUpperCase()} ${r.qty} ${r.symbol} (${r.kind})`)
+        .join(' · ')
+      emit(session, {
+        type: 'banner',
+        kind: 'info',
+        title: 'Which order?',
+        text: `You have ${open.length} working orders: ${list}. I amend one order at a time — cancel the ones you don't want first, or manage them on ${venue}.`,
+      })
+      return
+    }
+    const target = open[0]
+    if (!target) return // unreachable: length === 1
+    // Replacement terms: the amended value wins; everything else carries over
+    // from the working order. qty strings look like "0.05" or "0.05 BTC".
+    const heldQty = parseDisplayNumber(target.qty)
+    const size = amend.size ?? (heldQty !== null ? formatFractionSize(heldQty) : undefined)
+    if (size === undefined || Number(size) <= 0) {
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not amended',
+        reason: `I couldn't read the size of order #${target.orderId}, so I won't guess. Amend it on ${venue}, or tell me the full new order.`,
+      })
+      return
+    }
+    const oldPrice = target.price !== undefined ? target.price.replaceAll(',', '') : undefined
+    const limitPrice = amend.price ?? oldPrice
+    const order: OrderIntent = {
+      side: target.side,
+      size,
+      instrument: normalizeSymbol(target.symbol) ?? defaultSymbol(session),
+      // A price amend (or an existing limit) makes the replacement a limit
+      // order; a size-only amend of a market order stays market.
+      ...(limitPrice !== undefined
+        ? { orderType: 'limit' as const, limitPrice }
+        : { orderType: 'market' as const }),
+    }
+    emit(session, { type: 'skeleton', shape: 'ticket' })
+    await prepareTicket(session, order, text, { replacesOrderId: target.orderId })
+  }
+
+  /**
+   * Confirm of a replacement (amend) ticket: cancel the old venue order
+   * FIRST, then place the new one — both through existing seam surfaces, so
+   * both legs land in the seam's audit trail (cancel + confirm kinds). Every
+   * failure mode is honest: cancel failed → old order still working, nothing
+   * new placed; placement failed after a successful cancel → the thread says
+   * BOTH things (old order cancelled + replacement rejected) — never
+   * silently half-done.
+   */
+  function confirmAmendHandoff(session: Session, ticketId: string, oldOrderId: string): void {
+    const venue = session.partner.venueName.toUpperCase()
+    const side = session.tickets.get(ticketId)?.side
+    const dropTicket = (): void => {
+      ticketSessions.delete(ticketId)
+      session.tickets.delete(ticketId)
+      confirmedTickets.delete(ticketId)
+      clearTicketTimeout(ticketId)
+      releaseTicket(session, ticketId)
+    }
+    emit(session, {
+      type: 'lifecycle',
+      ticketId,
+      phase: 'awaiting_confirm',
+      stage: 'placing',
+      statusLine: `CANCELLING ORDER #${oldOrderId.toUpperCase()} ON ${venue}…`,
+      cancellable: false,
+      ...(side ? { side } : {}),
+    })
+    telemetry.recordUplink('ticket_confirm')
+    void (async () => {
+      try {
+        // Leg 1 — cancel the order being replaced. The seam audits this leg
+        // under its existing 'cancel' kind.
+        await seam.cancel(oldOrderId)
+      } catch (err) {
+        log.error({ err, ticketId, oldOrderId }, 'amend cancel leg failed')
+        dropTicket()
+        emit(session, {
+          type: 'lifecycle',
+          ticketId,
+          phase: 'expired',
+          statusLine: `COULDN'T CANCEL ORDER #${oldOrderId.toUpperCase()} — IT MAY STILL EXECUTE; NO REPLACEMENT WAS PLACED`,
+          ...(side ? { side } : {}),
+        })
+        return
+      }
+      // Leg 2 — place the replacement through the classic confirm path
+      // (audited by the seam's 'confirm' kind), with amend-honest copy.
+      emit(session, {
+        type: 'lifecycle',
+        ticketId,
+        phase: 'awaiting_confirm',
+        stage: 'placing',
+        statusLine: `ORDER #${oldOrderId.toUpperCase()} CANCELLED — SENDING REPLACEMENT TO ${venue}…`,
+        cancellable: true,
+        ...(side ? { side } : {}),
+      })
+      confirmedTickets.add(ticketId)
+      const quote = session.tickets.get(ticketId)
+      if (quote) quote.confirmed = true
+      armTicketTimeout(session, ticketId)
+      try {
+        await seam.confirm(ticketId)
+      } catch (err) {
+        log.error({ err, ticketId, oldOrderId }, 'amend place leg failed after cancel succeeded')
+        dropTicket()
+        // The half-done truth, stated in full: the cancel DID happen.
+        emit(session, {
+          type: 'lifecycle',
+          ticketId,
+          phase: 'expired',
+          statusLine: `ORDER #${oldOrderId.toUpperCase()} WAS CANCELLED, BUT ${venue} REJECTED THE REPLACEMENT — NO ORDER IS WORKING`,
+          ...(side ? { side } : {}),
+        })
+      }
+    })()
   }
 
   // ── interactive order drafts (order_draft → draft_action → prepare) ─────
@@ -1017,6 +1274,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   }
 
   function confirmHandoff(session: Session, ticketId: string): void {
+    // Replacement (amend) tickets confirm through the two-leg cancel-then-
+    // place path; the mapping is consumed so a re-confirm can't re-cancel.
+    const replacesOrderId = amendReplaces.get(ticketId)
+    if (replacesOrderId !== undefined) {
+      amendReplaces.delete(ticketId)
+      confirmAmendHandoff(session, ticketId, replacesOrderId)
+      return
+    }
     const side = session.tickets.get(ticketId)?.side
     // Neutral copy on purpose: the confirm surface (api vs js_callback) is
     // resolved inside the venue adapter, so "sending" is the only claim the
@@ -1064,7 +1329,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   function cancelTicket(session: Session, ticketId: string): void {
     telemetry.recordUplink('ticket_cancel')
     if (!confirmedTickets.has(ticketId)) {
-      // Pre-confirm: nothing ever reached the venue — dismiss locally.
+      // Pre-confirm: nothing ever reached the venue — dismiss locally. A
+      // dismissed replacement ticket also forgets what it would have
+      // replaced (the old order stays untouched and working).
+      amendReplaces.delete(ticketId)
       ticketSessions.delete(ticketId)
       session.tickets.delete(ticketId)
       clearTicketTimeout(ticketId)
@@ -1654,6 +1922,27 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
 
       case 'action': {
+        // Conversational amend ("move my limit to 61k") — resolved against
+        // the trader's open orders, never the draft flow.
+        if (intentRes.amend) {
+          await handleAmend(session, intentRes.amend, text)
+          return
+        }
+        // Fractional close/reduce ("sell half my SOL position"): resolve the
+        // fraction against the LIVE position, then flow into the existing
+        // close/reduce prepare path below. A failed resolution already
+        // emitted its honest decline — never a zero-size order.
+        if (
+          intentRes.order &&
+          typeof intentRes.order.sizeFraction === 'number' &&
+          (intentRes.order.action === 'close' || intentRes.order.reduceOnly === true)
+        ) {
+          emit(session, { type: 'skeleton', shape: 'ticket' })
+          const resolved = await resolveFractionalOrder(session, intentRes.order)
+          if (resolved === null) return
+          await prepareTicket(session, resolved, text)
+          return
+        }
         // Close/reduce-only orders BYPASS the draft flow: their terms come
         // from the position being closed, so an editable card (symbol/
         // leverage controls) is the wrong surface — and the draft frame

@@ -118,12 +118,185 @@ def parse_perp(text: str) -> dict | None:
     return order
 
 
+# --- fractional close/reduce sizing --------------------------------------------
+# "sell half my SOL position" / "close half my long" / "sell 25% of my btc".
+# The service never knows live position sizes, so the order carries a
+# `sizeFraction` (0 < f ≤ 1) and an EMPTY size; the gateway resolves the
+# fraction against the live position via the seam and fills the size in.
+# Out-of-range fractions ("sell 150% of my sol") defer — never guess.
+_FRACTION_RE = re.compile(
+    r"(?P<pct>\d{1,3}(?:\.\d+)?)\s*(?:%|percent)"
+    r"|\b(?:a\s+|one\s+)?(?P<word>half|quarter|third)\b"
+    r"|\b(?P<all>all|everything)\b",
+    re.IGNORECASE,
+)
+_FRACTION_WORDS = {"half": 0.5, "quarter": 0.25, "third": 0.333}
+
+# Nouns a trader appends to "my <asset> …" that are not the asset itself.
+_POSITION_NOUNS = {
+    "position", "positions", "holding", "holdings", "bag", "bags", "stack",
+    "coins", "tokens",
+}
+
+# "sell <fraction> [of] my <asset> [position]" — spot fractional reduce.
+_SPOT_FRACTION_RE = re.compile(
+    r"^\s*sell\s+(?P<frac>.+?)\s+(?:of\s+)?my\s+(?P<rest>[a-zA-Z][a-zA-Z ]{0,40})\s*$",
+    re.IGNORECASE,
+)
+# "close <fraction> [of] my [<asset>] long/short [position]" — perp fractional close.
+_PERP_FRACTION_RE = re.compile(
+    r"^\s*close\s+(?P<frac>.+?)\s+(?:of\s+)?my\s+(?:(?P<rest>[a-zA-Z][a-zA-Z ]{0,40}?)\s+)?"
+    r"(?P<dir>long|short)(?:\s+position)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def parse_size_fraction(text: str) -> float | None:
+    """Map a fraction phrase to (0, 1], else None.
+
+    half=0.5, quarter=0.25, third≈0.333, "N%"=N/100, all/everything=1.0.
+    Out-of-range percents ("150%", "0%") return None so the caller defers
+    to the no-order action path instead of guessing.
+    """
+    m = _FRACTION_RE.search(text)
+    if not m:
+        return None
+    if m.group("pct") is not None:
+        fraction = float(m.group("pct")) / 100.0
+        return fraction if 0 < fraction <= 1 else None
+    if m.group("word"):
+        return _FRACTION_WORDS[m.group("word").lower()]
+    return 1.0
+
+
+def _fraction_asset(rest: str) -> tuple[bool, str | None]:
+    """Resolve the asset from the tokens after "my". (True, "SOL") for a
+    recognized asset; (True, None) when only position-nouns appear (the
+    gateway falls back to the page's symbol); (False, None) → defer."""
+    tokens = [t for t in re.split(r"\s+", rest.strip().lower()) if t]
+    tokens = [t for t in tokens if t not in _POSITION_NOUNS]
+    if not tokens:
+        return True, None
+    if len(tokens) > 1:
+        return False, None
+    asset = normalize_asset(tokens[0])
+    return (True, asset) if asset else (False, None)
+
+
+def parse_fractional_close(text: str) -> dict | None:
+    """Extract a fractional close/reduce order, else None.
+
+    Perp ("close half my long") and spot ("sell half my SOL position"). The
+    returned order carries sizeFraction and an empty size (resolved by the
+    gateway against the live position); instrument is "" when no asset was
+    named — the gateway substitutes the session's page symbol, the same
+    convention order drafts use.
+    """
+    t = text.strip().rstrip(".!?")
+    m = _PERP_FRACTION_RE.match(t)
+    if m is not None:
+        fraction = parse_size_fraction(m.group("frac"))
+        if fraction is None:
+            return None
+        ok, asset = _fraction_asset(m.group("rest") or "")
+        if not ok:
+            return None
+        direction = m.group("dir").lower()
+        return {
+            "capability": "futures_perp",
+            # Closing a long sells; closing a short buys.
+            "side": "sell" if direction == "long" else "buy",
+            "direction": direction,
+            "action": "close",
+            "leverage": 10,
+            "marginMode": "isolated",
+            "reduceOnly": True,
+            "size": "",
+            "sizeFraction": fraction,
+            "instrument": to_pair(asset) if asset else "",
+            "orderType": "market",
+        }
+    m = _SPOT_FRACTION_RE.match(t)
+    if m is not None:
+        fraction = parse_size_fraction(m.group("frac"))
+        if fraction is None:
+            return None
+        ok, asset = _fraction_asset(m.group("rest"))
+        if not ok:
+            return None
+        return {
+            "side": "sell",
+            # action:'close' marks the reduce path — the gateway resolves the
+            # size from the live position and bypasses the (open-only) draft.
+            "action": "close",
+            "size": "",
+            "sizeFraction": fraction,
+            "instrument": to_pair(asset) if asset else "",
+            "orderType": "market",
+        }
+    return None
+
+
+# --- conversational amend -------------------------------------------------------
+# "move my limit to 61k" / "change my order to 0.2" → an amend marker the
+# gateway resolves against the trader's OPEN orders (replacement ticket:
+# cancel-then-place). v1 carries at most one value: a price or a size.
+_AMEND_TRIGGER_RE = re.compile(
+    r"\b(?:move|change|amend|update|edit|revise|adjust)\b", re.IGNORECASE
+)
+_AMEND_TARGET_RE = re.compile(r"\bmy\b[\w\s]{0,20}?\b(?:orders?|limit)\b", re.IGNORECASE)
+_AMEND_VALUE_RE = re.compile(
+    r"\bto\s+\$?(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<suffix>k|m)?\b", re.IGNORECASE
+)
+_AMEND_PRICE_HINT_RE = re.compile(r"\b(?:price|limit)\b", re.IGNORECASE)
+_AMEND_SIZE_HINT_RE = re.compile(r"\b(?:size|qty|quantity|amount)\b", re.IGNORECASE)
+
+
+def _format_amount(value: float) -> str:
+    """Float → canonical wire string: no exponent, no trailing zeros."""
+    return f"{value:.8f}".rstrip("0").rstrip(".")
+
+
+def parse_amend(text: str) -> dict | None:
+    """Extract an amend marker {price?, size?}, else None.
+
+    Price vs size: an explicit "price"/"limit" or "size"/"qty"/"amount" word
+    decides; otherwise a k/m suffix, thousands separator, or value ≥ 1000
+    reads as a price and anything else as a size ("change my order to 0.2").
+    """
+    t = text.strip()
+    if not (_AMEND_TRIGGER_RE.search(t) and _AMEND_TARGET_RE.search(t)):
+        return None
+    m = _AMEND_VALUE_RE.search(t)
+    if not m:
+        return None
+    value = float(m.group("num").replace(",", ""))
+    suffix = (m.group("suffix") or "").lower()
+    if suffix == "k":
+        value *= 1_000
+    elif suffix == "m":
+        value *= 1_000_000
+    if value <= 0:
+        return None
+    amount = _format_amount(value)
+    if _AMEND_PRICE_HINT_RE.search(t):
+        return {"price": amount}
+    if _AMEND_SIZE_HINT_RE.search(t):
+        return {"size": amount}
+    looks_like_price = bool(suffix) or value >= 1_000 or "," in m.group("num")
+    return {"price": amount} if looks_like_price else {"size": amount}
+
+
 def parse_order(text: str) -> dict | None:
     """Extract a fully-specified order, else None. Asset → "XXX/USDT" pair.
 
-    Tries perpetual-futures phrasing ("long 0.5 BTC 10x") first, then spot
-    ("buy 0.5 BTC"). Spot orders are tagged capability='spot' for symmetry.
+    Tries fractional close/reduce phrasing ("sell half my SOL") first, then
+    perpetual-futures ("long 0.5 BTC 10x"), then spot ("buy 0.5 BTC"). Spot
+    orders are tagged capability='spot' for symmetry.
     """
+    fractional = parse_fractional_close(text)
+    if fractional is not None:
+        return fractional
     perp = parse_perp(text)
     if perp is not None:
         return perp
@@ -318,6 +491,16 @@ def fast_path(text: str) -> dict[str, Any] | None:
             "language": language,
             "order": order,
         }
+    # Amend is checked BEFORE orders_query/portfolio: "change my order to 0.2"
+    # contains "order" but is a mutation, not a blotter query.
+    amend = parse_amend(text)
+    if amend is not None:
+        return {
+            "intent": "action",
+            "confidence": 0.95,
+            "language": language,
+            "amend": amend,
+        }
     # Host actions and orders queries are checked BEFORE portfolio: "my orders"
     # is a blotter query (orders_query), not the positions/P&L portfolio view.
     host_action = parse_host_action(text)
@@ -345,9 +528,12 @@ def rule_classify(text: str) -> dict[str, Any]:
     """Full deterministic classification — the no-LLM fallback.
 
     Also the brain of the mock provider, so mock mode behaves like a decent
-    (if literal-minded) classifier. Decided behavior for vague orders like
-    "sell half my sol position": intent=action with NO order object — the
-    gateway asks for an explicit size; we never guess trade parameters.
+    (if literal-minded) classifier. Fractional reduce phrasings ("sell half
+    my sol position") now parse into an order carrying sizeFraction (resolved
+    by the gateway against the live position); vague orders WITHOUT a
+    parseable fraction ("sell some of my sol") stay intent=action with NO
+    order object — the gateway asks for an explicit size; we never guess
+    trade parameters.
     """
     fp = fast_path(text)
     if fp is not None:
