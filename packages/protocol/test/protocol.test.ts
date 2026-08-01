@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Frame, parseFrame, Uplink } from '../src/index.js'
+import { CanonicalOrder, Frame, parseFrame, Uplink, VenueCapabilities } from '../src/index.js'
 
 const base = { v: 1 as const, id: 'f_1', ts: 1_752_480_000_000 }
 
@@ -420,7 +420,13 @@ describe('dynamic features — identity / upload_status / identity_claim (additi
 
   it('identity_claim validates username charset and 4-digit pin; signout needs neither', () => {
     const mk = (extra: object) =>
-      Uplink.safeParse({ v: 1, sessionId: 's_1', ts: 1_752_480_000_000, kind: 'identity_claim', ...extra })
+      Uplink.safeParse({
+        v: 1,
+        sessionId: 's_1',
+        ts: 1_752_480_000_000,
+        kind: 'identity_claim',
+        ...extra,
+      })
     expect(mk({ mode: 'create', username: 'victor_t', pin: '4821' }).success).toBe(true)
     expect(mk({ mode: 'signin', username: 'victor_t', pin: '4821' }).success).toBe(true)
     expect(mk({ mode: 'signout' }).success).toBe(true)
@@ -431,7 +437,7 @@ describe('dynamic features — identity / upload_status / identity_claim (additi
 })
 
 describe('host interaction — host_action / orders_summary / context.pageControl (additive)', () => {
-  it('parses host_action for each allowlisted action and rejects unknown actions', () => {
+  it('parses host_action for the legacy chart verbs and bounds the open verb string', () => {
     const tf = Frame.safeParse({
       ...base,
       type: 'host_action',
@@ -449,8 +455,16 @@ describe('host interaction — host_action / orders_summary / context.pageContro
       indicator: 'rsi',
     })
     expect(ind.success).toBe(true)
-    const bad = Frame.safeParse({ ...base, type: 'host_action', actionId: 'ha_3', action: 'navigate' })
-    expect(bad.success).toBe(false) // page control is a closed allowlist, never open navigation
+    // action is an open STRING (stage precedent) — bounded, never empty
+    const empty = Frame.safeParse({ ...base, type: 'host_action', actionId: 'ha_3', action: '' })
+    expect(empty.success).toBe(false)
+    const tooLong = Frame.safeParse({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_3b',
+      action: 'x'.repeat(41),
+    })
+    expect(tooLong.success).toBe(false)
     const badTf = Frame.safeParse({
       ...base,
       type: 'host_action',
@@ -486,7 +500,14 @@ describe('host interaction — host_action / orders_summary / context.pageContro
           status: 'WORKING',
           filledPct: 40,
         },
-        { orderId: 'o_2', symbol: 'ETH/USDT', side: 'sell', kind: 'MKT', qty: '1', status: 'FILLED' },
+        {
+          orderId: 'o_2',
+          symbol: 'ETH/USDT',
+          side: 'sell',
+          kind: 'MKT',
+          qty: '1',
+          status: 'FILLED',
+        },
       ],
       totals: { open: 1, filled: 1, cancelled: 0 },
     })
@@ -508,5 +529,215 @@ describe('host interaction — host_action / orders_summary / context.pageContro
     expect(mk({ symbol: 'BTC/USDT', pageControl: true }).success).toBe(true)
     expect(mk({}).success).toBe(true) // still valid without it — additive
     expect(mk({ pageControl: 'yes' }).success).toBe(false)
+  })
+})
+
+describe('wave 2 — host verbs / alerts / protective exits (additive)', () => {
+  const upBase = { v: 1 as const, sessionId: 's_1', ts: 1_752_480_000_000 }
+
+  it('BACK-COMPAT: old-style host_action (former enum value, no params) still parses', () => {
+    const r = parseFrame({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_old',
+      action: 'remove_indicator',
+      indicator: 'rsi',
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok && r.frame.type === 'host_action') {
+      expect(r.frame.action).toBe('remove_indicator')
+      expect(r.frame.params).toBeUndefined()
+    }
+  })
+
+  it('host_action accepts new open verbs with params', () => {
+    const nav = Frame.safeParse({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_nav',
+      action: 'navigate',
+      params: { target: '/futures/BTC-USDT' },
+      note: 'Opening futures →',
+    })
+    expect(nav.success).toBe(true)
+    const prefill = Frame.safeParse({
+      ...base,
+      type: 'host_action',
+      actionId: 'ha_pf',
+      action: 'prefill_ticket',
+      params: { symbol: 'ETH/USDT', side: 'buy', size: '1.5' },
+    })
+    expect(prefill.success).toBe(true)
+  })
+
+  it('rejects an oversized host_action params map (entries, key length, value length)', () => {
+    const mk = (params: Record<string, string>) =>
+      Frame.safeParse({
+        ...base,
+        type: 'host_action',
+        actionId: 'ha_p',
+        action: 'navigate',
+        params,
+      })
+    const tooMany = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, 'v']))
+    expect(mk(tooMany).success).toBe(false)
+    expect(mk({ ['k'.repeat(41)]: 'v' }).success).toBe(false)
+    expect(mk({ target: 'v'.repeat(201) }).success).toBe(false)
+    expect(mk({ target: '/spot' }).success).toBe(true)
+  })
+
+  it('context uplink declares supported host verbs; pageControl alone stays legacy', () => {
+    const mk = (extra: object) => Uplink.safeParse({ ...upBase, kind: 'context', ...extra })
+    expect(
+      mk({ pageControl: true, hostActions: ['set_timeframe', 'navigate', 'prefill_ticket'] })
+        .success,
+    ).toBe(true)
+    expect(mk({ pageControl: true }).success).toBe(true) // legacy chart verbs only
+    expect(mk({ hostActions: [] }).success).toBe(true)
+    expect(mk({ hostActions: ['', 'navigate'] }).success).toBe(false) // no empty verbs
+    expect(mk({ hostActions: Array.from({ length: 25 }, (_, i) => `verb_${i}`) }).success).toBe(
+      false,
+    ) // bounded list
+  })
+
+  it('parses an alert frame in every state and renders conditionLabel verbatim', () => {
+    for (const state of ['armed', 'triggered', 'cancelled'] as const) {
+      const r = parseFrame({
+        ...base,
+        type: 'alert',
+        alertId: 'a_1',
+        symbol: 'BTC/USDT',
+        conditionLabel: 'ABOVE 70,000',
+        state,
+        tsIso: '2026-08-01T09:00:00Z',
+        fallback: { text: 'Alert ABOVE 70,000 on BTC/USDT.' },
+      })
+      expect(r.ok).toBe(true)
+      if (r.ok && r.frame.type === 'alert') {
+        expect(r.frame.conditionLabel).toBe('ABOVE 70,000')
+        expect(r.frame.state).toBe(state)
+      }
+    }
+  })
+
+  it('rejects an alert with a bad state enum or missing conditionLabel', () => {
+    const badState = Frame.safeParse({
+      ...base,
+      type: 'alert',
+      alertId: 'a_1',
+      symbol: 'BTC/USDT',
+      conditionLabel: 'ABOVE 70,000',
+      state: 'snoozed',
+    })
+    expect(badState.success).toBe(false)
+    const noLabel = Frame.safeParse({
+      ...base,
+      type: 'alert',
+      alertId: 'a_1',
+      symbol: 'BTC/USDT',
+      state: 'armed',
+    })
+    expect(noLabel.success).toBe(false)
+  })
+
+  it('alert_action uplink cancels; creation has no wire verb', () => {
+    const cancel = Uplink.safeParse({
+      ...upBase,
+      kind: 'alert_action',
+      alertId: 'a_1',
+      action: 'cancel',
+    })
+    expect(cancel.success).toBe(true)
+    const create = Uplink.safeParse({
+      ...upBase,
+      kind: 'alert_action',
+      alertId: 'a_1',
+      action: 'create',
+    })
+    expect(create.success).toBe(false) // creation is conversational (user_text)
+    const noId = Uplink.safeParse({ ...upBase, kind: 'alert_action', action: 'cancel' })
+    expect(noId.success).toBe(false)
+  })
+
+  it('order_draft round-trips stop-loss / take-profit as strings; numbers are rejected', () => {
+    const draft = {
+      ...base,
+      type: 'order_draft',
+      draftId: 'd_3',
+      capability: 'futures_perp',
+      title: 'Set up your LONG BTC order',
+      instrument: 'BTC/USDT',
+      side: 'buy',
+      direction: 'long',
+      sizeAsset: 'BTC',
+      cta: 'Review order →',
+      stopLossPrice: '58,000',
+      takeProfitPrice: '72,000',
+    }
+    const ok = Frame.safeParse(draft)
+    expect(ok.success).toBe(true)
+    if (ok.success && ok.data.type === 'order_draft') {
+      expect(ok.data.stopLossPrice).toBe('58,000')
+      expect(ok.data.takeProfitPrice).toBe('72,000')
+    }
+    expect(Frame.safeParse({ ...draft, stopLossPrice: 58000 }).success).toBe(false)
+    expect(Frame.safeParse({ ...draft, takeProfitPrice: 72000 }).success).toBe(false)
+  })
+
+  it('draft_action submit echoes SL/TP strings; non-string prices are rejected', () => {
+    const mk = (params: object) =>
+      Uplink.safeParse({
+        ...upBase,
+        kind: 'draft_action',
+        draftId: 'd_3',
+        action: 'submit',
+        params: { instrument: 'BTC/USDT', orderType: 'market', size: '0.5', ...params },
+      })
+    expect(mk({ stopLossPrice: '58,000', takeProfitPrice: '72,000' }).success).toBe(true)
+    expect(mk({}).success).toBe(true) // both optional — additive
+    expect(mk({ stopLossPrice: 58000 }).success).toBe(false)
+  })
+
+  it('canonical orders carry optional SL/TP strings; venue caps gate via protectiveExits presence', () => {
+    const spot = CanonicalOrder.safeParse({
+      capability: 'spot',
+      instrument: 'BTC/USDT',
+      side: 'buy',
+      size: '0.5',
+      orderType: 'market',
+      stopLossPrice: '58,000',
+    })
+    expect(spot.success).toBe(true)
+    const perp = CanonicalOrder.safeParse({
+      capability: 'futures_perp',
+      instrument: 'BTC/USDT',
+      direction: 'long',
+      leverage: 10,
+      marginMode: 'isolated',
+      size: '0.5',
+      orderType: 'market',
+      takeProfitPrice: '72,000',
+    })
+    expect(perp.success).toBe(true)
+    const badPerp = CanonicalOrder.safeParse({
+      capability: 'futures_perp',
+      instrument: 'BTC/USDT',
+      direction: 'long',
+      leverage: 10,
+      marginMode: 'isolated',
+      size: '0.5',
+      orderType: 'market',
+      stopLossPrice: 58000,
+    })
+    expect(badPerp.success).toBe(false) // money is a STRING, never a number
+    // presence-pattern: protectiveExits is literal true or absent, never false
+    expect(
+      VenueCapabilities.safeParse({
+        spot: { protectiveExits: true },
+        futures_perp: { maxLeverage: 50, marginModes: ['isolated'], protectiveExits: true },
+      }).success,
+    ).toBe(true)
+    expect(VenueCapabilities.safeParse({ spot: {} }).success).toBe(true) // absent = disabled
+    expect(VenueCapabilities.safeParse({ spot: { protectiveExits: false } }).success).toBe(false)
   })
 })

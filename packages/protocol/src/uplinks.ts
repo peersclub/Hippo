@@ -68,6 +68,12 @@ export const DraftActionUplink = z.object({
       orderType: z.enum(['market', 'limit']),
       size: z.string().min(1),
       limitPrice: z.string().optional(),
+      /** Protective exits (additive, August 2026) — echo the draft card's
+       * stop-loss / take-profit inputs on submit. Money as STRINGS. The
+       * gateway re-validates against venue capabilities (protectiveExits
+       * presence) like every other edited param — never trusted blindly. */
+      stopLossPrice: z.string().optional(),
+      takeProfitPrice: z.string().optional(),
       leverage: z.number().int().min(1).optional(),
       marginMode: z.enum(['isolated', 'cross']).optional(),
     })
@@ -93,6 +99,15 @@ export const ContextUplink = z.object({
    * in is answered in prose instead of silently no-opping.
    */
   pageControl: z.boolean().optional(),
+  /**
+   * Host-action verb declaration (additive, August 2026): the host_action
+   * verbs this host page supports (well-known: set_timeframe, apply_indicator,
+   * remove_indicator, navigate, set_symbol, prefill_ticket — open vocabulary,
+   * hosts may declare more). The gateway only emits verbs the host declared.
+   * Back-compat: pageControl true with NO hostActions = legacy chart verbs
+   * only (set_timeframe / apply_indicator / remove_indicator).
+   */
+  hostActions: z.array(z.string().min(1).max(40)).max(24).optional(),
 })
 
 export const FeedbackUplink = z.object({
@@ -139,6 +154,21 @@ export const StreamStopUplink = z.object({
   kind: z.literal('stream_stop'),
 })
 
+/**
+ * Alert cancel (additive, August 2026) — the trader tapped CANCEL on an alert
+ * card chip. Creation stays conversational (user_text — the server parses the
+ * condition), so cancel is the only alert verb that needs a wire uplink.
+ * `action` is a closed enum ON PURPOSE (unlike growth vocabularies): each
+ * value is a distinct SDK affordance, and a new one ships with the SDK that
+ * renders it. The gateway answers with an `alert` frame (state 'cancelled').
+ */
+export const AlertActionUplink = z.object({
+  ...base,
+  kind: z.literal('alert_action'),
+  alertId: z.string().min(1).max(64),
+  action: z.enum(['cancel']),
+})
+
 export const Uplink = z.discriminatedUnion('kind', [
   UserTextUplink,
   ChipTapUplink,
@@ -150,6 +180,7 @@ export const Uplink = z.discriminatedUnion('kind', [
   ConsentUplink,
   SettingsUplink,
   StreamStopUplink,
+  AlertActionUplink,
 ])
 
 export type Uplink = z.infer<typeof Uplink>
