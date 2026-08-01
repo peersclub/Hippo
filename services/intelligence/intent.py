@@ -449,10 +449,94 @@ def canonical_indicator(text: str) -> str | None:
     return "sma50" if (period and period.group(1) == "50") else "sma20"
 
 
+# Wider host verbs (August 2026) — PRIMARY-path mirrors of the gateway's
+# degraded-mode parsers (guessNavigate/guessSetSymbol/guessPrefillTicket in
+# orchestrator/intelligence.ts). Both sides must recognise the same phrasings:
+# this service classifies when it is up; the gateway's copies keep the verbs
+# alive when it is not. The gateway re-validates symbols and gates every verb
+# on the host's ADVERTISED action list before anything is emitted.
+_NAV_RE = re.compile(
+    r"\b(?:go to|open|navigate to|take me to|show)\s+(?:the\s+)?"
+    r"(trade|trading|settings?|how)(?:\s+(?:page|tab|screen|view|section))?\b",
+    re.IGNORECASE,
+)
+_SET_SYMBOL_RE = re.compile(
+    r"\b(?:switch(?:\s+(?:me|over|back))?\s+to|"
+    r"change\s+(?:(?:the\s+)?(?:pair|symbol|market|chart)\s+)?to|"
+    r"show\s+me|pull\s+up|go\s+to)\s+\$?([a-z][a-z0-9]{1,9})"
+    r"(?:\s*/\s*([a-z0-9]{2,10}))?\b"
+    r"(?!\s+(?:price|prices|news|analysis|funding|volume|vol|brief|order|orders))",
+    re.IGNORECASE,
+)
+_NOT_ASSETS = {
+    "the", "my", "me", "it", "this", "that", "chart", "charts", "candle",
+    "candles", "page", "tab", "trade", "trading", "settings", "setting",
+    "how", "orders", "order", "position", "positions", "portfolio",
+    "market", "limit", "usdt", "timeframe",
+}
+_PREFILL_HINT = re.compile(
+    r"\b(?:pre-?fill|fill\s+(?:in\s+|out\s+|up\s+)?(?:the\s+|a\s+)?(?:order\s+)?(?:ticket|form))\b",
+    re.IGNORECASE,
+)
+_PREFILL_SIDE_RE = re.compile(r"\b(buy|sell|long|short)\b", re.IGNORECASE)
+_PREFILL_QTY_RE = re.compile(
+    r"\b(?:buy|sell|long|short)\s+(?:of\s+)?([\d,]*\.?\d+)\b|\bof\s+([\d,]*\.?\d+)\b",
+    re.IGNORECASE,
+)
+_PREFILL_PRICE_RE = re.compile(
+    r"(?:\bat|@|\bprice(?:\s+of)?|\blimit(?:\s+(?:price|of))?)\s*\$?([\d,]*\.?\d+)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_navigate(t: str) -> dict[str, Any] | None:
+    m = _NAV_RE.search(t)
+    if not m:
+        return None
+    raw = m.group(1).lower()
+    target = "trade" if raw.startswith("trad") else "settings" if raw.startswith("setting") else "how"
+    return {"action": "navigate", "params": {"target": target}}
+
+
+def _parse_set_symbol(t: str) -> dict[str, Any] | None:
+    m = _SET_SYMBOL_RE.search(t)
+    if not m:
+        return None
+    base = m.group(1).lower()
+    if base in _NOT_ASSETS or re.fullmatch(r"\d+[mhd]", base):
+        return None
+    quote = (m.group(2) or "usdt").upper()
+    return {"action": "set_symbol", "params": {"symbol": f"{base.upper()}/{quote}"}}
+
+
+def _parse_prefill_ticket(t: str) -> dict[str, Any] | None:
+    if not _PREFILL_HINT.search(t):
+        return None
+    params: dict[str, str] = {}
+    side = _PREFILL_SIDE_RE.search(t)
+    if side:
+        word = side.group(1).lower()
+        params["side"] = "buy" if word == "long" else "sell" if word == "short" else word
+    qty = _PREFILL_QTY_RE.search(t)
+    if qty:
+        params["qty"] = (qty.group(1) or qty.group(2)).replace(",", "")
+    price = _PREFILL_PRICE_RE.search(t)
+    if price:
+        # Only when the trader SAID a price — the server never invents one.
+        params["price"] = price.group(1).replace(",", "")
+    return {"action": "prefill_ticket", "params": params}
+
+
 def parse_host_action(text: str) -> dict[str, Any] | None:
-    """Extract a chart-control action, else None. `indicator` is omitted when it
-    can't be canonicalised — the gateway then declines honestly."""
+    """Extract a page-control action, else None. `indicator` is omitted when it
+    can't be canonicalised — the gateway then declines honestly. Order matters:
+    timeframe ("switch to 5m") before symbol ("switch to ETH"), prefill before
+    the order parsers upstream, navigate ("go to settings") before symbol
+    ("go to eth") — the earlier, more specific reading wins."""
     t = text.strip()
+    prefill = _parse_prefill_ticket(t)
+    if prefill is not None:
+        return prefill
     tf = canonical_timeframe(t)
     if tf and _TF_TRIGGER.search(t):
         return {"action": "set_timeframe", "timeframe": tf}
@@ -465,7 +549,7 @@ def parse_host_action(text: str) -> dict[str, Any] | None:
         if ind:
             out["indicator"] = ind
         return out
-    return None
+    return _parse_navigate(t) or _parse_set_symbol(t)
 
 
 # --- consolidated orders query ------------------------------------------------
@@ -649,6 +733,18 @@ def fast_path(text: str) -> dict[str, Any] | None:
     alert = _alert_fast_path(text, language)
     if alert is not None:
         return alert
+    # Ticket prefill BEFORE the order parsers: "fill the ticket to buy 0.1 btc"
+    # carries a buy-phrase but is a page command (fill the host ticket's
+    # inputs — the trader clicks Place), never an order. Mirrors the
+    # gateway's degraded-mode ordering.
+    prefill = _parse_prefill_ticket(text)
+    if prefill is not None:
+        return {
+            "intent": "host_action",
+            "confidence": 0.95,
+            "language": language,
+            "hostAction": prefill,
+        }
     order = parse_order(text)
     if order is not None:
         return {
