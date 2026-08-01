@@ -108,6 +108,14 @@ export const OrderDraftFrame = z.object({
   sizeAsset: z.string(), // unit label for the size input, e.g. "BTC"
   orderType: z.enum(['market', 'limit']).default('market'),
   limitPrice: z.string().optional(),
+  /** Protective exits (additive, August 2026) — stop-loss / take-profit price
+   * inputs on the draft card. Money as STRINGS (protocol law), same as
+   * limitPrice. Round-trip only: the trader edits, the draft_action submit
+   * echoes them, and the gateway RE-VALIDATES against venue capabilities
+   * (protectiveExits presence) before preparing the ticket — the SDK never
+   * decides whether the venue supports them. */
+  stopLossPrice: z.string().optional(),
+  takeProfitPrice: z.string().optional(),
   leverage: z.number().int().min(1).optional(), // perp only — slider position
   maxLeverage: z.number().int().min(1).optional(), // slider bound (venue caps)
   marginMode: z.enum(['isolated', 'cross']).optional(),
@@ -356,19 +364,38 @@ export const UploadStatusFrame = z.object({
  * never touches the host DOM: it forwards a validated action over the existing
  * postMessage bridge and the host applies it — or ignores it. Only flows when
  * the host opted in (embed attr → ContextUplink.pageControl), so a page that
- * never asked can never be driven. `action` is a closed set (the SDK must know
- * how to forward each); `indicator` is an open slug the HOST validates against
- * what its chart actually supports — growth on the host side breaks nothing.
+ * never asked can never be driven. `indicator` is an open slug the HOST
+ * validates against what its chart actually supports — growth on the host side
+ * breaks nothing.
+ *
+ * `action` widened enum → open STRING (additive, August 2026, stage precedent
+ * on LifecycleFrame): the host — not the SDK — is the authority on which verbs
+ * it supports (declared via ContextUplink.hostActions), so a new verb must not
+ * fail SDK parse. The SDK forwards verbs verbatim over the bridge; the host
+ * applies the ones it knows and acks failure for the rest. Well-known verbs:
+ * set_timeframe, apply_indicator, remove_indicator, navigate, set_symbol,
+ * prefill_ticket.
  */
 export const HostActionFrame = z.object({
   ...base,
   type: z.literal('host_action'),
   actionId: z.string(), // correlates the host's ack back to this frame
-  action: z.enum(['set_timeframe', 'apply_indicator', 'remove_indicator']),
+  action: z.string().min(1).max(40),
   timeframe: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']).optional(),
   indicator: z
     .string()
     .regex(/^[a-z0-9_-]{1,24}$/)
+    .optional(),
+  /**
+   * Verb arguments for actions beyond the legacy chart pair (additive, August
+   * 2026): navigate target, set_symbol symbol, prefill_ticket fields… A flat
+   * bounded string→string map — the HOST validates values against what it
+   * actually supports, same posture as `indicator`. The legacy
+   * timeframe/indicator fields stay untouched for old SDKs/hosts.
+   */
+  params: z
+    .record(z.string().min(1).max(40), z.string().max(200))
+    .refine((m) => Object.keys(m).length <= 16, { message: 'params: at most 16 entries' })
     .optional(),
   /** Server-authored one-liner for the in-panel chip, e.g. "Chart → 5m". */
   note: z.string().optional(),
@@ -409,6 +436,27 @@ export const OrdersSummaryFrame = z.object({
   }),
 })
 
+/**
+ * Price alert card (additive, August 2026) — one alert's current state, pushed
+ * on creation and on every state change so the card updates in place (keyed by
+ * alertId). Creation is conversational (user_text → the server parses the
+ * condition); only CANCEL needs a wire uplink (alert_action). `conditionLabel`
+ * is SERVER-AUTHORED display text (e.g. "ABOVE 70,000") that the SDK renders
+ * VERBATIM — stop-line law, the SDK never re-formats or recomputes a
+ * condition. Old SDKs render this via FallbackCard (fallback carried in base).
+ */
+export const AlertFrame = z.object({
+  ...base,
+  type: z.literal('alert'),
+  alertId: z.string().min(1).max(64),
+  symbol: z.string().min(1).max(20), // "BTC/USDT"
+  conditionLabel: z.string().min(1).max(120), // server-authored, rendered verbatim
+  state: z.enum(['armed', 'triggered', 'cancelled']),
+  /** Server-authored one-line detail, e.g. "Triggered at 70,012.40 · 14:32 IST". */
+  note: z.string().max(280).optional(),
+  tsIso: z.string().optional(), // ISO time of the state change, when known
+})
+
 export const Frame = z.discriminatedUnion('type', [
   ResearchBriefFrame,
   OrderTicketFrame,
@@ -431,6 +479,7 @@ export const Frame = z.discriminatedUnion('type', [
   UploadStatusFrame,
   HostActionFrame,
   OrdersSummaryFrame,
+  AlertFrame,
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
@@ -451,6 +500,7 @@ export type Identity = z.infer<typeof IdentityFrame>
 export type UploadStatus = z.infer<typeof UploadStatusFrame>
 export type HostAction = z.infer<typeof HostActionFrame>
 export type OrdersSummary = z.infer<typeof OrdersSummaryFrame>
+export type Alert = z.infer<typeof AlertFrame>
 export type OrderDraft = z.infer<typeof OrderDraftFrame>
 export type PriceTick = z.infer<typeof PriceTickFrame>
 export type Skeleton = z.infer<typeof SkeletonFrame>

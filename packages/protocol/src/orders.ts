@@ -18,6 +18,17 @@ export type Capability = (typeof CAPABILITIES)[number]
 
 const orderTypeEnum = z.enum(['market', 'limit'])
 
+/**
+ * Protective exits (additive, August 2026) — optional stop-loss / take-profit
+ * trigger prices attached to a spot or perp order. Money as STRINGS, exactly
+ * like limitPrice — the seam never guesses or recomputes money. Validated by
+ * the capability module against VenueCapabilities.*.protectiveExits presence.
+ */
+const protectiveExitFields = {
+  stopLossPrice: z.string().optional(),
+  takeProfitPrice: z.string().optional(),
+}
+
 /** Spot — buy/sell a quantity of an instrument. Framework module #1. */
 export const SpotOrder = z.object({
   capability: z.literal('spot'),
@@ -26,6 +37,7 @@ export const SpotOrder = z.object({
   size: z.string(), // base quantity, explicit — never inferred
   orderType: orderTypeEnum,
   limitPrice: z.string().optional(),
+  ...protectiveExitFields,
 })
 
 /** Perpetual futures — a leveraged long/short position with a margin mode. */
@@ -40,6 +52,7 @@ export const FuturesPerpOrder = z.object({
   reduceOnly: z.boolean().default(false),
   orderType: orderTypeEnum,
   limitPrice: z.string().optional(),
+  ...protectiveExitFields,
 })
 
 /** Options — buy/sell a call/put at a strike and expiry. */
@@ -72,10 +85,19 @@ export type OptionsOrder = z.infer<typeof OptionsOrder>
  * per-feature values here are what the capability module validates against
  * (accuracy: "leverage 13x exceeds this venue's 10x cap" is a venue-true check).
  */
-export const SpotParams = z.object({})
+export const SpotParams = z.object({
+  /** Presence = the venue accepts stop-loss / take-profit trigger prices on
+   * spot orders (additive, August 2026). Same presence-pattern as the
+   * capability objects themselves: present means enabled, absent means the
+   * capability module rejects orders carrying stopLossPrice/takeProfitPrice. */
+  protectiveExits: z.literal(true).optional(),
+})
 export const FuturesPerpParams = z.object({
   maxLeverage: z.number().positive(),
   marginModes: z.array(z.enum(['isolated', 'cross'])).min(1),
+  /** Presence = the venue accepts stop-loss / take-profit trigger prices on
+   * perp orders (additive, August 2026). See SpotParams.protectiveExits. */
+  protectiveExits: z.literal(true).optional(),
 })
 export const OptionsParams = z.object({
   // expiries/strikes are instrument-listed; kept minimal until an options venue lands
