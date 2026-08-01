@@ -59,7 +59,12 @@ export type OrderIntent = {
   capability?: 'spot' | 'futures_perp'
   side: 'buy' | 'sell'
   size: string
-  /** e.g. "BTC/USDT" */
+  /** Fractional close/reduce ("sell half my SOL"): 0 < f ≤ 1 and size is ""
+   * — the orchestrator resolves the fraction against the LIVE position via
+   * the seam before preparing. Absent for absolute-size orders. */
+  sizeFraction?: number
+  /** e.g. "BTC/USDT" — "" on fractional orders that named no asset (the
+   * orchestrator substitutes the session's page symbol, like drafts do). */
   instrument: string
   orderType: 'market' | 'limit'
   limitPrice?: string
@@ -71,11 +76,20 @@ export type OrderIntent = {
   reduceOnly?: boolean
 }
 
+/** Conversational amend ("move my limit to 61k") — v1 is a replacement
+ * ticket: the orchestrator finds the trader's single open order, prepares a
+ * new ticket at the amended price/size, and on confirm cancels the old venue
+ * order before placing the new one. At most one of price/size is set. */
+export type AmendIntent = { price?: string; size?: string }
+
 export type IntentResult = {
   intent: IntentKind
   confidence: number
   language: 'en' | 'hi' | 'hinglish'
   order?: OrderIntent
+  /** Amend marker when the action is "change my working order" (additive;
+   * produced by the intelligence fast-path only). */
+  amend?: AmendIntent
   /** Chart-control payload when intent is 'host_action' (additive). */
   hostAction?: HostActionIntent
   /** Orders-blotter scope when intent is 'orders_query' (additive). */

@@ -14,9 +14,12 @@ from intent import (
     classify,
     detect_language,
     fast_path,
+    parse_amend,
+    parse_fractional_close,
     parse_host_action,
     parse_order,
     parse_orders_query,
+    parse_size_fraction,
     rule_classify,
 )
 
@@ -116,11 +119,156 @@ class OrderParsing(unittest.TestCase):
         self.assertIsNone(parse_order("buy 5 pepe"))
 
     def test_vague_size_defers(self) -> None:
-        # "half" is not an explicit quantity — never guess trade parameters.
-        self.assertIsNone(parse_order("sell half my sol position"))
+        # "some" is not a quantity OR a fraction — never guess trade parameters.
+        self.assertIsNone(parse_order("sell some of my sol position"))
 
     def test_unparseable_trailing_text_defers(self) -> None:
         self.assertIsNone(parse_order("buy 1 btc when it dips"))
+
+
+class FractionalCloseParsing(unittest.TestCase):
+    def test_fraction_table(self) -> None:
+        for phrase, fraction in (
+            ("half", 0.5),
+            ("a half", 0.5),
+            ("quarter", 0.25),
+            ("a quarter", 0.25),
+            ("one third", 0.333),
+            ("third", 0.333),
+            ("25%", 0.25),
+            ("12.5%", 0.125),
+            ("100%", 1.0),
+            ("all", 1.0),
+            ("everything", 1.0),
+        ):
+            self.assertEqual(parse_size_fraction(phrase), fraction, phrase)
+
+    def test_fraction_rejects(self) -> None:
+        for phrase in ("150%", "0%", "some", "most", "101%"):
+            self.assertIsNone(parse_size_fraction(phrase), phrase)
+
+    def test_spot_sell_half(self) -> None:
+        order = parse_fractional_close("sell half my sol position")
+        self.assertEqual(
+            order,
+            {
+                "side": "sell",
+                "action": "close",
+                "size": "",
+                "sizeFraction": 0.5,
+                "instrument": "SOL/USDT",
+                "orderType": "market",
+            },
+        )
+
+    def test_spot_percent_of(self) -> None:
+        order = parse_fractional_close("sell 25% of my btc")
+        assert order is not None
+        self.assertEqual(order["sizeFraction"], 0.25)
+        self.assertEqual(order["instrument"], "BTC/USDT")
+
+    def test_spot_all(self) -> None:
+        order = parse_fractional_close("sell all my eth")
+        assert order is not None
+        self.assertEqual(order["sizeFraction"], 1.0)
+        self.assertEqual(order["instrument"], "ETH/USDT")
+
+    def test_spot_no_asset_falls_to_page_symbol(self) -> None:
+        order = parse_fractional_close("sell half my position")
+        assert order is not None
+        self.assertEqual(order["instrument"], "")  # gateway uses the page symbol
+        self.assertEqual(order["sizeFraction"], 0.5)
+
+    def test_perp_close_half_long(self) -> None:
+        order = parse_fractional_close("close half my long")
+        assert order is not None
+        self.assertEqual(order["capability"], "futures_perp")
+        self.assertEqual(order["action"], "close")
+        self.assertTrue(order["reduceOnly"])
+        self.assertEqual(order["side"], "sell")  # closing a long sells
+        self.assertEqual(order["sizeFraction"], 0.5)
+        self.assertEqual(order["instrument"], "")
+
+    def test_perp_close_with_asset(self) -> None:
+        order = parse_fractional_close("close a quarter of my btc short")
+        assert order is not None
+        self.assertEqual(order["direction"], "short")
+        self.assertEqual(order["side"], "buy")  # closing a short buys
+        self.assertEqual(order["sizeFraction"], 0.25)
+        self.assertEqual(order["instrument"], "BTC/USDT")
+
+    def test_over_100_percent_defers(self) -> None:
+        self.assertIsNone(parse_fractional_close("sell 150% of my sol"))
+
+    def test_unknown_asset_defers(self) -> None:
+        self.assertIsNone(parse_fractional_close("sell half my pepe"))
+
+    def test_absolute_sizes_still_parse_unchanged(self) -> None:
+        order = parse_order("sell 0.5 sol")
+        self.assertEqual(
+            order,
+            {"side": "sell", "size": "0.5", "instrument": "SOL/USDT", "orderType": "market"},
+        )
+        order = parse_order("close long 0.5 btc")
+        assert order is not None
+        self.assertNotIn("sizeFraction", order)
+        self.assertEqual(order["size"], "0.5")
+
+    def test_fast_path_fractional_is_action_with_order(self) -> None:
+        result = fast_path("sell half my sol position")
+        assert result is not None
+        self.assertEqual(result["intent"], "action")
+        self.assertEqual(result["order"]["sizeFraction"], 0.5)
+
+    def test_rule_classify_vague_still_no_order(self) -> None:
+        result = rule_classify("sell some of my sol position")
+        self.assertEqual(result["intent"], "action")
+        self.assertNotIn("order", result)
+
+
+class AmendParsing(unittest.TestCase):
+    def test_move_limit_price_k_suffix(self) -> None:
+        self.assertEqual(parse_amend("move my limit to 61k"), {"price": "61000"})
+
+    def test_change_order_small_value_is_size(self) -> None:
+        self.assertEqual(parse_amend("change my order to 0.2"), {"size": "0.2"})
+
+    def test_explicit_price_word(self) -> None:
+        self.assertEqual(parse_amend("update my order price to 60,000"), {"price": "60000"})
+
+    def test_explicit_size_word(self) -> None:
+        self.assertEqual(parse_amend("amend my order size to 1500"), {"size": "1500"})
+
+    def test_bare_large_value_is_price(self) -> None:
+        self.assertEqual(parse_amend("change my order to 61,500"), {"price": "61500"})
+
+    def test_no_trigger_defers(self) -> None:
+        self.assertIsNone(parse_amend("show my orders"))
+
+    def test_no_value_defers(self) -> None:
+        self.assertIsNone(parse_amend("change my order please"))
+
+    def test_zero_value_defers(self) -> None:
+        self.assertIsNone(parse_amend("change my order to 0"))
+
+    def test_fast_path_amend_beats_orders_query(self) -> None:
+        # Contains "order" but is a mutation — must not classify as orders_query.
+        result = fast_path("change my order to 0.2")
+        assert result is not None
+        self.assertEqual(result["intent"], "action")
+        self.assertEqual(result["amend"], {"size": "0.2"})
+        self.assertNotIn("order", result)
+
+    def test_fast_path_move_limit(self) -> None:
+        result = fast_path("move my limit to 61k")
+        assert result is not None
+        self.assertEqual(result["intent"], "action")
+        self.assertEqual(result["amend"], {"price": "61000"})
+
+    def test_orders_query_still_wins_for_queries(self) -> None:
+        result = fast_path("show all my orders")
+        assert result is not None
+        self.assertEqual(result["intent"], "orders_query")
 
 
 class FastPaths(unittest.TestCase):
@@ -163,7 +311,9 @@ class RuleClassify(unittest.TestCase):
     def test_vague_order_is_action_without_order(self) -> None:
         # DECIDED behavior: intent=action, NO order object — the gateway asks
         # for an explicit size; the service never guesses trade parameters.
-        result = rule_classify("sell half my sol position")
+        # ("half" now parses as a fraction — see FractionalCloseParsing — so
+        # the still-vague phrasing here uses "some".)
+        result = rule_classify("sell some of my sol position")
         self.assertEqual(result["intent"], "action")
         self.assertNotIn("order", result)
 
