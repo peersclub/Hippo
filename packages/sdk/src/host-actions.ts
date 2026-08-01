@@ -38,9 +38,39 @@ function setState(actionId: string, s: HostActionState) {
   hostActionMap.value = { ...hostActionMap.value, [actionId]: s }
 }
 
+/** Bounds mirrored from HostActionFrame.params (≤16 entries, keys ≤40 chars,
+ * values ≤200 chars). The frame already passed the protocol schema, but the
+ * bridge re-validates at the boundary like everything else it posts. */
+export const MAX_PARAM_ENTRIES = 16
+export const MAX_PARAM_KEY_LEN = 40
+export const MAX_PARAM_VALUE_LEN = 200
+
+/**
+ * Re-validate a frame's `params` before it rides the bridge: strings only —
+ * a non-string value or an oversized key/value drops that ENTRY (never the
+ * whole action: the host does its own final validation and acks failure for
+ * anything incomplete), bounded to the contract's 16 entries. undefined when
+ * nothing survives, so legacy chart actions post byte-identical messages.
+ */
+export function sanitizeParams(raw: unknown): Record<string, string> | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const out: Record<string, string> = {}
+  let n = 0
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (n >= MAX_PARAM_ENTRIES) break
+    if (k.length === 0 || k.length > MAX_PARAM_KEY_LEN) continue
+    if (typeof v !== 'string' || v.length > MAX_PARAM_VALUE_LEN) continue
+    out[k] = v
+    n += 1
+  }
+  return n > 0 ? out : undefined
+}
+
 /** The message the SDK posts to the host page for one action. Only the fields
  * the host validates ride along; the server-authored `note` stays SDK-side (it
- * drives the chip, not the host's chart). */
+ * drives the chip, not the host's chart). `action` and `params` are forwarded
+ * VERBATIM (post-sanitize) — the host, not the SDK, is the authority on which
+ * verbs it supports, so a brand-new verb rides through with no SDK change. */
 export function actionMessage(frame: HostAction): {
   source: 'hippo-sdk'
   type: 'hippo:action'
@@ -48,7 +78,9 @@ export function actionMessage(frame: HostAction): {
   action: HostAction['action']
   timeframe?: string
   indicator?: string
+  params?: Record<string, string>
 } {
+  const params = sanitizeParams(frame.params)
   return {
     source: 'hippo-sdk',
     type: 'hippo:action',
@@ -56,6 +88,7 @@ export function actionMessage(frame: HostAction): {
     action: frame.action,
     ...(frame.timeframe ? { timeframe: frame.timeframe } : {}),
     ...(frame.indicator ? { indicator: frame.indicator } : {}),
+    ...(params ? { params } : {}),
   }
 }
 

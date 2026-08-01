@@ -7,7 +7,9 @@ import {
   forwardHostAction,
   HOST_ACTION_TIMEOUT_MS,
   hostActionMap,
+  MAX_PARAM_ENTRIES,
   parseAck,
+  sanitizeParams,
 } from '../src/host-actions.js'
 import { pushFrame, thread } from '../src/state.js'
 import { clearStreamWatchdog } from '../src/streaming.js'
@@ -58,6 +60,60 @@ describe('actionMessage — the SDK→host post payload', () => {
       action: 'apply_indicator',
       indicator: 'rsi',
     })
+  })
+
+  it('forwards params for the wider verbs', () => {
+    const msg = actionMessage(
+      hostAction({
+        action: 'prefill_ticket',
+        timeframe: undefined,
+        params: { side: 'buy', qty: '0.1' },
+      }),
+    )
+    expect(msg).toEqual({
+      source: 'hippo-sdk',
+      type: 'hippo:action',
+      actionId: 'a1',
+      action: 'prefill_ticket',
+      params: { side: 'buy', qty: '0.1' },
+    })
+  })
+
+  it('forwards an UNKNOWN future verb verbatim — no SDK change required', () => {
+    const msg = actionMessage(
+      hostAction({ action: 'toggle_depth_view', timeframe: undefined, params: { mode: 'full' } }),
+    )
+    expect(msg.action).toBe('toggle_depth_view')
+    expect(msg.params).toEqual({ mode: 'full' })
+  })
+})
+
+describe('sanitizeParams — boundary re-validation before the bridge post', () => {
+  it('passes a clean string→string map through', () => {
+    expect(sanitizeParams({ symbol: 'ETH/USDT' })).toEqual({ symbol: 'ETH/USDT' })
+  })
+
+  it('drops non-string values and oversized keys/values, keeping the rest', () => {
+    expect(
+      sanitizeParams({
+        side: 'buy',
+        qty: 42 as unknown as string,
+        note: 'x'.repeat(201),
+        ['k'.repeat(41)]: 'v',
+      }),
+    ).toEqual({ side: 'buy' })
+  })
+
+  it('bounds to 16 entries', () => {
+    const raw = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`k${i}`, 'v']))
+    expect(Object.keys(sanitizeParams(raw) ?? {})).toHaveLength(MAX_PARAM_ENTRIES)
+  })
+
+  it('returns undefined for non-objects and empty results', () => {
+    expect(sanitizeParams(undefined)).toBeUndefined()
+    expect(sanitizeParams('side=buy')).toBeUndefined()
+    expect(sanitizeParams([])).toBeUndefined()
+    expect(sanitizeParams({ qty: 7 as unknown as string })).toBeUndefined()
   })
 })
 

@@ -53,18 +53,70 @@ export function setPageControl(on: boolean): void {
   pageControl = on
 }
 
+/**
+ * Host capability declaration (August 2026) — the verbs the host page supports,
+ * collected from its `hippo:capabilities` message:
+ *
+ *   SDK → host:  { source:'hippo-sdk',  type:'hippo:capabilities:request' }
+ *   host → SDK:  { source:'hippo-host', type:'hippo:capabilities', actions: string[] }
+ *
+ * Both directions exist because load order is unknowable: the host announces
+ * proactively on ITS load (covers "SDK mounted first"), and answers the SDK's
+ * request (covers "host loaded first" — the SDK asks only after its listener
+ * is installed, so the answer can't be missed). null = no declaration received;
+ * with pageControl on, the context uplink then OMITS hostActions and the
+ * gateway falls back to the legacy chart trio (the contract's back-compat rule
+ * — omission IS the legacy encoding, so we never synthesize a trio here).
+ */
+let hostActions: string[] | null = null
+
+/** Bounds mirrored from ContextUplink.hostActions (≤24 verbs, each ≤40 chars). */
+export const MAX_HOST_ACTIONS = 24
+export const MAX_ACTION_LEN = 40
+
+/** Test/remount hook — clears the collected declaration. */
+export function resetHostActions(): void {
+  hostActions = null
+}
+
+/**
+ * Validate one raw window message as a host capability declaration. Strict on
+ * shape (wrong source/type/actions → null, same posture as parseBridgeMessage);
+ * lenient on entries — a non-string, empty or oversized verb is DROPPED, not
+ * fatal, so a host growing its vocabulary can never knock out the verbs the
+ * contract can carry. Deduped and capped to the uplink bound.
+ */
+export function parseCapabilities(data: unknown): string[] | null {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return null
+  const d = data as Record<string, unknown>
+  if (d.source !== 'hippo-host' || d.type !== 'hippo:capabilities') return null
+  if (!Array.isArray(d.actions)) return null
+  const out: string[] = []
+  for (const a of d.actions) {
+    if (typeof a !== 'string' || a.length === 0 || a.length > MAX_ACTION_LEN) continue
+    if (!out.includes(a)) out.push(a)
+    if (out.length >= MAX_HOST_ACTIONS) break
+  }
+  return out
+}
+
 /** The `context` uplink payload, stamped with pageControl when the host opted
- * in. Shared by the symbol-change send and the session-start advertise so both
- * carry the flag; pure + exported so its shape is unit-testable. */
+ * in — plus the host's declared verbs once its capabilities message arrived
+ * (omitted otherwise: pageControl with NO hostActions is the wire encoding for
+ * "legacy chart verbs only"). Shared by the symbol-change send and the
+ * session-start advertise so both carry the flags; pure + exported so its
+ * shape is unit-testable. */
 export function contextPayload(opts: { symbol?: string } = {}): {
   kind: 'context'
   symbol?: string
   pageControl?: true
+  hostActions?: string[]
 } {
   return {
     kind: 'context',
     ...(opts.symbol ? { symbol: opts.symbol } : {}),
     ...(pageControl ? { pageControl: true } : {}),
+    ...(pageControl && hostActions ? { hostActions: [...hostActions] } : {}),
   }
 }
 
@@ -77,6 +129,40 @@ export function contextPayload(opts: { symbol?: string } = {}): {
 export function advertisePageControl(): void {
   if (!pageControl) return
   void send(contextPayload({ symbol: pageSymbol.value ?? undefined }))
+}
+
+/**
+ * Store a freshly-declared verb set and re-advertise. Safe to call any time:
+ * before the session exists, `send` no-ops and the post-connect
+ * advertisePageControl carries the verbs; after, this uplink updates the
+ * gateway's stored set. An unchanged declaration is dropped (hosts may
+ * re-announce on every request).
+ */
+export function acceptCapabilities(actions: string[]): void {
+  const prev = hostActions
+  if (prev !== null && prev.length === actions.length && actions.every((a, i) => prev[i] === a)) {
+    return
+  }
+  hostActions = actions
+  advertisePageControl()
+}
+
+/**
+ * Ask the host page to (re)declare its verbs. Called at mount AFTER
+ * installHostBridge — our listener is live, so the answer can't race us — and
+ * only when the host opted into page control (capabilities are meaningless
+ * without it). Never throws.
+ */
+export function requestHostCapabilities(): void {
+  if (!pageControl || typeof window === 'undefined') return
+  try {
+    window.postMessage(
+      { source: 'hippo-sdk', type: 'hippo:capabilities:request' },
+      window.location.origin,
+    )
+  } catch {
+    // Untrusted host environment — never let a post failure break the panel.
+  }
 }
 
 /**
@@ -127,6 +213,15 @@ export function installHostBridge(): void {
       if (ack) {
         applyAck(ack)
         return
+      }
+      // Host capability declaration — same origin gate as acks (the host
+      // announces from its own window), same strict-shape posture.
+      if (ev.origin === window.location.origin) {
+        const caps = parseCapabilities(ev.data)
+        if (caps) {
+          acceptCapabilities(caps)
+          return
+        }
       }
       const ctx = parseBridgeMessage(ev.data)
       if (!ctx) return

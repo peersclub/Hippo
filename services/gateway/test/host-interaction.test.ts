@@ -45,6 +45,28 @@ async function optIn(session: Session): Promise<void> {
   await sendTurn(gw.app, session.id, { kind: 'context', pageControl: true })
 }
 
+/** The wave-2 host: page control + a declared verb vocabulary. */
+const WIDE_VERBS = [
+  'set_timeframe',
+  'apply_indicator',
+  'remove_indicator',
+  'set_symbol',
+  'navigate',
+  'prefill_ticket',
+]
+async function optInWide(session: Session, hostActions: string[] = WIDE_VERBS): Promise<void> {
+  await sendTurn(gw.app, session.id, { kind: 'context', pageControl: true, hostActions })
+}
+
+type HostActionFrame = {
+  action: string
+  timeframe?: string
+  indicator?: string
+  params?: Record<string, string>
+  note?: string
+  actionId: string
+}
+
 describe('host actions — chart control gated on pageControl', () => {
   it('opted-in: emits a host_action frame with a server-authored note + ack', async () => {
     const session = await boot()
@@ -117,6 +139,172 @@ describe('host actions — chart control gated on pageControl', () => {
     await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'remove the moving average' })
     const types = await waitForJournal(session, (t) => t.includes('banner'))
     expect(types).not.toContain('host_action')
+  })
+})
+
+describe('wider host verbs — gated on the host-declared vocabulary', () => {
+  it('set_symbol: "switch to eth" → params.symbol normalized to ETH/USDT', async () => {
+    const session = await boot()
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'switch to eth' })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    const frame = frameOfType<HostActionFrame>(session, 'host_action')
+    expect(frame.action).toBe('set_symbol')
+    expect(frame.params).toEqual({ symbol: 'ETH/USDT' })
+    expect(frame.note).toBe('Market → ETH/USDT')
+    const banner = frameOfType<{ title: string }>(session, 'banner')
+    expect(banner.title).toBe('Market switched')
+  })
+
+  it('set_symbol: an explicit pair rides through ("show me sol/usdt")', async () => {
+    const session = await boot()
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'show me sol/usdt' })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    expect(frameOfType<HostActionFrame>(session, 'host_action').params).toEqual({
+      symbol: 'SOL/USDT',
+    })
+  })
+
+  it('set_symbol: an invalid symbol from stage-1 is re-validated and declined', async () => {
+    sessions = new InMemorySessionStore()
+    gw = await testApp({
+      intel: stubIntel({
+        intent: () => ({
+          intent: 'host_action',
+          confidence: 0.9,
+          language: 'en',
+          hostAction: { action: 'set_symbol', params: { symbol: 'DROP TABLE;' } },
+        }),
+      }),
+      seam: stubSeam(),
+      sessions,
+    })
+    const session = await createSession(gw.app, sessions)
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'switch to whatever' })
+    const types = await waitForJournal(session, (t) => t.includes('banner'))
+    expect(types).not.toContain('host_action')
+    expect(frameOfType<{ title: string }>(session, 'banner').title).toMatch(/not recognised/i)
+  })
+
+  it('navigate: "go to settings" → params.target, server-authored note', async () => {
+    const session = await boot()
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'go to settings' })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    const frame = frameOfType<HostActionFrame>(session, 'host_action')
+    expect(frame.action).toBe('navigate')
+    expect(frame.params).toEqual({ target: 'settings' })
+    expect(frame.note).toBe('Page → settings')
+  })
+
+  it('navigate: "open the trade page" → target trade', async () => {
+    const session = await boot()
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'open the trade page' })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    expect(frameOfType<HostActionFrame>(session, 'host_action').params).toEqual({
+      target: 'trade',
+    })
+  })
+
+  it('prefill_ticket: side+qty as strings, NO invented price', async () => {
+    const session = await boot()
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, {
+      kind: 'user_text',
+      text: 'fill the ticket to buy 0.1 btc',
+    })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    const frame = frameOfType<HostActionFrame>(session, 'host_action')
+    expect(frame.action).toBe('prefill_ticket')
+    // The server must NOT invent a price the trader never said.
+    expect(frame.params).toEqual({ side: 'buy', qty: '0.1' })
+    expect(frame.note).toBe('Ticket → BUY 0.1')
+    // The ack must say nothing was submitted — prefill never trades.
+    const banner = frameOfType<{ title: string; text: string }>(session, 'banner')
+    expect(banner.title).toBe('Ticket prefilled')
+    expect(banner.text).toMatch(/nothing was submitted/i)
+  })
+
+  it('prefill_ticket: a trader-stated price rides along as a string', async () => {
+    const session = await boot()
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, {
+      kind: 'user_text',
+      text: 'fill the ticket to sell 2 eth at 3,150',
+    })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    const frame = frameOfType<HostActionFrame>(session, 'host_action')
+    expect(frame.params).toEqual({ side: 'sell', qty: '2', price: '3150' })
+    expect(frame.note).toBe('Ticket → SELL 2 @ 3150')
+  })
+
+  it('prefill_ticket: missing side/qty → honest decline, no frame', async () => {
+    const session = await boot()
+    await optInWide(session)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'fill in the ticket' })
+    const types = await waitForJournal(session, (t) => t.includes('banner'))
+    expect(types).not.toContain('host_action')
+    expect(frameOfType<{ title: string }>(session, 'banner').title).toBe('Ticket not prefilled')
+  })
+
+  it('LEGACY session (pageControl only): a new verb is declined, never emitted', async () => {
+    const session = await boot()
+    await optIn(session) // no hostActions declared → chart trio only
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'switch to eth' })
+    const types = await waitForJournal(session, (t) => t.includes('banner'))
+    expect(types).not.toContain('host_action')
+    expect(frameOfType<{ title: string }>(session, 'banner').title).toBe(
+      'Not supported on this page',
+    )
+  })
+
+  it('LEGACY session: the chart trio still works exactly as before', async () => {
+    const session = await boot()
+    await optIn(session)
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'switch to 5m candles' })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    const frame = frameOfType<HostActionFrame>(session, 'host_action')
+    expect(frame.action).toBe('set_timeframe')
+    expect(frame.timeframe).toBe('5m')
+    expect(frame.params).toBeUndefined()
+  })
+
+  it('a NARROW declaration gates even chart verbs off the list', async () => {
+    const session = await boot()
+    await optInWide(session, ['set_timeframe']) // host only speaks timeframes
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'apply RSI' })
+    const types = await waitForJournal(session, (t) => t.includes('banner'))
+    expect(types).not.toContain('host_action')
+    expect(frameOfType<{ title: string }>(session, 'banner').title).toBe(
+      'Not supported on this page',
+    )
+  })
+
+  it('a declared FUTURE verb passes through with its params untouched', async () => {
+    sessions = new InMemorySessionStore()
+    gw = await testApp({
+      intel: stubIntel({
+        intent: () => ({
+          intent: 'host_action',
+          confidence: 0.9,
+          language: 'en',
+          hostAction: { action: 'toggle_depth_view', params: { mode: 'full' } },
+        }),
+      }),
+      seam: stubSeam(),
+      sessions,
+    })
+    const session = await createSession(gw.app, sessions)
+    await optInWide(session, ['toggle_depth_view'])
+    await sendTurn(gw.app, session.id, { kind: 'user_text', text: 'expand the depth view' })
+    await waitForJournal(session, (t) => t.includes('host_action'))
+    const frame = frameOfType<HostActionFrame>(session, 'host_action')
+    expect(frame.action).toBe('toggle_depth_view')
+    expect(frame.params).toEqual({ mode: 'full' })
+    expect(frame.note).toBe('toggle depth view')
   })
 })
 

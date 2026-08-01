@@ -957,14 +957,18 @@ const HOST_ACTION_PHASE_KEY: Record<HostActionPhase, MessageKey> = {
 }
 
 /** The chip's note — server-authored when present, else composed from the
- * action so an older gateway that omits `note` still reads clearly. */
+ * action so an older gateway that omits `note` still reads clearly. For any
+ * verb beyond the legacy chart trio the gateway always authors `note`; the
+ * humanized-slug fallback below is a defensive last resort (a verb slug is
+ * wire data, not translatable chrome — nothing here enters the catalog). */
 function hostActionNote(frame: HostAction, L: Locale): string {
   if (frame.note) return frame.note
   const ind = (frame.indicator ?? '').toUpperCase()
   if (frame.action === 'set_timeframe')
     return `${t(L, 'host_action_chart')} → ${frame.timeframe ?? ''}`
   if (frame.action === 'remove_indicator') return `${t(L, 'host_action_indicator')} ✕ ${ind}`
-  return `${t(L, 'host_action_indicator')} → ${ind}`
+  if (frame.action === 'apply_indicator') return `${t(L, 'host_action_indicator')} → ${ind}`
+  return frame.action.replaceAll('_', ' ')
 }
 
 /**

@@ -205,12 +205,39 @@ const INDICATOR_LABEL: Record<string, string> = {
   vol: 'Volume',
 }
 
+/** The chart trio every page-control host supported before verb declaration
+ * existed — the effective vocabulary when pageControl is true but the context
+ * uplink carried NO hostActions (the contract's back-compat rule). */
+const LEGACY_CHART_VERBS: readonly string[] = [
+  'set_timeframe',
+  'apply_indicator',
+  'remove_indicator',
+]
+
 /** Server-authored one-liner for the host_action chip, e.g. "Chart → 5m",
- * "Indicator → RSI", "Removed → Volume". Pure. */
+ * "Indicator → RSI", "Market → ETH/USDT", "Ticket → BUY 0.1". Called with the
+ * already-validated intent (params normalized), so it never renders raw user
+ * text. Unknown future verbs fall back to the humanized slug. Pure. */
 function hostActionNote(ha: HostActionIntent): string {
-  if (ha.action === 'set_timeframe') return `Chart → ${ha.timeframe}`
-  const label = INDICATOR_LABEL[ha.indicator ?? ''] ?? (ha.indicator ?? 'indicator').toUpperCase()
-  return ha.action === 'apply_indicator' ? `Indicator → ${label}` : `Removed → ${label}`
+  const p = ha.params ?? {}
+  switch (ha.action) {
+    case 'set_timeframe':
+      return `Chart → ${ha.timeframe}`
+    case 'apply_indicator':
+    case 'remove_indicator': {
+      const label =
+        INDICATOR_LABEL[ha.indicator ?? ''] ?? (ha.indicator ?? 'indicator').toUpperCase()
+      return ha.action === 'apply_indicator' ? `Indicator → ${label}` : `Removed → ${label}`
+    }
+    case 'set_symbol':
+      return `Market → ${p.symbol}`
+    case 'navigate':
+      return `Page → ${p.target}`
+    case 'prefill_ticket':
+      return `Ticket → ${(p.side ?? '').toUpperCase()} ${p.qty}${p.price ? ` @ ${p.price}` : ''}`
+    default:
+      return ha.action.replaceAll('_', ' ')
+  }
 }
 
 /** Bucket order records into open/filled/cancelled totals over the FULL set
@@ -1208,6 +1235,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       })
       return
     }
+    // Verb gate (August 2026): emit ONLY what the host declared. A legacy host
+    // (pageControl true, no hostActions uplinked) speaks the chart trio only.
+    const allowed = session.hostActions ?? LEGACY_CHART_VERBS
+    if (!allowed.includes(ha.action)) {
+      emit(session, {
+        type: 'banner',
+        kind: 'info',
+        title: 'Not supported on this page',
+        text: "This page hasn't declared support for that action, so I left it alone — you can still do it on the page itself.",
+      })
+      return
+    }
     if ((ha.action === 'apply_indicator' || ha.action === 'remove_indicator') && !ha.indicator) {
       // A supported indicator couldn't be resolved — decline honestly.
       emit(session, {
@@ -1218,22 +1257,123 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       })
       return
     }
-    const note = hostActionNote(ha)
+    // Wider-verb param validation — every field re-checked server-side before
+    // a frame exists; the host re-validates again at its boundary.
+    let params: Record<string, string> | undefined
+    if (ha.action === 'set_symbol') {
+      // Same symbol rule the context bridge applies to uplinked page symbols.
+      const symbol = normalizeSymbol(ha.params?.symbol)
+      if (!symbol) {
+        emit(session, {
+          type: 'banner',
+          kind: 'info',
+          title: 'Market not recognised',
+          text: 'I couldn\'t tell which market you meant — try a pair like "switch to ETH/USDT".',
+        })
+        return
+      }
+      params = { symbol }
+    } else if (ha.action === 'navigate') {
+      const target = ha.params?.target
+      if (typeof target !== 'string' || !/^[a-z0-9_-]{1,40}$/.test(target)) {
+        emit(session, {
+          type: 'banner',
+          kind: 'info',
+          title: 'Page not recognised',
+          text: 'I couldn\'t tell where you wanted to go — try "go to settings" or "open the trade page".',
+        })
+        return
+      }
+      params = { target }
+    } else if (ha.action === 'prefill_ticket') {
+      // side + qty are required; price rides along ONLY when the trader said
+      // one — the server never invents a price. All values stay strings.
+      const side = ha.params?.side
+      const qty = ha.params?.qty
+      const price = ha.params?.price
+      const DECIMAL_RE = /^\d+\.?\d*$/
+      if (
+        (side !== 'buy' && side !== 'sell') ||
+        typeof qty !== 'string' ||
+        !DECIMAL_RE.test(qty) ||
+        Number(qty) <= 0
+      ) {
+        emit(session, {
+          type: 'banner',
+          kind: 'info',
+          title: 'Ticket not prefilled',
+          text: 'I need a side and a size to fill the ticket — try "fill the ticket to buy 0.1 BTC".',
+        })
+        return
+      }
+      params = { side, qty }
+      if (typeof price === 'string' && DECIMAL_RE.test(price) && Number(price) > 0) {
+        params.price = price
+      }
+    } else if (ha.params) {
+      // A future verb the host declared: pass its params through untouched —
+      // the host validates values against what it actually supports.
+      params = ha.params
+    }
+    const note = hostActionNote({ ...ha, params })
     emit(session, {
       type: 'host_action',
       actionId: `ha_${randomUUID().replaceAll('-', '').slice(0, 12)}`,
       action: ha.action,
       ...(ha.timeframe ? { timeframe: ha.timeframe } : {}),
       ...(ha.indicator ? { indicator: ha.indicator } : {}),
+      ...(params ? { params } : {}),
       note,
     })
     // Short user-visible acknowledgment (the one-line notice surface).
-    emit(session, {
-      type: 'banner',
-      kind: 'info',
-      title: 'Chart updated',
-      text: `${note}. Tell me if you want anything else on the chart.`,
-    })
+    emit(session, hostActionAckBanner(ha.action, note))
+  }
+
+  /** The one-line notice that rides beside each emitted host_action. The
+   * prefill copy is deliberate: it must say the order was NOT submitted. */
+  function hostActionAckBanner(
+    action: string,
+    note: string,
+  ): { type: 'banner'; kind: 'info'; title: string; text: string } {
+    switch (action) {
+      case 'set_symbol':
+        return {
+          type: 'banner',
+          kind: 'info',
+          title: 'Market switched',
+          text: `${note}. The page follows along — tell me if you want it back.`,
+        }
+      case 'navigate':
+        return {
+          type: 'banner',
+          kind: 'info',
+          title: 'Opening page',
+          text: `${note}. The page handles the move from here.`,
+        }
+      case 'prefill_ticket':
+        return {
+          type: 'banner',
+          kind: 'info',
+          title: 'Ticket prefilled',
+          text: `${note}. Review it on the page and press Place — nothing was submitted.`,
+        }
+      case 'set_timeframe':
+      case 'apply_indicator':
+      case 'remove_indicator':
+        return {
+          type: 'banner',
+          kind: 'info',
+          title: 'Chart updated',
+          text: `${note}. Tell me if you want anything else on the chart.`,
+        }
+      default:
+        return {
+          type: 'banner',
+          kind: 'info',
+          title: 'Sent to page',
+          text: `${note}. The page reports the outcome on the chip above.`,
+        }
+    }
   }
 
   // ── consolidated orders (orders_query) ─────────────────────────────────
@@ -1780,6 +1920,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // when true will a host_action turn emit a frame; a page that never
           // opted in is answered in prose (handleHostAction).
           if (typeof uplink.pageControl === 'boolean') session.pageControl = uplink.pageControl
+          // Host-declared verb set (August 2026) — already bounded by the
+          // uplink schema (≤24 verbs, each ≤40 chars). Stored verbatim; the
+          // emission gate in handleHostAction reads it. A host that never
+          // declares keeps the legacy chart-trio fallback.
+          if (Array.isArray(uplink.hostActions)) session.hostActions = uplink.hostActions
           return
         }
         case 'settings': {

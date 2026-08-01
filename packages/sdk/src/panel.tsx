@@ -7,7 +7,13 @@
 import type { OrdersSnapshot } from '@hippo/protocol'
 import { type ComponentChildren, render } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { advertisePageControl, installHostBridge, SYMBOL_RE, setPageControl } from './bridge.js'
+import {
+  advertisePageControl,
+  installHostBridge,
+  requestHostCapabilities,
+  SYMBOL_RE,
+  setPageControl,
+} from './bridge.js'
 import { FallbackCard, renderFrame } from './cards.js'
 import { LONG_PRESS_MS, PRESS_MOVE_SLOP_PX, roveIndex } from './chips.js'
 import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js'
@@ -974,6 +980,11 @@ export function mountPanel({ shadow, pill, config }: MountOpts) {
   // under its size gate) and advertise it once the session is live, so the
   // gateway is willing to emit host_action frames.
   setPageControl(readPageControl())
+  // Ask the host which host_action verbs it supports. Our bridge listener is
+  // already installed (installHostBridge above), so the answer can't race us;
+  // hosts that also announce proactively on load are deduped in the bridge.
+  // No answer = the gateway's legacy chart-trio fallback.
+  requestHostCapabilities()
 
   // Connect eagerly (hover-preload warms the session too) — but only a click opens.
   void connect({

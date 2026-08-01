@@ -30,17 +30,23 @@ const ticket = { market: 'spot', side: 'buy', kind: 'market', leverage: 10, marg
 let lastPrice = 0
 
 // ── pair selector ─────────────────────────────────────────────────────────
+// setPair is THE pair-switch mechanism (it keys the same state ?pair= seeds):
+// a human header click and a hippo:action set_symbol land on this exact path,
+// so chart, ticker, ticket estimate and the embed's context all stay in sync.
+function setPair(p) {
+  if (!PAIRS.includes(p)) return false
+  pair = p
+  for (const c of pairsel.children) c.classList.toggle('on', c.textContent === p)
+  startMarket()
+  tellHippo({ symbol: pair }) // embed follows the host's pair switch
+  return true
+}
 const pairsel = $('pairsel')
 for (const p of PAIRS) {
   const b = document.createElement('button')
   b.textContent = p
   if (p === pair) b.classList.add('on')
-  b.onclick = () => {
-    pair = p
-    for (const c of pairsel.children) c.classList.toggle('on', c.textContent === p)
-    startMarket()
-    tellHippo({ symbol: pair }) // embed follows the host's pair switch
-  }
+  b.onclick = () => setPair(p)
   pairsel.appendChild(b)
 }
 
@@ -667,6 +673,45 @@ const pageControlEnabled = (() => {
     return true
   }
 })()
+
+// ── host capability declaration ──────────────────────────────────────────────
+// The host_action verbs this page supports. Declared to the SDK over
+// hippo:capabilities so the gateway only ever sends verbs we can honor —
+// announced proactively on load (covers an SDK that mounted before us) AND in
+// answer to the SDK's hippo:capabilities:request (covers the usual order: this
+// script runs at page load, the embed mounts later and asks). Both directions
+// because neither side can know who loaded first. Always announced even when
+// the admin localStorage kill-switch is off — actions then ack
+// {ok:false, reason:'page control disabled'}, the honest existing behavior,
+// instead of silently vanishing from the vocabulary.
+const HOST_ACTIONS = [
+  'set_timeframe',
+  'apply_indicator',
+  'remove_indicator',
+  'set_symbol',
+  'navigate',
+  'prefill_ticket',
+]
+// Where `navigate` may take the trader — the page-defined allowlist, nothing
+// else. location.search rides along so ?host= / ?pair= overrides survive.
+const NAV_TARGETS = { trade: 'index.html', settings: 'settings.html', how: 'how.html' }
+function announceCapabilities() {
+  try {
+    window.postMessage(
+      { source: 'hippo-host', type: 'hippo:capabilities', actions: HOST_ACTIONS },
+      location.origin,
+    )
+  } catch {
+    /* embed absent or origin quirk — the host never breaks over the parasite */
+  }
+}
+
+// Simulate a human tap on a segmented-control button (side / order-type), so a
+// prefill flows through the exact seg() handler a real click uses.
+function clickSeg(id, value) {
+  const b = document.querySelector(`#${id} button[data-v="${value}"]`)
+  if (b) b.click()
+}
 function ackAction(actionId, ok, reason) {
   try {
     window.postMessage(
@@ -686,8 +731,13 @@ function ackAction(actionId, ok, reason) {
 window.addEventListener('message', (e) => {
   if (e.origin !== location.origin) return
   const d = e.data
-  if (!d || d.source !== 'hippo-sdk' || d.type !== 'hippo:action') return
+  if (d?.source !== 'hippo-sdk') return
+  if (d.type === 'hippo:capabilities:request') return announceCapabilities()
+  if (d.type !== 'hippo:action') return
   const { actionId, action } = d
+  // Verb params: a flat string→string map by contract; anything else is
+  // treated as absent and each verb re-validates its own fields below.
+  const params = typeof d.params === 'object' && !Array.isArray(d.params) ? (d.params ?? {}) : {}
   try {
     if (!pageControlEnabled) return ackAction(actionId, false, 'page control disabled')
     if (action === 'set_timeframe') {
@@ -708,6 +758,46 @@ window.addEventListener('message', (e) => {
       removeIndicator(d.indicator)
       return ackAction(actionId, true)
     }
+    if (action === 'set_symbol') {
+      // Same pair-switch mechanism the header ticker buttons use — setPair
+      // validates against the page's listed PAIRS and keeps everything synced.
+      const sym = typeof params.symbol === 'string' ? params.symbol.toUpperCase() : ''
+      if (!setPair(sym)) return ackAction(actionId, false, 'unsupported symbol')
+      return ackAction(actionId, true)
+    }
+    if (action === 'navigate') {
+      const target = params.target
+      if (typeof target !== 'string' || !Object.hasOwn(NAV_TARGETS, target))
+        return ackAction(actionId, false, 'unknown target')
+      // Ack FIRST, then leave on the next beat: the ack postMessage is a
+      // queued task, and an instant location change could tear this document
+      // down before it delivers — stranding the chip on "no response".
+      ackAction(actionId, true)
+      setTimeout(() => {
+        location.href = NAV_TARGETS[target] + location.search
+      }, 120)
+      return
+    }
+    if (action === 'prefill_ticket') {
+      // Fill the HUMAN order ticket only — never submit. The trader reviews
+      // and clicks Place; nothing trades from a prefill.
+      const side = params.side
+      if (side !== 'buy' && side !== 'sell') return ackAction(actionId, false, 'invalid side')
+      const qty = Number(params.qty)
+      if (!Number.isFinite(qty) || qty <= 0) return ackAction(actionId, false, 'invalid qty')
+      let price
+      if (params.price !== undefined) {
+        price = Number(params.price)
+        if (!Number.isFinite(price) || price <= 0)
+          return ackAction(actionId, false, 'invalid price')
+      }
+      clickSeg('side', side) // same handler a human tap runs
+      if (price !== undefined) clickSeg('kind', 'limit') // a price only means anything on a limit ticket
+      $('qty').value = String(qty)
+      if (price !== undefined) $('limit').value = String(price)
+      syncEst()
+      return ackAction(actionId, true)
+    }
     return ackAction(actionId, false, 'unknown action')
   } catch {
     ackAction(actionId, false, 'error')
@@ -718,6 +808,7 @@ window.addEventListener('message', (e) => {
 syncTicket()
 connectSSE()
 startMarket()
+announceCapabilities() // proactive — an SDK already mounted hears it now; a later one asks
 // Load current admin config so the drawer reflects reality on first open.
 fetch(`${HOST}/admin/config`)
   .then((r) => r.json())
