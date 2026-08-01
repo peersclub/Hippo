@@ -112,6 +112,10 @@ export type Session = {
    * commands); absent/false = the orchestrator answers chart requests in prose
    * instead of emitting a frame the host would silently drop. */
   pageControl?: boolean
+  /** Host-declared host_action verbs from the context uplink (August 2026).
+   * The orchestrator emits ONLY verbs on this list; absent with pageControl
+   * true = legacy host → chart trio only (the contract's back-compat rule). */
+  hostActions?: string[]
   /** OrderIds this session created (prepared tickets), append-only — the basis
    * for orders_query scope 'session'. Live-object only (best-effort across a
    * cold resume); scope 'all' never depends on it. */

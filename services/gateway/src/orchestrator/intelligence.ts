@@ -33,14 +33,19 @@ export type IntentKind =
   | 'host_action'
   | 'orders_query'
 
-/** Chart-control intent (host_action). `indicator` is a supported slug when the
- * intelligence service could canonicalise it; ABSENT when the phrasing named an
- * unsupported indicator — the orchestrator then declines honestly rather than
- * guessing. Mirrors @hippo/protocol HostActionFrame's action/timeframe vocab. */
+/** Host-action intent (host_action). `action` is an open string mirroring
+ * @hippo/protocol HostActionFrame (wave 2): the orchestrator gates emission on
+ * the verbs the HOST declared, so detection may name any verb. `indicator` is
+ * a supported slug when the phrasing could be canonicalised; ABSENT when it
+ * named an unsupported indicator — the orchestrator then declines honestly
+ * rather than guessing. `params` carries the wider-verb arguments (set_symbol
+ * symbol, navigate target, prefill_ticket side/qty/price) as strings; the
+ * orchestrator re-validates every field before a frame is emitted. */
 export type HostActionIntent = {
-  action: 'set_timeframe' | 'apply_indicator' | 'remove_indicator'
+  action: string
   timeframe?: '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
   indicator?: string
+  params?: Record<string, string>
 }
 
 /** Consolidated-orders intent (orders_query). "my orders" defaults to 'all';
@@ -305,6 +310,13 @@ export function createIntelligenceClient(baseUrl = INTELLIGENCE_URL): Intelligen
 export function guessIntent(text: string): IntentResult {
   const t = text.toLowerCase()
 
+  // Ticket prefill BEFORE the order parsers: "fill the ticket to buy 0.1 btc"
+  // carries a buy-phrase but is a page command (fill the human ticket's inputs
+  // — the trader clicks Place), never an order.
+  const prefill = guessPrefillTicket(t)
+  if (prefill)
+    return { intent: 'host_action', confidence: 0.5, language: 'en', hostAction: prefill }
+
   // "long 0.5 btc 10x" / "short 1 eth 20x isolated" → futures_perp action.
   const p = t.match(/\b(long|short)\s+([\d,]*\.?\d+)\s*([a-z]{2,10})\b(?:\D*?(\d{1,3})x)?/)
   if (p) {
@@ -416,7 +428,9 @@ function canonIndicator(t: string): string | undefined {
 }
 
 /** Deterministic host-action detection for degraded mode. Returns undefined
- * when the message isn't a chart command. */
+ * when the message isn't a page command. Order matters: timeframe ("switch to
+ * 5m") before symbol ("switch to ETH"), navigate ("go to settings") before
+ * symbol ("go to eth") — the earlier, more specific reading wins. */
 function guessHostAction(t: string): HostActionIntent | undefined {
   const tf = canonTimeframe(t)
   if (tf && TF_TRIGGER.test(t)) return { action: 'set_timeframe', timeframe: tf }
@@ -429,5 +443,93 @@ function guessHostAction(t: string): HostActionIntent | undefined {
       ...(indicator ? { indicator } : {}),
     }
   }
-  return undefined
+  return guessNavigate(t) ?? guessSetSymbol(t)
+}
+
+// ── wider host verbs (August 2026) ──────────────────────────────────────────
+
+/** "go to settings" / "open the trade page" / "take me to the how page". The
+ * target vocabulary matches the demo host's navigate allowlist; a host that
+ * supports different targets simply acks failure — never a gateway guess. */
+const NAV_RE =
+  /\b(?:go to|open|navigate to|take me to|show)\s+(?:the\s+)?(trade|trading|settings?|how)(?:\s+(?:page|tab|screen|view|section))?\b/
+
+function guessNavigate(t: string): HostActionIntent | undefined {
+  const m = t.match(NAV_RE)
+  if (!m) return undefined
+  const raw = m[1] as string
+  const target = raw.startsWith('trad') ? 'trade' : raw.startsWith('setting') ? 'settings' : 'how'
+  return { action: 'navigate', params: { target } }
+}
+
+/** "switch to ETH" / "show me SOL" / "change to eth/usdt". The captured token
+ * must plausibly be an asset: everyday non-asset words and timeframe-shaped
+ * tokens are excluded, and research-y suffixes ("eth price", "sol news") keep
+ * their research routing. A bare asset gets the venue's /USDT quote — the
+ * SAME normalization the degraded order parser applies. The orchestrator
+ * re-validates the final pair against the context bridge's symbol rule. */
+const SET_SYMBOL_RE =
+  /\b(?:switch(?:\s+(?:me|over|back))?\s+to|change\s+(?:(?:the\s+)?(?:pair|symbol|market|chart)\s+)?to|show\s+me|pull\s+up|go\s+to)\s+\$?([a-z][a-z0-9]{1,9})(?:\s*\/\s*([a-z0-9]{2,10}))?\b(?!\s+(?:price|prices|news|analysis|funding|volume|vol|brief|order|orders))/
+
+const NOT_ASSETS = new Set([
+  'the',
+  'my',
+  'me',
+  'it',
+  'this',
+  'that',
+  'chart',
+  'charts',
+  'candle',
+  'candles',
+  'page',
+  'tab',
+  'trade',
+  'trading',
+  'settings',
+  'setting',
+  'how',
+  'orders',
+  'order',
+  'position',
+  'positions',
+  'portfolio',
+  'market',
+  'limit',
+  'usdt',
+  'timeframe',
+])
+
+function guessSetSymbol(t: string): HostActionIntent | undefined {
+  const m = t.match(SET_SYMBOL_RE)
+  if (!m) return undefined
+  const base = m[1] as string
+  const quote = m[2]
+  if (NOT_ASSETS.has(base) || /^\d+[mhd]$/.test(base)) return undefined
+  const symbol = `${base.toUpperCase()}/${(quote ?? 'usdt').toUpperCase()}`
+  return { action: 'set_symbol', params: { symbol } }
+}
+
+/** "fill the ticket to buy 0.1 btc (at 61000)" / "prefill a sell of 2 eth".
+ * Values stay STRINGS end-to-end; price is included ONLY when the trader said
+ * one — the server never invents a price. Side/qty may come back absent when
+ * the phrasing didn't carry them; the orchestrator declines honestly then. */
+const PREFILL_HINT =
+  /\b(?:pre-?fill|fill\s+(?:in\s+|out\s+|up\s+)?(?:the\s+|a\s+)?(?:order\s+)?(?:ticket|form))\b/
+
+function guessPrefillTicket(t: string): HostActionIntent | undefined {
+  if (!PREFILL_HINT.test(t)) return undefined
+  const params: Record<string, string> = {}
+  const side = t.match(/\b(buy|sell|long|short)\b/)
+  if (side)
+    params.side = side[1] === 'long' ? 'buy' : side[1] === 'short' ? 'sell' : (side[1] as string)
+  const qty =
+    t.match(/\b(?:buy|sell|long|short)\s+(?:of\s+)?([\d,]*\.?\d+)\b/) ??
+    t.match(/\bof\s+([\d,]*\.?\d+)\b/)
+  if (qty) params.qty = (qty[1] as string).replaceAll(',', '')
+  const price = t.match(
+    /(?:\bat|@|\bprice(?:\s+of)?|\blimit(?:\s+(?:price|of))?)\s*\$?([\d,]*\.?\d+)\b/,
+  )
+  if (price) params.price = (price[1] as string).replaceAll(',', '')
+  return { action: 'prefill_ticket', params }
 }
