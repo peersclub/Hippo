@@ -148,6 +148,15 @@ function parsePlan(body: unknown): OrderPlan | null {
   if (r.orderType === 'limit' && typeof r.limitPrice !== 'string') return null
   const orderType = r.orderType as PrepareRequest['orderType']
   const limit = typeof r.limitPrice === 'string' ? { limitPrice: r.limitPrice } : {}
+  // Protective exits (additive, August 2026) — optional money STRINGS, same
+  // law as limitPrice. Present-but-wrong-typed is a hard reject, not a drop:
+  // silently losing a stop-loss is the one unacceptable outcome.
+  if (r.stopLossPrice !== undefined && typeof r.stopLossPrice !== 'string') return null
+  if (r.takeProfitPrice !== undefined && typeof r.takeProfitPrice !== 'string') return null
+  const exits = {
+    ...(typeof r.stopLossPrice === 'string' ? { stopLossPrice: r.stopLossPrice } : {}),
+    ...(typeof r.takeProfitPrice === 'string' ? { takeProfitPrice: r.takeProfitPrice } : {}),
+  }
 
   if (r.capability === 'spot') {
     if (typeof r.instrument !== 'string' || !INSTRUMENT.test(r.instrument)) return null
@@ -161,6 +170,7 @@ function parsePlan(body: unknown): OrderPlan | null {
       instrument: r.instrument,
       orderType,
       ...limit,
+      ...exits,
     }
   }
   if (r.capability === 'futures_perp') {
@@ -181,6 +191,7 @@ function parsePlan(body: unknown): OrderPlan | null {
       reduceOnly: r.reduceOnly === true,
       orderType,
       ...limit,
+      ...exits,
     }
   }
   // options
@@ -388,6 +399,17 @@ export function buildService(
       return reply
         .code(422)
         .send({ error: `capability '${plan.capability}' not supported on this venue` })
+    // Protective-exit gating: a plan carrying stopLossPrice/takeProfitPrice is
+    // only accepted when the venue ADVERTISES protectiveExits for that
+    // capability — reject loudly rather than let a protection silently drop.
+    if (
+      plan.capability !== 'options' &&
+      (plan.stopLossPrice !== undefined || plan.takeProfitPrice !== undefined) &&
+      caps[plan.capability]?.protectiveExits !== true
+    )
+      return reply.code(422).send({
+        error: `attached stop-loss/take-profit is not supported on this venue for '${plan.capability}'`,
+      })
     const detail =
       plan.capability === 'options'
         ? `options ${plan.underlying}`
@@ -404,6 +426,8 @@ export function buildService(
           instrument: plan.instrument,
           orderType: plan.orderType,
           ...(plan.limitPrice ? { limitPrice: plan.limitPrice } : {}),
+          ...(plan.stopLossPrice ? { stopLossPrice: plan.stopLossPrice } : {}),
+          ...(plan.takeProfitPrice ? { takeProfitPrice: plan.takeProfitPrice } : {}),
         })
       else
         return reply.code(422).send({ error: `venue adapter cannot prepare '${plan.capability}'` })

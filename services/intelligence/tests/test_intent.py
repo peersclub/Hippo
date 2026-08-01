@@ -13,6 +13,7 @@ from intent import (
     canonical_timeframe,
     classify,
     detect_language,
+    extract_protective_exits,
     fast_path,
     parse_amend,
     parse_fractional_close,
@@ -269,6 +270,81 @@ class AmendParsing(unittest.TestCase):
         result = fast_path("show all my orders")
         assert result is not None
         self.assertEqual(result["intent"], "orders_query")
+
+
+class ProtectiveExits(unittest.TestCase):
+    """Attached stop-loss / take-profit phrases — the missing protective half
+    of "long 0.5 BTC 10x with stop at 60k and tp at 75k"."""
+
+    def test_the_headline_phrase(self) -> None:
+        order = parse_order("long 0.5 btc 10x with stop at 60k and tp at 75k")
+        assert order is not None
+        self.assertEqual(order["capability"], "futures_perp")
+        self.assertEqual(order["leverage"], 10)
+        self.assertEqual(order["stopLossPrice"], "60000")
+        self.assertEqual(order["takeProfitPrice"], "75000")
+        self.assertEqual(order["orderType"], "market")
+
+    def test_stop_loss_spelled_out(self) -> None:
+        order = parse_order("long 0.5 btc 10x stop loss 60000")
+        assert order is not None
+        self.assertEqual(order["stopLossPrice"], "60000")
+        self.assertNotIn("takeProfitPrice", order)
+
+    def test_sl_tp_shorthand(self) -> None:
+        order = parse_order("short 1 eth 20x sl 3.5k tp 2.8k")
+        assert order is not None
+        self.assertEqual(order["direction"], "short")
+        self.assertEqual(order["stopLossPrice"], "3500")
+        self.assertEqual(order["takeProfitPrice"], "2800")
+
+    def test_take_profit_only_on_spot(self) -> None:
+        order = parse_order("buy 0.5 btc take profit at 75k")
+        assert order is not None
+        self.assertNotIn("capability", order)  # spot stays untagged
+        self.assertEqual(order["takeProfitPrice"], "75000")
+        self.assertNotIn("stopLossPrice", order)
+
+    def test_spot_with_stop(self) -> None:
+        order = parse_order("buy 0.1 btc with stop at 55,000")
+        assert order is not None
+        self.assertEqual(order["stopLossPrice"], "55000")
+        self.assertEqual(order["orderType"], "market")
+
+    def test_limit_entry_and_stop_coexist(self) -> None:
+        order = parse_order("long 2 sol 5x limit 140 with stop at 120")
+        assert order is not None
+        self.assertEqual(order["orderType"], "limit")
+        self.assertEqual(order["limitPrice"], "140")
+        self.assertEqual(order["stopLossPrice"], "120")
+
+    def test_orders_without_exits_stay_byte_identical(self) -> None:
+        self.assertEqual(
+            parse_order("buy 0.5 btc"),
+            {"side": "buy", "size": "0.5", "instrument": "BTC/USDT", "orderType": "market"},
+        )
+        order = parse_order("long 0.5 btc 10x")
+        assert order is not None
+        self.assertNotIn("stopLossPrice", order)
+        self.assertNotIn("takeProfitPrice", order)
+
+    def test_extractor_returns_text_untouched_when_nothing_matches(self) -> None:
+        exits, rest = extract_protective_exits("10x cross at 61,000")
+        self.assertEqual(exits, {})
+        self.assertEqual(rest, "10x cross at 61,000")
+
+    def test_extractor_strips_connectors_only_after_a_hit(self) -> None:
+        exits, rest = extract_protective_exits("10x with stop at 60k and tp at 75k")
+        self.assertEqual(
+            exits, {"stopLossPrice": "60000", "takeProfitPrice": "75000"}
+        )
+        self.assertEqual(rest, "10x")
+
+    def test_fast_path_carries_the_protected_order(self) -> None:
+        result = fast_path("long 0.5 btc 10x with stop at 60k and tp at 75k")
+        assert result is not None
+        self.assertEqual(result["intent"], "action")
+        self.assertEqual(result["order"]["stopLossPrice"], "60000")
 
 
 class FastPaths(unittest.TestCase):

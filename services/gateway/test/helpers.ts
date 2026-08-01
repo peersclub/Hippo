@@ -272,10 +272,11 @@ export const ordersFixture: OrderRecord[] = [
   },
 ]
 
-/** Default stubbed venue capabilities: spot + 20x perps, both margin modes. */
+/** Default stubbed venue capabilities: spot + 20x perps, both margin modes,
+ * protective exits (attached stop-loss/take-profit) on both. */
 export const capabilitiesFixture: VenueCapabilities = {
-  spot: {},
-  futures_perp: { maxLeverage: 20, marginModes: ['isolated', 'cross'] },
+  spot: { protectiveExits: true },
+  futures_perp: { maxLeverage: 20, marginModes: ['isolated', 'cross'], protectiveExits: true },
 }
 
 /** Call-recording seam client with fixture responses. */
@@ -483,6 +484,8 @@ export type DraftFrame = {
   sizeAsset: string
   orderType: 'market' | 'limit'
   limitPrice?: string
+  stopLossPrice?: string
+  takeProfitPrice?: string
   leverage?: number
   maxLeverage?: number
   marginMode?: 'isolated' | 'cross'
@@ -513,6 +516,10 @@ export async function submitDraft(
       orderType: draft.orderType,
       size: draft.size,
       ...(draft.limitPrice !== undefined ? { limitPrice: draft.limitPrice } : {}),
+      // Echo non-empty protective prefills exactly as the SDK does (blank
+      // inputs are omitted, never sent as '').
+      ...(draft.stopLossPrice ? { stopLossPrice: draft.stopLossPrice } : {}),
+      ...(draft.takeProfitPrice ? { takeProfitPrice: draft.takeProfitPrice } : {}),
       ...(draft.leverage !== undefined ? { leverage: draft.leverage } : {}),
       ...(draft.marginMode !== undefined ? { marginMode: draft.marginMode } : {}),
       ...overrides,

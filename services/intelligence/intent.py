@@ -80,6 +80,59 @@ _PERP_RE = re.compile(
 )
 _LEV_RE = re.compile(r"\b(?P<lev>\d{1,3})x\b", re.IGNORECASE)
 
+# --- protective exits (attached stop-loss / take-profit) ------------------------
+# "with stop at 60k", "stop loss 60000", "sl 60k tp 75k", "take profit at 75k".
+# Self-contained: extraction strips the matched phrases (plus their joining
+# "with"/"and"/",") from the residue so the existing limit-price logic still
+# sees only what it always saw. Prices become plain money STRINGS ("60k" →
+# "60000") — the seam validates them against the actual entry.
+_PROTECTIVE_PRICE = r"\$?(?P<price>\d[\d,]*(?:\.\d+)?)\s*(?P<kilo>k)?\b"
+_SL_RE = re.compile(
+    r"\b(?:stop[\s-]*loss|stop|sl)\s*(?:at|@|:|=)?\s*" + _PROTECTIVE_PRICE,
+    re.IGNORECASE,
+)
+_TP_RE = re.compile(
+    r"\b(?:take[\s-]*profit|tp)\s*(?:at|@|:|=)?\s*" + _PROTECTIVE_PRICE,
+    re.IGNORECASE,
+)
+_CONNECTOR_RE = re.compile(r"\b(?:with|and)\b|,", re.IGNORECASE)
+
+
+def _protective_price(m: re.Match) -> str:
+    """Normalise a matched protective price to a plain string ("60k" → "60000")."""
+    raw = m.group("price").replace(",", "")
+    if not m.group("kilo"):
+        return raw
+    scaled = float(raw) * 1000
+    return str(int(scaled)) if scaled == int(scaled) else str(scaled)
+
+
+def extract_protective_exits(rest: str) -> tuple[dict[str, str], str]:
+    """Pull stop-loss / take-profit phrases out of an order's trailing text.
+
+    Returns ({"stopLossPrice": …, "takeProfitPrice": …} — only the keys found)
+    and the residue with those phrases (and their connectors) removed. When
+    nothing matches, the text is returned byte-identical so every existing
+    parse stays untouched.
+    """
+    exits: dict[str, str] = {}
+    # TP first: "stop" alone must never swallow the "p" of a preceding "tp",
+    # and removing TP spans first keeps the SL regex from seeing them.
+    tp = _TP_RE.search(rest)
+    if tp:
+        exits["takeProfitPrice"] = _protective_price(tp)
+        rest = rest[: tp.start()] + " " + rest[tp.end():]
+    sl = _SL_RE.search(rest)
+    if sl:
+        exits["stopLossPrice"] = _protective_price(sl)
+        rest = rest[: sl.start()] + " " + rest[sl.end():]
+    if exits:
+        # Only when we consumed a phrase: drop dangling connectors so the
+        # residue check ("trailing text we don't understand") stays honest.
+        rest = _CONNECTOR_RE.sub(" ", rest)
+        rest = re.sub(r"\s+", " ", rest).strip()
+    return exits, rest
+
 
 def parse_perp(text: str) -> dict | None:
     """Extract a fully-specified perpetual-futures order, else None."""
@@ -90,6 +143,7 @@ def parse_perp(text: str) -> dict | None:
     if asset is None:
         return None
     rest = (m.group("rest") or "").strip()
+    exits, rest = extract_protective_exits(rest)
     lev_m = _LEV_RE.search(rest)
     direction = m.group("dir").lower()
     action = (m.group("action") or "open").strip().lower() or "open"
@@ -115,6 +169,7 @@ def parse_perp(text: str) -> dict | None:
             return None  # trailing text we don't understand → let the LLM try
         order["orderType"] = "limit"
         order["limitPrice"] = limit.group("price").replace(",", "")
+    order.update(exits)
     return order
 
 
@@ -307,6 +362,7 @@ def parse_order(text: str) -> dict | None:
     if asset is None:
         return None
     rest = (m.group("rest") or "").strip()
+    exits, rest = extract_protective_exits(rest)
     # Spot stays byte-identical (untagged) — the gateway treats an order with no
     # capability as spot; only richer capabilities carry an explicit tag.
     order: dict[str, str] = {
@@ -321,6 +377,7 @@ def parse_order(text: str) -> dict | None:
             return None  # trailing text we don't understand → let the LLM try
         order["orderType"] = "limit"
         order["limitPrice"] = limit.group("price").replace(",", "")
+    order.update(exits)
     return order
 
 
@@ -680,6 +737,13 @@ def _validate_order(raw: object) -> dict[str, str] | None:
         if not raw.get("limitPrice"):
             return None
         order["limitPrice"] = str(raw["limitPrice"])
+    # Protective exits from the LLM: pass through as money strings when the
+    # model extracted them ("with stop at 60k" phrased too loosely for the
+    # regex). Downstream (gateway + seam) re-validates — never trusted blindly.
+    if raw.get("stopLossPrice"):
+        order["stopLossPrice"] = str(raw["stopLossPrice"])
+    if raw.get("takeProfitPrice"):
+        order["takeProfitPrice"] = str(raw["takeProfitPrice"])
     return order
 
 

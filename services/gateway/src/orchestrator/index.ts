@@ -806,6 +806,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // The seam owns quoting, fees and validation (per-venue adapter). The
     // gateway forwards the prepared ticket verbatim — it never computes money.
     let ticket: import('./seam.js').PreparedTicket
+    const exits = {
+      ...(order.stopLossPrice !== undefined ? { stopLossPrice: order.stopLossPrice } : {}),
+      ...(order.takeProfitPrice !== undefined ? { takeProfitPrice: order.takeProfitPrice } : {}),
+    }
     try {
       if (order.capability === 'futures_perp' && order.direction && order.leverage) {
         // Futures perp → the seam's capability plan path.
@@ -822,6 +826,22 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           reduceOnly: order.reduceOnly ?? false,
           orderType: order.orderType,
           ...(order.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
+          ...exits,
+        })
+      } else if (order.stopLossPrice !== undefined || order.takeProfitPrice !== undefined) {
+        // Spot WITH protective exits → the capability plan path too: the
+        // legacy /v1/prepare wire has no protective fields, and dropping them
+        // there would silently strip the trader's protection.
+        ticket = await seam.prepareOrder({
+          capability: 'spot',
+          partnerId: session.partner.partnerId,
+          userId: userKey(session),
+          side: order.side,
+          size: order.size,
+          instrument: order.instrument,
+          orderType: order.orderType,
+          ...(order.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
+          ...exits,
         })
       } else {
         ticket = await seam.prepare({
@@ -1157,6 +1177,27 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       capability === 'futures_perp' && perp ? Math.max(1, Math.floor(perp.maxLeverage)) : undefined
     const marginModes = capability === 'futures_perp' && perp ? perp.marginModes : []
 
+    // Protective exits: only OFFERED when the venue advertises protectiveExits
+    // for this capability. DESIGN CHOICE (documented): when the parsed order
+    // asked for a stop/take-profit the venue can't attach, we DECLINE the
+    // whole order rather than open an unprotected position — an order card
+    // that silently dropped the protective half would be worse than no card.
+    const protectiveSupported =
+      capability === 'futures_perp'
+        ? perp?.protectiveExits === true
+        : caps.spot?.protectiveExits === true
+    if (
+      !protectiveSupported &&
+      (order?.stopLossPrice !== undefined || order?.takeProfitPrice !== undefined)
+    ) {
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason: `${session.partner.venueName} doesn't support attached stop-loss/take-profit orders, so I won't place this without the protection you asked for. Ask again without the stop/take-profit to place the entry alone.`,
+      })
+      return
+    }
+
     const draftId = `d_${randomUUID().replaceAll('-', '').slice(0, 12)}`
     rememberDraft(session, draftId, {
       capability,
@@ -1178,6 +1219,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       sizeAsset: base,
       orderType: order?.orderType ?? 'market',
       ...(order?.limitPrice !== undefined ? { limitPrice: order.limitPrice } : {}),
+      // Frame presence drives the SDK's stop/take-profit inputs: present
+      // (possibly empty) when the venue supports attaching them, absent when
+      // it doesn't — the server decides, the SDK never guesses venue truth.
+      ...(protectiveSupported
+        ? {
+            stopLossPrice: order?.stopLossPrice ?? '',
+            takeProfitPrice: order?.takeProfitPrice ?? '',
+          }
+        : {}),
       ...(maxLeverage !== undefined
         ? {
             leverage: Math.min(Math.max(1, Math.floor(order?.leverage ?? 1)), maxLeverage),
@@ -1211,6 +1261,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       orderType: 'market' | 'limit'
       size: string
       limitPrice?: string
+      stopLossPrice?: string
+      takeProfitPrice?: string
       leverage?: number
       marginMode?: 'isolated' | 'cross'
     },
@@ -1244,16 +1296,84 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       }
     }
 
-    if (fixed.capability === 'futures_perp') {
-      // Perp bounds from the venue's advertised capabilities. Best-effort: if
-      // the seam can't answer right now, forward and let its own validation
-      // (authoritative) decide, rather than blocking the trader here.
-      let caps: VenueCapabilities | null = null
+    // Protective exits are UNTRUSTED edits like everything else on the card:
+    // empty strings read as absent; present values are re-validated below
+    // against venue capabilities and basic long/short sanity (the seam
+    // re-validates against the actual entry price — it owns venue truth).
+    const stopLoss = params.stopLossPrice?.trim() ? params.stopLossPrice.trim() : undefined
+    const takeProfit = params.takeProfitPrice?.trim() ? params.takeProfitPrice.trim() : undefined
+    const wantsExits = stopLoss !== undefined || takeProfit !== undefined
+
+    // Venue capabilities: needed for perp bounds AND for protective-exit
+    // gating (spot included). Best-effort: if the seam can't answer right
+    // now, forward and let its own validation (authoritative) decide, rather
+    // than blocking the trader here.
+    let caps: VenueCapabilities | null = null
+    if (fixed.capability === 'futures_perp' || wantsExits) {
       try {
         caps = await seam.capabilities()
       } catch (err) {
         log.warn({ err }, 'seam capabilities unavailable at submit — deferring to seam validation')
       }
+    }
+
+    if (wantsExits) {
+      const supported =
+        fixed.capability === 'futures_perp'
+          ? caps?.futures_perp?.protectiveExits === true
+          : caps?.spot?.protectiveExits === true
+      if (caps && !supported) {
+        reject(
+          `${session.partner.venueName} doesn't support attached stop-loss/take-profit orders — remove them to place the entry alone.`,
+        )
+        return
+      }
+      const slNum = stopLoss !== undefined ? Number(stopLoss) : undefined
+      const tpNum = takeProfit !== undefined ? Number(takeProfit) : undefined
+      if (slNum !== undefined && (!Number.isFinite(slNum) || slNum <= 0)) {
+        reject('Stop-loss must be a positive price.')
+        return
+      }
+      if (tpNum !== undefined && (!Number.isFinite(tpNum) || tpNum <= 0)) {
+        reject('Take-profit must be a positive price.')
+        return
+      }
+      const isLong =
+        fixed.capability === 'futures_perp' ? fixed.direction !== 'short' : fixed.side === 'buy'
+      if (fixed.capability === 'spot' && fixed.side === 'sell') {
+        reject('Attached stop-loss/take-profit applies to buy orders — a sell is already an exit.')
+        return
+      }
+      if (
+        slNum !== undefined &&
+        tpNum !== undefined &&
+        (isLong ? slNum >= tpNum : slNum <= tpNum)
+      ) {
+        reject(
+          isLong
+            ? 'For a long, the stop-loss must be below the take-profit.'
+            : 'For a short, the stop-loss must be above the take-profit.',
+        )
+        return
+      }
+      if (params.orderType === 'limit') {
+        const px = Number(params.limitPrice)
+        if (slNum !== undefined && (isLong ? slNum >= px : slNum <= px)) {
+          reject(
+            `A stop-loss of ${stopLoss} would trigger immediately against your ${params.limitPrice} entry.`,
+          )
+          return
+        }
+        if (tpNum !== undefined && (isLong ? tpNum <= px : tpNum >= px)) {
+          reject(
+            `A take-profit of ${takeProfit} would fill immediately against your ${params.limitPrice} entry.`,
+          )
+          return
+        }
+      }
+    }
+
+    if (fixed.capability === 'futures_perp') {
       const perp = caps?.futures_perp
       if (caps && !perp) {
         reject(`${session.partner.venueName} doesn't support perpetual futures.`)
@@ -1300,6 +1420,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ...(params.orderType === 'limit' && params.limitPrice !== undefined
         ? { limitPrice: params.limitPrice }
         : {}),
+      ...(stopLoss !== undefined ? { stopLossPrice: stopLoss } : {}),
+      ...(takeProfit !== undefined ? { takeProfitPrice: takeProfit } : {}),
     }
 
     // Ticket-shaped skeleton while the seam quotes — same as the classic flow.

@@ -40,6 +40,18 @@ export function initialLeverage(frame: Pick<OrderDraft, 'leverage' | 'maxLeverag
   return clampLeverage(frame.leverage ?? DEFAULT_LEVERAGE, maxLeverageOf(frame))
 }
 
+/**
+ * Whether the card shows the protective-exit (stop-loss / take-profit)
+ * inputs. FRAME PRESENCE drives it — the server includes the fields (possibly
+ * empty) only when the venue supports attaching them; the SDK never decides
+ * venue truth. Empty string = shown but unset.
+ */
+export function protectiveEnabled(
+  frame: Pick<OrderDraft, 'stopLossPrice' | 'takeProfitPrice'>,
+): boolean {
+  return frame.stopLossPrice !== undefined || frame.takeProfitPrice !== undefined
+}
+
 /** The card's local edit state (component state seeded from the frame). */
 export type DraftEdit = {
   capability: OrderDraft['capability']
@@ -47,6 +59,10 @@ export type DraftEdit = {
   orderType: 'market' | 'limit'
   size: string
   limitPrice: string
+  /** '' when the venue doesn't offer protective exits (inputs hidden) or the
+   * trader left them blank — either way the param is omitted on submit. */
+  stopLossPrice: string
+  takeProfitPrice: string
   leverage: number
   maxLeverage: number
   marginMode?: 'isolated' | 'cross'
@@ -57,6 +73,8 @@ export type DraftParams = {
   orderType: 'market' | 'limit'
   size: string
   limitPrice?: string
+  stopLossPrice?: string
+  takeProfitPrice?: string
   leverage?: number
   marginMode?: 'isolated' | 'cross'
 }
@@ -64,6 +82,8 @@ export type DraftParams = {
 /**
  * Assemble the draft_action submit params from the card's edit state:
  *   - limitPrice rides only on limit orders (a market order has none);
+ *   - stopLossPrice/takeProfitPrice ride whenever non-empty (spot or perp) —
+ *     the gateway re-validates them against venue capabilities;
  *   - leverage/marginMode ride only on perps, leverage clamped to the
  *     venue bound client-side (the server re-clamps regardless);
  *   - strings are trimmed but otherwise echoed verbatim — the server is the
@@ -78,6 +98,8 @@ export function assembleDraftParams(edit: DraftEdit): DraftParams {
   if (edit.orderType === 'limit' && edit.limitPrice.trim() !== '') {
     params.limitPrice = edit.limitPrice.trim()
   }
+  if (edit.stopLossPrice.trim() !== '') params.stopLossPrice = edit.stopLossPrice.trim()
+  if (edit.takeProfitPrice.trim() !== '') params.takeProfitPrice = edit.takeProfitPrice.trim()
   if (edit.capability === 'futures_perp') {
     params.leverage = clampLeverage(edit.leverage, edit.maxLeverage)
     if (edit.marginMode) params.marginMode = edit.marginMode

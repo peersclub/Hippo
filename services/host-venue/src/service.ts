@@ -69,6 +69,19 @@ function parsePlace(body: Record<string, unknown>): PlaceRequest | string {
   const req: PlaceRequest = { market, pairName, side, kind, qty, rate }
   if (typeof body.clientOrderId === 'string') req.clientOrderId = body.clientOrderId
   if (typeof body.marketOrderAmount === 'number') req.marketOrderAmount = body.marketOrderAmount
+  // Protective exits (attached stop-loss / take-profit) — optional numerics on
+  // the wire. Presence-validated here; the store validates the SANITY (side of
+  // entry, long/short direction) with a human message.
+  if (body.stopLossPrice !== undefined) {
+    const sl = num(body.stopLossPrice)
+    if (!Number.isFinite(sl) || sl <= 0) return 'invalid stopLossPrice'
+    req.stopLossPrice = sl
+  }
+  if (body.takeProfitPrice !== undefined) {
+    const tp = num(body.takeProfitPrice)
+    if (!Number.isFinite(tp) || tp <= 0) return 'invalid takeProfitPrice'
+    req.takeProfitPrice = tp
+  }
   if (market === 'perp') {
     req.direction = body.direction === 'short' ? 'short' : 'long'
     req.leverage = Number.isFinite(num(body.leverage)) ? num(body.leverage) : 1
@@ -93,6 +106,9 @@ function toOpenRow(o: Order) {
     orderType: o.side === 'sell' ? ORDER_SIDE.sell : ORDER_SIDE.buy,
     tradeTypeLabel: o.kind,
     orderTypeLabel: o.side,
+    // Additive: protective children carry their entry's id, so the open-orders
+    // view (and the parasite's blotter) can label them instead of guessing.
+    ...(o.parentId !== undefined ? { parentId: o.parentId } : {}),
   }
 }
 
@@ -307,9 +323,16 @@ export function buildService(opts: BuildOptions) {
   app.get('/v1/capabilities', async () => {
     const c = store.config
     const capabilities: Record<string, unknown> = {}
-    if (c.capsSpot) capabilities.spot = {}
+    // protectiveExits: presence == the venue accepts attached stop-loss /
+    // take-profit on orders. Always on when the capability itself is on (v1;
+    // an admin gate can arrive later without a wire change).
+    if (c.capsSpot) capabilities.spot = { protectiveExits: true }
     if (c.capsPerp)
-      capabilities.futures_perp = { maxLeverage: c.maxLeverage, marginModes: c.marginModes }
+      capabilities.futures_perp = {
+        maxLeverage: c.maxLeverage,
+        marginModes: c.marginModes,
+        protectiveExits: true,
+      }
     if (c.capsOptions) capabilities.options = { settlement: 'cash' }
     return {
       venue: 'assetworks',

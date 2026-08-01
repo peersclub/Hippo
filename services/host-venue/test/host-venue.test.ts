@@ -382,6 +382,268 @@ describe('host-venue realism & policy levers', () => {
   })
 })
 
+describe('protective exits — attached stop-loss / take-profit with OCO', () => {
+  /** Fee-free venue with a mutable price so tests can walk the market. */
+  function priceStore(cfg: Partial<AdminConfig> = {}) {
+    const px = { value: 60_000 }
+    const store = new VenueStore(async () => px.value, {
+      ...BASE_CONFIG,
+      feeRate: 0,
+      makerFee: 0,
+      ...cfg,
+    })
+    return { store, px }
+  }
+
+  const perpEntry = (o = {}) => ({
+    market: 'perp' as const,
+    pairName: 'BTC-USDT',
+    side: 'buy' as const,
+    kind: 'market' as const,
+    qty: 1,
+    rate: 60_000,
+    direction: 'long' as const,
+    leverage: 10,
+    marginMode: 'isolated' as const,
+    stopLossPrice: 55_000,
+    takeProfitPrice: 70_000,
+    ...o,
+  })
+
+  const usdt = (store: VenueStore) =>
+    new Map(store.balances(USER).map((b) => [b.currencyName, b.amount])).get('USDT') ?? 0
+
+  it('rejects nonsense protection at placement (long: stop must be below entry, tp above)', () => {
+    const { store } = priceStore()
+    expect(() => store.place(USER, perpEntry({ stopLossPrice: 61_000 }))).toThrow(/stop-loss/i)
+    expect(() => store.place(USER, perpEntry({ takeProfitPrice: 59_000 }))).toThrow(/take-profit/i)
+    // Short direction flips the matrix.
+    expect(() =>
+      store.place(
+        USER,
+        perpEntry({
+          side: 'sell',
+          direction: 'short',
+          stopLossPrice: 59_000,
+          takeProfitPrice: 55_000,
+        }),
+      ),
+    ).toThrow(/stop-loss.*above/i)
+    // Closing orders can't carry protection — the close IS the exit.
+    expect(() => store.place(USER, perpEntry({ reduceOnly: true }))).toThrow(/reduce-only/i)
+    // Spot sells can't carry protection — a "protective" child would open exposure.
+    expect(() =>
+      store.place(USER, {
+        market: 'spot',
+        pairName: 'BTC-USDT',
+        side: 'sell',
+        kind: 'market',
+        qty: 0.1,
+        rate: 60_000,
+        stopLossPrice: 55_000,
+      }),
+    ).toThrow(/buy orders only/i)
+  })
+
+  it('entry fill spawns the OCO pair; the stop rests until price crosses ADVERSELY, then closes at market', async () => {
+    const { store, px } = priceStore()
+    const entry = store.place(USER, { ...perpEntry(), clientOrderId: 't_prot' })
+    await store.sweep()
+    expect(store.order(entry.id)?.status).toBe(20) // entry SETTLED
+
+    // Children exist: a reduce-only TP limit and an SL stop, OCO-linked.
+    const children = store.openOrders(USER)
+    expect(children).toHaveLength(2)
+    const tp = children.find((o) => o.kind === 'limit')
+    const sl = children.find((o) => o.kind === 'stop')
+    expect(tp).toMatchObject({
+      side: 'sell',
+      rate: 70_000,
+      reduceOnly: true,
+      parentId: entry.id,
+      clientOrderId: 't_prot:tp',
+    })
+    expect(sl).toMatchObject({
+      side: 'sell',
+      rate: 55_000,
+      reduceOnly: true,
+      parentId: entry.id,
+      clientOrderId: 't_prot:sl',
+    })
+    expect(tp?.ocoSiblingId).toBe(sl?.id)
+    expect(sl?.ocoSiblingId).toBe(tp?.id)
+
+    // Price above the trigger (favourable side): the stop must NOT fire —
+    // a limit-sell at 55k would have crossed here; the stop rule is inverted.
+    px.value = 56_000
+    await store.sweep()
+    expect(store.order(sl?.id ?? 0)?.status).toBe(10) // still resting
+    expect(store.order(tp?.id ?? 0)?.status).toBe(10)
+
+    // Adverse cross: last ≤ stop → close at market, position gone, OCO fires.
+    px.value = 54_000
+    const before = usdt(store)
+    await store.sweep()
+    expect(store.order(sl?.id ?? 0)?.status).toBe(20) // stop filled
+    expect(store.order(sl?.id ?? 0)?.avgFillPrice).toBeCloseTo(54_000, 0) // taker at market
+    expect(store.order(tp?.id ?? 0)?.status).toBe(50) // sibling CANCELED
+    expect(await store.openPositions(USER)).toHaveLength(0)
+    // Realized PnL hits TOTAL: (54k − 60k) × 1 = −6,000. The margin release
+    // frees RESERVED (asserted via the snapshot), it doesn't change total.
+    expect(usdt(store) - before).toBeCloseTo(-6_000, 0)
+    expect(store.snapshot().wallets[USER]?.USDT?.reserved ?? -1).toBe(0)
+  })
+
+  it('take-profit fills as a MAKER at its resting rate and cancels the stop', async () => {
+    const { store, px } = priceStore({ makerFee: 0.0002 })
+    const entry = store.place(USER, perpEntry())
+    await store.sweep()
+    const tp = store.openOrders(USER).find((o) => o.kind === 'limit')
+    const sl = store.openOrders(USER).find((o) => o.kind === 'stop')
+
+    px.value = 71_000
+    await store.sweep()
+    const tpDone = store.order(tp?.id ?? 0)
+    expect(tpDone?.status).toBe(20)
+    expect(tpDone?.avgFillPrice).toBe(70_000) // the resting rate, not 71k — maker
+    expect(store.order(sl?.id ?? 0)?.status).toBe(50) // OCO sibling cancelled
+    expect(await store.openPositions(USER)).toHaveLength(0)
+    void entry
+  })
+
+  it('applies taker slippage to a triggered stop (market close semantics)', async () => {
+    const { store, px } = priceStore({ slippagePct: 0.01 })
+    store.place(USER, perpEntry({ takeProfitPrice: undefined }))
+    await store.sweep()
+    const sl = store.openOrders(USER).find((o) => o.kind === 'stop')
+    px.value = 54_000
+    await store.sweep()
+    // Sell stop fills 1% BELOW the live price — moved against the taker.
+    expect(store.order(sl?.id ?? 0)?.avgFillPrice).toBeCloseTo(54_000 * 0.99, 0)
+  })
+
+  it('closing the position by other means cancels the surviving children', async () => {
+    const { store } = priceStore()
+    store.place(USER, perpEntry())
+    await store.sweep()
+    expect(store.openOrders(USER)).toHaveLength(2)
+
+    // Manual full close (reduce-only market sell) — not a protective child.
+    store.place(USER, {
+      market: 'perp',
+      pairName: 'BTC-USDT',
+      side: 'sell',
+      kind: 'market',
+      qty: 1,
+      rate: 60_000,
+      direction: 'long',
+      leverage: 10,
+      marginMode: 'isolated',
+      reduceOnly: true,
+    })
+    await store.sweep()
+    expect(await store.openPositions(USER)).toHaveLength(0)
+    // Both children were cancelled — no orphan could reopen exposure.
+    expect(store.openOrders(USER)).toHaveLength(0)
+    const statuses = store
+      .allOrders(USER)
+      .filter((o) => o.parentId !== undefined)
+      .map((o) => o.status)
+    expect(statuses.sort()).toEqual([50, 50])
+  })
+
+  it('spot buy with protection: children never double-reserve; OCO resolution leaves reserves clean', async () => {
+    const { store, px } = priceStore()
+    store.place(USER, {
+      market: 'spot',
+      pairName: 'BTC-USDT',
+      side: 'buy',
+      kind: 'market',
+      qty: 0.1,
+      rate: 60_000,
+      stopLossPrice: 55_000,
+      takeProfitPrice: 70_000,
+    })
+    await store.sweep()
+    const children = store.openOrders(USER)
+    expect(children).toHaveLength(2)
+    // Neither child reserved the base — 2.1 BTC total, 2.1 available.
+    const snap = store.snapshot()
+    expect(snap.wallets[USER]?.BTC?.reserved ?? 0).toBe(0)
+
+    px.value = 70_500
+    await store.sweep()
+    const bal = new Map(store.balances(USER).map((b) => [b.currencyName, b.amount]))
+    expect(bal.get('BTC')).toBeCloseTo(2, 6) // 2 + 0.1 − 0.1
+    expect(bal.get('USDT')).toBeCloseTo(100_000 - 6_000 + 7_000, 0) // sold at the 70k limit
+    const snap2 = store.snapshot()
+    expect(snap2.wallets[USER]?.BTC?.reserved ?? 0).toBe(0)
+    expect(store.openOrders(USER)).toHaveLength(0) // stop cancelled by OCO
+  })
+
+  it('accepts the wire fields end-to-end and rejects invalid ones with an honest error', async () => {
+    const { app, store } = makeApp({ feeRate: 0, makerFee: 0 })
+    const good = sign({
+      pairName: 'BTC-USDT',
+      orderType: 0,
+      tradeType: 20,
+      qty: 0.1,
+      rate: 60_000,
+      market: 'perp',
+      direction: 'long',
+      leverage: 10,
+      marginMode: 'isolated',
+      stopLossPrice: 55_000,
+      takeProfitPrice: '70000', // numeric strings accepted like every wire number
+      clientOrderId: 't_wire',
+    })
+    const placed = await app.inject({ method: 'POST', url: '/api/v1/trade/orders', ...good })
+    expect(placed.statusCode).toBe(200)
+    await store.sweep()
+    const open = store.openOrders(USER)
+    expect(open.map((o) => o.kind).sort()).toEqual(['limit', 'stop'])
+
+    const bad = sign({
+      pairName: 'BTC-USDT',
+      orderType: 0,
+      tradeType: 20,
+      qty: 0.1,
+      rate: 60_000,
+      stopLossPrice: -5,
+    })
+    const rejected = await app.inject({ method: 'POST', url: '/api/v1/trade/orders', ...bad })
+    expect(rejected.statusCode).toBe(400)
+    expect(rejected.json().error).toMatch(/stopLossPrice/i)
+
+    const nonsense = sign({
+      pairName: 'BTC-USDT',
+      orderType: 0,
+      tradeType: 20,
+      qty: 0.1,
+      rate: 60_000,
+      market: 'perp',
+      direction: 'long',
+      leverage: 10,
+      stopLossPrice: 65_000, // above a long's entry — would trigger immediately
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/v1/trade/orders', ...nonsense })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/stop-loss.*below/i)
+  })
+
+  it('advertises protectiveExits per capability, derived from live admin config', async () => {
+    const { app } = makeApp()
+    const caps = (await app.inject({ method: 'GET', url: '/v1/capabilities' })).json()
+    expect(caps.capabilities.spot.protectiveExits).toBe(true)
+    expect(caps.capabilities.futures_perp.protectiveExits).toBe(true)
+
+    const { app: spotOff } = makeApp({ capsSpot: false })
+    const caps2 = (await spotOff.inject({ method: 'GET', url: '/v1/capabilities' })).json()
+    expect(caps2.capabilities.spot).toBeUndefined()
+    expect(caps2.capabilities.futures_perp.protectiveExits).toBe(true)
+  })
+})
+
 describe('discovery surface (hippo scan target)', () => {
   it('serves the OpenAPI doc with the signed trade wire + capabilities', async () => {
     const { app } = makeApp()

@@ -101,6 +101,8 @@ export type MessageKey =
   | 'draft_margin'
   | 'draft_margin_isolated'
   | 'draft_margin_cross'
+  | 'draft_stop_loss'
+  | 'draft_take_profit'
   | 'draft_dismiss'
   | 'draft_dismissed'
   | 'draft_sent'
@@ -245,6 +247,8 @@ const en: Catalog = {
   draft_margin: 'Margin',
   draft_margin_isolated: 'Isolated',
   draft_margin_cross: 'Cross',
+  draft_stop_loss: 'Stop loss',
+  draft_take_profit: 'Take profit',
   draft_dismiss: 'Dismiss',
   draft_dismissed: 'Order draft dismissed',
   draft_sent: 'SENT ✓',
@@ -387,6 +391,8 @@ const hi: Catalog = {
   draft_margin: 'मार्जिन',
   draft_margin_isolated: 'आइसोलेटेड',
   draft_margin_cross: 'क्रॉस',
+  draft_stop_loss: 'स्टॉप लॉस',
+  draft_take_profit: 'टेक प्रॉफ़िट',
   draft_dismiss: 'हटाएँ',
   draft_dismissed: 'ऑर्डर ड्राफ़्ट हटा दिया गया',
   draft_sent: 'भेज दिया ✓',
@@ -535,6 +541,8 @@ const hiLatn: Catalog = {
   draft_margin: 'Margin',
   draft_margin_isolated: 'Isolated',
   draft_margin_cross: 'Cross',
+  draft_stop_loss: 'Stop loss',
+  draft_take_profit: 'Take profit',
   draft_dismiss: 'Hatao',
   draft_dismissed: 'Order draft hata diya',
   draft_sent: 'BHEJ DIYA ✓',
@@ -682,6 +690,8 @@ const ar: Catalog = {
   draft_margin: 'الهامش',
   draft_margin_isolated: 'معزول',
   draft_margin_cross: 'مشترك',
+  draft_stop_loss: 'وقف الخسارة',
+  draft_take_profit: 'جني الأرباح',
   draft_dismiss: 'تجاهل',
   draft_dismissed: 'تم تجاهل مسودة الأمر',
   draft_sent: 'تم الإرسال ✓',
