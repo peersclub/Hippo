@@ -402,3 +402,60 @@ describe('conversational amend: replacement ticket over the single open order', 
     await app.close()
   })
 })
+
+describe('fractional sizing against LIVE venue display rows', () => {
+  // Regression: live venue positions carry DISPLAY instruments
+  // ("BTC-USDT 5x LONG"), and the resolver's original exact === against
+  // "BTC/USDT" never matched — every fractional close declined with
+  // "no position" in production while the positions view showed the row.
+  it('matches "BTC-USDT 5x LONG" and prefers the named direction', async () => {
+    const seam = stubSeam()
+    seam.portfolio = async () => ({
+      positions: [
+        {
+          instrument: 'BTC-USDT 22x SHORT',
+          size: '0.5',
+          entry: '64,000',
+          mark: '—',
+          pnl: '—',
+          tone: 'neutral' as const,
+        },
+        {
+          instrument: 'BTC-USDT 5x LONG',
+          size: '0.07',
+          entry: '64,012',
+          mark: '—',
+          pnl: '—',
+          tone: 'neutral' as const,
+        },
+      ],
+      openOrders: [],
+    })
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        intent: (): IntentResult => ({
+          intent: 'action',
+          confidence: 0.95,
+          language: 'en',
+          order: {
+            capability: 'futures_perp',
+            side: 'sell',
+            direction: 'long',
+            action: 'close',
+            reduceOnly: true,
+            size: '',
+            sizeFraction: 0.5,
+            instrument: 'BTC/USDT',
+            orderType: 'market',
+          },
+        }),
+      }),
+      seam,
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'close half my btc long' })
+    await waitForJournal(session, (t) => t.includes('order_ticket'))
+    // 0.5 × the LONG row (0.07), not the SHORT row (0.5).
+    expect(seam.prepares[seam.prepares.length - 1]).toMatchObject({ size: '0.035' })
+  })
+})
