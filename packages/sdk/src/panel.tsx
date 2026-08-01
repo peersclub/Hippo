@@ -580,7 +580,10 @@ function Thread() {
                     // stable key means phase changes update, never remount.
                     item.frame.type === 'upload_status'
                     ? `up:${item.frame.fileId}`
-                    : item.frame.id
+                    : // Alert cards collapse in place by alertId (state.ts).
+                      item.frame.type === 'alert'
+                      ? `al:${item.frame.alertId}`
+                      : item.frame.id
               }
             >
               {renderFrame(item.frame)}

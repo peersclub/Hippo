@@ -4,6 +4,7 @@
  */
 import type {
   AdviceDecline,
+  Alert,
   Banner,
   BriefDelta,
   Frame,
@@ -24,6 +25,12 @@ import type {
 } from '@hippo/protocol'
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import {
+  ALERT_STATE_KEY,
+  alertStateClass,
+  cancelAlertUplink,
+  showCancelChip,
+} from './alerts-view.js'
 import { assembleDraftParams, initialLeverage, maxLeverageOf, sizeValid } from './draft.js'
 import {
   FEEDBACK_REASONS,
@@ -1047,6 +1054,59 @@ function OrdersSummaryCard({ frame }: { frame: OrdersSummary }) {
   )
 }
 
+/**
+ * Price alert card — one alert's current state, updated in place (the store
+ * collapses alert frames by alertId; the panel keys the card by alert, so a
+ * state change never remounts). `conditionLabel` and `note` are SERVER-
+ * authored and rendered verbatim — the SDK never re-formats or recomputes a
+ * condition. Only armed cards carry the CANCEL chip; like ticket actions it
+ * rides transport `send` (live-only, never queued) and fails loud.
+ */
+function AlertCard({ frame }: { frame: Alert }) {
+  const L = locale.value
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const cancel = async () => {
+    if (busy) return
+    setFailed(false)
+    setBusy(true)
+    const ok = await send(cancelAlertUplink(frame.alertId))
+    setBusy(false)
+    if (!ok) setFailed(true)
+    // Success stays quiet — the server's `cancelled` alert frame is the
+    // response and swaps this card's state in place.
+  }
+  return (
+    <div class={`alertcard ${alertStateClass(frame.state)}`}>
+      <div class="alhd">
+        <span class="aleyebrow">{t(L, 'alert_eyebrow')}</span>
+        <span class="albadge">
+          {frame.state === 'armed' && <span class="pulse" aria-hidden="true" />}
+          {t(L, ALERT_STATE_KEY[frame.state])}
+        </span>
+      </div>
+      <div class="albody">
+        <span class="alsym">{frame.symbol}</span>
+        <span class="alcond">{frame.conditionLabel}</span>
+      </div>
+      {frame.note && <div class="alnote">{frame.note}</div>}
+      {showCancelChip(frame.state) && (
+        <button
+          type="button"
+          class="alcancel"
+          disabled={busy || connection.value !== 'live'}
+          aria-busy={busy}
+          title={connection.value !== 'live' ? t(L, 'ticket_offline_hint') : undefined}
+          onClick={() => void cancel()}
+        >
+          {busy ? t(L, 'confirming') : t(L, 'alert_cancel')}
+        </button>
+      )}
+      {failed && <div class="action-failed">{t(L, 'action_failed')}</div>}
+    </div>
+  )
+}
+
 export function FallbackCard({ frame }: { frame: UnknownFrame }) {
   const fb = frame.fallback
   if (!fb) return null
@@ -1098,6 +1158,8 @@ export function renderFrame(frame: Frame): JSX.Element | null {
       return <HostActionCard frame={frame} />
     case 'orders_summary':
       return <OrdersSummaryCard frame={frame} />
+    case 'alert':
+      return <AlertCard frame={frame} />
     default:
       return null // orders_snapshot, pulse, price_tick, learned_memory & identity are handled by stores, never rendered in-thread
   }

@@ -155,6 +155,11 @@ export type MessageKey =
   | 'orders_total_cancelled'
   | 'orders_summary_empty_all'
   | 'orders_summary_empty_session'
+  | 'alert_eyebrow'
+  | 'alert_cancel'
+  | 'alert_state_armed'
+  | 'alert_state_triggered'
+  | 'alert_state_cancelled'
 
 type Catalog = Record<MessageKey, string>
 
@@ -294,6 +299,11 @@ const en: Catalog = {
   orders_total_cancelled: 'Cancelled',
   orders_summary_empty_all: 'No orders yet',
   orders_summary_empty_session: 'No orders this session',
+  alert_eyebrow: 'PRICE ALERT',
+  alert_cancel: 'CANCEL ALERT',
+  alert_state_armed: 'ARMED',
+  alert_state_triggered: 'TRIGGERED',
+  alert_state_cancelled: 'CANCELLED',
 }
 
 // First pass — pending native review.
@@ -431,6 +441,11 @@ const hi: Catalog = {
   orders_total_cancelled: 'रद्द',
   orders_summary_empty_all: 'अभी कोई ऑर्डर नहीं',
   orders_summary_empty_session: 'इस सत्र में कोई ऑर्डर नहीं',
+  alert_eyebrow: 'मूल्य अलर्ट',
+  alert_cancel: 'अलर्ट रद्द करें',
+  alert_state_armed: 'सक्रिय',
+  alert_state_triggered: 'ट्रिगर हुआ',
+  alert_state_cancelled: 'रद्द',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -576,6 +591,11 @@ const hiLatn: Catalog = {
   orders_total_cancelled: 'Cancelled',
   orders_summary_empty_all: 'Abhi koi order nahi',
   orders_summary_empty_session: 'Is session mein koi order nahi',
+  alert_eyebrow: 'PRICE ALERT',
+  alert_cancel: 'ALERT CANCEL KAREIN',
+  alert_state_armed: 'ACTIVE',
+  alert_state_triggered: 'TRIGGER HUA',
+  alert_state_cancelled: 'CANCEL',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -716,6 +736,11 @@ const ar: Catalog = {
   orders_total_cancelled: 'ملغى',
   orders_summary_empty_all: 'لا أوامر بعد',
   orders_summary_empty_session: 'لا أوامر في هذه الجلسة',
+  alert_eyebrow: 'تنبيه السعر',
+  alert_cancel: 'إلغاء التنبيه',
+  alert_state_armed: 'مُفعّل',
+  alert_state_triggered: 'تم التفعيل',
+  alert_state_cancelled: 'ملغى',
 }
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }

@@ -438,6 +438,112 @@ def parse_orders_query(text: str) -> dict[str, Any] | None:
     return {"scope": scope}
 
 
+# --- price alerts (conversational create/cancel) --------------------------------
+# "alert me when BTC crosses/hits/goes above/below 70k", "tell me if ETH drops
+# under 3000" → an alert intent the gateway arms durably. SELF-CONTAINED and
+# deterministic: everything from cue detection to the returned classification
+# dict lives here; fast_path has exactly one dispatch call into this block.
+# "crosses"/"hits"/"reaches" resolve to direction 'cross' — the GATEWAY decides
+# above/below against the live price at creation (target > current → above).
+_ALERT_CUE_RE = re.compile(
+    r"\b(?:alert|notify|ping|warn)\s+(?:me|us)\b"
+    r"|\b(?:tell|let)\s+(?:me|us)\s+know\b"
+    r"|\btell\s+(?:me|us)\s+(?:if|when|once)\b"
+    r"|\bset\s+(?:an?\s+)?alert\b",
+    re.IGNORECASE,
+)
+_ALERT_ABOVE_RE = re.compile(
+    r"\b(?:above|over|exceeds?|breaks?\s+(?:above|over)|rises?\s+(?:above|over|past)|"
+    r"goes?\s+(?:above|over|past)|more\s+than)\b",
+    re.IGNORECASE,
+)
+_ALERT_BELOW_RE = re.compile(
+    r"\b(?:below|under|beneath|drops?|falls?|dips?|sinks?|less\s+than|"
+    r"goes?\s+(?:below|under))\b",
+    re.IGNORECASE,
+)
+_ALERT_CROSS_RE = re.compile(r"\b(?:cross(?:es)?|hits?|reach(?:es)?|touch(?:es)?)\b", re.IGNORECASE)
+# "70k" / "70,000" / "$70000.50" — k multiplies by 1000.
+_ALERT_PRICE_RE = re.compile(r"\$?\s*(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<kilo>k\b)?", re.IGNORECASE)
+_ALERT_CANCEL_RE = re.compile(
+    r"\b(?:cancel|remove|delete|stop|kill|clear|drop)\b[\s\S]*\balerts?\b"
+    r"|\balerts?\b[\s\S]*\b(?:cancel|remove|delete|stop|kill|clear|drop)\b",
+    re.IGNORECASE,
+)
+
+
+def _alert_asset(text: str) -> str | None:
+    """First recognized asset mention → "XXX/USDT" pair, else None."""
+    for token in re.findall(r"[a-zA-Z]+", text):
+        asset = normalize_asset(token)
+        if asset:
+            return to_pair(asset)
+    return None
+
+
+def _alert_price(text: str) -> float | None:
+    """First plausible price in the text ("70k" → 70000.0), else None."""
+    m = _ALERT_PRICE_RE.search(text)
+    if not m:
+        return None
+    value = float(m.group("num").replace(",", ""))
+    if m.group("kilo"):
+        value *= 1000
+    return value if value > 0 else None
+
+
+def parse_alert(text: str) -> dict[str, Any] | None:
+    """Extract a price-alert intent, else None.
+
+    Create → {"action": "create", "symbol", "direction": above|below|cross, "price"}.
+    Cancel → {"action": "cancel", "symbol"?} ("cancel my btc alert").
+    Deliberately strict: a create needs cue + asset + price + a direction word —
+    anything less falls through to the normal classifier rather than guessing.
+    """
+    if _ALERT_CANCEL_RE.search(text):
+        out: dict[str, Any] = {"action": "cancel"}
+        symbol = _alert_asset(text)
+        if symbol:
+            out["symbol"] = symbol
+        return out
+    if not _ALERT_CUE_RE.search(text):
+        return None
+    symbol = _alert_asset(text)
+    price = _alert_price(text)
+    if symbol is None or price is None:
+        return None
+    # above/below words are explicit and win over the ambiguous cross verbs
+    # ("crosses above 70k" is an ABOVE alert, not a cross).
+    if _ALERT_ABOVE_RE.search(text):
+        direction = "above"
+    elif _ALERT_BELOW_RE.search(text):
+        direction = "below"
+    elif _ALERT_CROSS_RE.search(text):
+        direction = "cross"
+    else:
+        return None
+    return {"action": "create", "symbol": symbol, "direction": direction, "price": price}
+
+
+def _alert_fast_path(text: str, language: str) -> dict[str, Any] | None:
+    """Full classification dict for an alert phrasing, else None."""
+    alert = parse_alert(text)
+    if alert is None:
+        return None
+    interpretation = (
+        "Managing your price alerts."
+        if alert["action"] == "cancel"
+        else "Setting up a price alert."
+    )
+    return {
+        "intent": "alert",
+        "confidence": 0.95,
+        "language": language,
+        "alertIntent": alert,
+        "interpretation": interpretation,
+    }
+
+
 # --- deterministic classification rules ---------------------------------------
 _ADVICE_BAIT = [
     re.compile(p, re.IGNORECASE)
@@ -483,6 +589,9 @@ def fast_path(text: str) -> dict[str, Any] | None:
     language = detect_language(text)
     if any(p.search(text) for p in _ADVICE_BAIT):
         return {"intent": "advice", "confidence": 0.95, "language": language}
+    alert = _alert_fast_path(text, language)
+    if alert is not None:
+        return alert
     order = parse_order(text)
     if order is not None:
         return {

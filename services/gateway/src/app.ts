@@ -8,7 +8,9 @@ import { timingSafeEqual } from 'node:crypto'
 import cors from '@fastify/cors'
 import { Uplink } from '@hippo/protocol'
 import {
+  type AlertStore,
   getPool,
+  InMemoryAlertStore,
   InMemoryMauStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
@@ -19,6 +21,7 @@ import {
   monthKey,
   type PartnerStore,
   type PlanStore,
+  PostgresAlertStore,
   PostgresMauStore,
   PostgresPartnerStore,
   PostgresPlanStore,
@@ -30,6 +33,7 @@ import {
   type UserStore,
 } from '@hippo/stores'
 import Fastify from 'fastify'
+import { createAlertsEngine } from './alerts.js'
 import { Diagnostics, instrumentClient } from './diagnostics.js'
 import { createOrchestrator } from './orchestrator/index.js'
 import { createIntelligenceClient } from './orchestrator/intelligence.js'
@@ -78,6 +82,11 @@ export type GatewayOptions = {
   /** Durable upload records (migration 016) — the "Files" library. Postgres
    * when DATABASE_URL is set, in-memory otherwise. */
   uploadedFileStore?: UploadedFileStore
+  /** Durable price alerts (migration 017). Postgres when DATABASE_URL is set,
+   * in-memory otherwise. */
+  alertStore?: AlertStore
+  /** Alert poll cadence override (tests). Defaults to ALERT_POLL_MS ?? 15s. */
+  alertPollMs?: number
   /** Override the session store (tests inject a Redis-backed one). Defaults to
    * Redis when REDIS_URL is set, else in-memory. */
   sessions?: SessionStore
@@ -126,6 +135,8 @@ export async function buildApp(opts: GatewayOptions = {}) {
   const uploadedFiles =
     opts.uploadedFileStore ??
     (usePg ? new PostgresUploadedFileStore(getPool()) : new InMemoryUploadedFileStore())
+  const alertStore =
+    opts.alertStore ?? (usePg ? new PostgresAlertStore(getPool()) : new InMemoryAlertStore())
 
   const sessions =
     opts.sessions ??
@@ -149,6 +160,20 @@ export async function buildApp(opts: GatewayOptions = {}) {
     app.log.warn({ err }, 'MAU hydration failed — quota counters start cold')
   }
   const emit = createEmitter({ strict: opts.strictFrames ?? isTest, log: app.log })
+  // The market client is shared by the orchestrator (briefs, ticks) and the
+  // alerts poll loop — deliberately NOT instrumented (see below).
+  const market = opts.market ?? createMarketClient()
+  // Price alerts engine: durable store + shared market client + the session
+  // store for live-session delivery. Started below; stopped with the app so
+  // tests never leak a poll interval.
+  const alerts = createAlertsEngine({
+    store: alertStore,
+    market,
+    sessions,
+    emit,
+    log: app.log,
+    ...(opts.alertPollMs !== undefined ? { pollMs: opts.alertPollMs } : {}),
+  })
   // Instrumented pass-through wrappers feed the diagnostics call log. The
   // market client is deliberately NOT wrapped: the shared price-tick poller
   // calls snapshot() every few seconds and would drown the 100-entry log.
@@ -158,7 +183,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
       respond: 'research',
       respondStream: 'research',
     }),
-    market: opts.market ?? createMarketClient(),
+    market,
     memory: instrumentClient(opts.memory ?? createMemoryClient(), diagnostics, {
       update: 'memory-write',
       clear: 'memory-write',
@@ -174,6 +199,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
       listOrders: 'order',
     }),
     identity: identities,
+    alerts,
     emit,
     telemetry,
     log: app.log,
@@ -181,6 +207,11 @@ export async function buildApp(opts: GatewayOptions = {}) {
     // in-memory store, restart-proof on Redis (see orchestrator/index.ts).
     sessions,
   })
+
+  // Alert poll loop: unref'd interval, torn down with the app so a test
+  // gateway never leaks a timer past close().
+  alerts.start()
+  app.addHook('onClose', async () => alerts.stop())
 
   // Shared guard for internal routes: INTERNAL_API_TOKEN, timing-safe and
   // fail-closed. 503 when the token is unset (surface disabled), 401 on a
@@ -423,6 +454,8 @@ export async function buildApp(opts: GatewayOptions = {}) {
     users,
     identities,
     uploadedFiles,
+    alertStore,
+    alerts,
   }
 }
 

@@ -348,6 +348,32 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .hostact.failed{border-color:rgba(var(--hippo-down-rgb),.4)}
 .hostact.failed .haphase{color:var(--hippo-down)}
 .hostact.timeout .haphase{color:var(--hippo-amber)}
+/* price alert card — one alert's current state, updated in place by alertId.
+   Server-authored conditionLabel rendered verbatim; armed = amber pulse,
+   triggered = up-accent, cancelled = dim. Tokens only. */
+.alertcard{align-self:flex-start;max-width:96%;width:100%;border-radius:15px;padding:13px;
+  background:var(--hippo-card);border:1px solid var(--hippo-hairline);
+  display:flex;flex-direction:column;gap:8px;animation:msgIn .3s ease both}
+.alertcard .alhd{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.alertcard .aleyebrow{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.14em;color:var(--hippo-text-faint)}
+.alertcard .albadge{display:flex;align-items:center;gap:6px;font-family:var(--hippo-font-mono);
+  font-size:9px;letter-spacing:.1em;padding:3px 9px;border-radius:var(--hippo-radius-pill)}
+.alertcard .albadge .pulse{width:6px;height:6px;border-radius:50%;background:var(--hippo-amber);animation:hpulse 1.2s ease infinite}
+.alertcard .albody{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.alertcard .alsym{font-family:var(--hippo-font-display);font-weight:600;font-size:13px;color:var(--hippo-text-hi)}
+.alertcard .alcond{font-family:var(--hippo-font-mono);font-size:12px;color:var(--hippo-text-mid)}
+.alertcard .alnote{font-family:var(--hippo-font-body);font-size:11px;color:var(--hippo-text-dim)}
+.alertcard.armed{border-color:rgba(var(--hippo-amber-rgb),.35)}
+.alertcard.armed .albadge{color:var(--hippo-amber);background:rgba(var(--hippo-amber-rgb),.12)}
+.alertcard.triggered{border-color:rgba(var(--hippo-up-rgb),.4)}
+.alertcard.triggered .albadge{color:var(--hippo-up);background:rgba(var(--hippo-up-rgb),.12)}
+.alertcard.triggered .alcond{color:var(--hippo-text-hi)}
+.alertcard.cancelled{opacity:.62}
+.alertcard.cancelled .albadge{color:var(--hippo-text-faint);background:rgba(var(--hippo-white-rgb),.06)}
+.alertcard .alcancel{align-self:flex-start;font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.1em;
+  padding:5px 12px;border-radius:var(--hippo-radius-pill);border:1px solid rgba(var(--hippo-down-rgb),.45);color:var(--hippo-down)}
+.alertcard .alcancel:disabled{opacity:.5;cursor:default}
+@media (prefers-reduced-motion:reduce){.alertcard{animation:none}.alertcard .albadge .pulse{animation:none}}
 /* consolidated orders card — full "show my orders" answer (scope + totals +
    rows). Reuses .oside / .fillbar so it reads like the rest of the order UI */
 .osumm{align-self:flex-start;max-width:96%;width:100%;border-radius:15px;padding:13px;

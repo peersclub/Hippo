@@ -324,6 +324,26 @@ export function pushFrame(item: ThreadItem) {
     // also clears a trailing thinking/skeleton via the ephemeral rule).
   }
 
+  // Alert cards collapse IN PLACE by alertId, exactly like lifecycle by
+  // ticketId — one card tells the alert's whole story (armed → triggered /
+  // cancelled). Journal replay after a reconnect replays states in order, so
+  // the collapse leaves exactly the latest state per alert.
+  if (t === 'alert' && item.kind === 'frame' && item.frame.type === 'alert') {
+    const alertId = item.frame.alertId
+    const prev = thread.value
+    for (let i = prev.length - 1; i >= 0; i--) {
+      const x = prev[i]
+      if (x?.kind === 'frame' && x.frame.type === 'alert' && x.frame.alertId === alertId) {
+        const next = [...prev]
+        next[i] = item
+        commitThread(next)
+        return
+      }
+    }
+    // First frame for this alert — fall through to normal handling (which
+    // also clears a trailing thinking/skeleton via the ephemeral rule).
+  }
+
   // Upload lifecycle collapses IN PLACE by fileId, exactly like lifecycle by
   // ticketId — one chip tells the file's journey (received → analyzing →
   // failed). The frame also retires the client-local progress row for its
