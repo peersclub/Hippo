@@ -162,6 +162,12 @@ export type MessageKey =
   | 'alert_state_armed'
   | 'alert_state_triggered'
   | 'alert_state_cancelled'
+  | 'clarify_eyebrow'
+  | 'clarify_you_said'
+  | 'clarify_chosen'
+  | 'clarify_sending'
+  | 'clarify_offline_hint'
+  | 'clarify_failed'
 
 type Catalog = Record<MessageKey, string>
 
@@ -308,6 +314,12 @@ const en: Catalog = {
   alert_state_armed: 'ARMED',
   alert_state_triggered: 'TRIGGERED',
   alert_state_cancelled: 'CANCELLED',
+  clarify_eyebrow: 'BEFORE I ACT',
+  clarify_you_said: 'You said',
+  clarify_chosen: 'YOU CHOSE',
+  clarify_sending: 'SENDING…',
+  clarify_offline_hint: 'Reconnect to answer this',
+  clarify_failed: "Couldn't send your choice — nothing was decided. Tap again.",
 }
 
 // First pass — pending native review.
@@ -452,6 +464,12 @@ const hi: Catalog = {
   alert_state_armed: 'सक्रिय',
   alert_state_triggered: 'ट्रिगर हुआ',
   alert_state_cancelled: 'रद्द',
+  clarify_eyebrow: 'कुछ करने से पहले',
+  clarify_you_said: 'आपने कहा',
+  clarify_chosen: 'आपने चुना',
+  clarify_sending: 'भेजा जा रहा है…',
+  clarify_offline_hint: 'जवाब देने के लिए दोबारा जुड़ें',
+  clarify_failed: 'आपका चुनाव भेजा नहीं जा सका — कुछ तय नहीं हुआ। दोबारा दबाएँ।',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -604,6 +622,12 @@ const hiLatn: Catalog = {
   alert_state_armed: 'ACTIVE',
   alert_state_triggered: 'TRIGGER HUA',
   alert_state_cancelled: 'CANCEL',
+  clarify_eyebrow: 'KUCH KARNE SE PEHLE',
+  clarify_you_said: 'Aapne kaha',
+  clarify_chosen: 'AAPNE CHUNA',
+  clarify_sending: 'BHEJA JA RAHA HAI…',
+  clarify_offline_hint: 'Jawab dene ke liye dobara connect karo',
+  clarify_failed: 'Aapka choice bhej nahi paye — kuch tay nahi hua. Dobara tap karo.',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -751,6 +775,12 @@ const ar: Catalog = {
   alert_state_armed: 'مُفعّل',
   alert_state_triggered: 'تم التفعيل',
   alert_state_cancelled: 'ملغى',
+  clarify_eyebrow: 'قبل أن أتصرف',
+  clarify_you_said: 'قلت',
+  clarify_chosen: 'اخترت',
+  clarify_sending: 'جارٍ الإرسال…',
+  clarify_offline_hint: 'أعد الاتصال للإجابة',
+  clarify_failed: 'تعذّر إرسال اختيارك — لم يُتخذ أي إجراء. المس مرة أخرى.',
 }
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }

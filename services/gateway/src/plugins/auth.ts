@@ -126,6 +126,13 @@ export type Session = {
   tickets: Map<string, TicketQuote>
   /** Pending interactive order drafts awaiting submit/dismiss (bounded). */
   drafts: Map<string, DraftFields>
+  /** Open confidence-aware clarifications awaiting the trader's pick, keyed by
+   * clarificationId. Bounded (CLARIFICATIONS_CAP) and TTL'd (CLARIFICATION_TTL_MS)
+   * by the orchestrator's clarify module. Live-object only and deliberately NOT
+   * serialized into the durable session meta: a clarification that outlived its
+   * gateway is answered with an honest "that question is closed" rather than
+   * placing an order nobody is looking at any more. */
+  clarifications?: Map<string, import('../orchestrator/clarify.js').OpenClarification>
   /** Force-close the live SSE socket (set by streamSession) — admin revoke. */
   closeStream?: (() => void) | null
 }

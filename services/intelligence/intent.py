@@ -24,6 +24,21 @@ INTENTS = {
 }
 LANGUAGES = {"en", "hi", "hinglish"}
 
+# Below this confidence a classification is a GUESS, not a parse — and on a
+# COSTLY intent (an order, an alert, a page mutation) the gateway ASKS instead
+# of acting on it (confidence-aware clarification, August 2026).
+#
+# 0.85 needs no tuning because the numbers this module emits are bimodal by
+# construction: every deterministic fast_path hit returns 0.92–0.97 ("we parsed
+# this") and every rule_classify fallback returns 0.6–0.8 ("we guessed this").
+# 0.85 sits in the empty gap between those two clusters, so it separates parse
+# from guess exactly, and no fast-path hit can ever fall below it.
+#
+# The POLICY lives in the gateway (services/gateway/src/orchestrator/clarify.ts,
+# CLARIFY_CONFIDENCE — same number, same reasoning); this copy only decides when
+# to bother naming ALTERNATIVE readings for it.
+CLARIFY_THRESHOLD = 0.85
+
 # Supported chart timeframes + indicator slugs for host_action (demo set).
 # Natural phrasings canonicalise to these; anything outside the set is an
 # honest decline downstream (the gateway never guesses an unsupported one).
@@ -786,6 +801,34 @@ def fast_path(text: str) -> dict[str, Any] | None:
     return None
 
 
+# --- ambiguous position exits ---------------------------------------------------
+# "close btc", "exit my eth", "get me out of SOL": a market is named but no
+# size, side or order terms are. It READS as an intent to reduce exposure, and
+# it could equally mean "show me what I'm holding in BTC" — so it is classified
+# action at LOW confidence on purpose. The gateway's clarification policy turns
+# that into a question instead of an order; nothing here places anything.
+_EXIT_VERB_RE = re.compile(
+    r"^\s*(?:close|exit|flatten|unwind|dump|liquidate)\b"
+    r"|\bget\s+(?:me\s+)?out\s+of\b",
+    re.IGNORECASE,
+)
+_POSITION_NOUN_RE = re.compile(
+    r"\b(?:" + "|".join(sorted(_POSITION_NOUNS)) + r")\b", re.IGNORECASE
+)
+
+
+def is_ambiguous_exit(text: str) -> bool:
+    """True for a bare position-exit phrasing that names a market or a position
+    but no order terms. Requiring one of those keeps unrelated "close the
+    settings page" phrasings out of the action bucket entirely."""
+    if not _EXIT_VERB_RE.search(text):
+        return False
+    tokens = re.findall(r"[a-zA-Z]+", text)
+    if any(normalize_asset(t) for t in tokens):
+        return True
+    return bool(_POSITION_NOUN_RE.search(text))
+
+
 def rule_classify(text: str) -> dict[str, Any]:
     """Full deterministic classification — the no-LLM fallback.
 
@@ -803,11 +846,83 @@ def rule_classify(text: str) -> dict[str, Any]:
     language = detect_language(text)
     if _ACTION_VERB_START.match(text):
         return {"intent": "action", "confidence": 0.7, "language": language}
+    if is_ambiguous_exit(text):
+        return {"intent": "action", "confidence": 0.65, "language": language}
     if _SMALLTALK_RE.match(text) and len(canonical_text(text).split()) <= 6:
         return {"intent": "smalltalk", "confidence": 0.8, "language": language}
     if _CONCEPT_RE.search(text) and not _LIVE_MARKET_RE.search(text):
         return {"intent": "concept", "confidence": 0.7, "language": language}
     return {"intent": "research", "confidence": 0.6, "language": language}
+
+
+# --- alternative readings (feeds the gateway's clarification card) ---------------
+# Every intent named here is CHEAP: a query, never a mutation. The gateway
+# renders them as the safe alternatives beside the risky reading, so a wrong
+# guess costs a re-ask instead of an order.
+_COSTLY_INTENTS = {"action", "alert", "host_action"}
+_MAX_ALTERNATIVES = 2
+
+
+def alternative_intents(text: str, intent: str) -> list[str]:
+    """Plausible SECOND readings of a LOW-confidence costly classification,
+    most-likely first, at most two.
+
+    Deliberately conservative: a reading is named only when the text actually
+    supports it. An empty list is a fine answer — the gateway still asks, it
+    just falls back to its own generic escape option. Pure.
+    """
+    if intent not in _COSTLY_INTENTS:
+        return []
+    tl = text.lower()
+    ranked: list[str] = []
+    if intent == "action":
+        # "close btc" / "cancel my order" could just as well be "show me what
+        # I have working" — the blotter first, then the positions view.
+        if _ORDERS_WORD_RE.search(tl) or _EXIT_VERB_RE.search(tl):
+            ranked.append("orders_query")
+        if _POSITION_NOUN_RE.search(tl) or re.search(r"\bmy\b", tl):
+            ranked.append("portfolio")
+    else:
+        # An alert or a page command about an asset is often just a question
+        # about that asset ("btc at 70k?" / "show me eth").
+        ranked.append("research")
+        if _POSITION_NOUN_RE.search(tl) or re.search(r"\bmy\b", tl):
+            ranked.append("portfolio")
+    out: list[str] = []
+    for alt in ranked:
+        if alt != intent and alt in INTENTS and alt not in out:
+            out.append(alt)
+    return out[:_MAX_ALTERNATIVES]
+
+
+def _validate_alternatives(raw: object, intent: str) -> list[str]:
+    """Allowlist LLM-proposed alternatives: known intents only, never the
+    primary, never a costly one (an alternative exists to be the SAFE reading),
+    deduped and bounded. Anything else is dropped silently."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for alt in raw:
+        if not isinstance(alt, str):
+            continue
+        if alt in INTENTS and alt != intent and alt not in _COSTLY_INTENTS and alt not in out:
+            out.append(alt)
+    return out[:_MAX_ALTERNATIVES]
+
+
+def _ensure_alternatives(result: dict[str, Any], text: str) -> dict[str, Any]:
+    """Attach `alternatives` when — and only when — the primary reading is a
+    low-confidence guess at a costly intent. A confident result is returned
+    byte-identical: the key never appears on a fast-path classification."""
+    if result.get("alternatives"):
+        return result
+    confidence = result.get("confidence")
+    if not isinstance(confidence, (int, float)) or float(confidence) >= CLARIFY_THRESHOLD:
+        return result
+    alts = alternative_intents(text, str(result.get("intent", "")))
+    if alts:
+        result["alternatives"] = alts
+    return result
 
 
 # --- LLM output validation ------------------------------------------------------
@@ -899,6 +1014,12 @@ def _validate_classification(
     restructured = parsed.get("restructuredQuery")
     if isinstance(restructured, str) and restructured.strip():
         result["restructuredQuery"] = restructured.strip()
+    # Alternative readings, when the model volunteered them (the prompt does
+    # not ask for them today). Allowlisted like everything else it returns;
+    # _ensure_alternatives fills the deterministic default when it didn't.
+    alternatives = _validate_alternatives(parsed.get("alternatives"), parsed["intent"])
+    if alternatives:
+        result["alternatives"] = alternatives
     if parsed["intent"] == "action":
         order = _validate_order(parsed.get("order"))
         if order is not None:
@@ -1070,4 +1191,7 @@ async def classify(
             result = rule_classify(text)
     if language_hint in LANGUAGES:
         result["language"] = language_hint
+    # Low-confidence costly reading → name the alternatives the gateway turns
+    # into clarification options. A no-op above CLARIFY_THRESHOLD.
+    _ensure_alternatives(result, text)
     return _ensure_interpretation(result, text)

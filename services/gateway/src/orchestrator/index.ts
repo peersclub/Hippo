@@ -31,6 +31,14 @@ import type { DraftFields, Session, SessionStore } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft, JournalEntry } from '../plugins/sse.js'
 import { emitTransient } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
+import type { ClarificationPlan } from './clarify.js'
+import {
+  buildClarification,
+  CLARIFICATION_TTL_MS,
+  choiceDeclineBanner,
+  rememberClarification,
+  takeChoice,
+} from './clarify.js'
 import { createIdentityHandler } from './identity.js'
 import type {
   AmendIntent,
@@ -1915,34 +1923,81 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     })
   }
 
+  // ── confidence-aware clarification ─────────────────────────────────────
+
+  /**
+   * Ask instead of executing: mint the clarificationId, remember the options
+   * (bounded + TTL'd on the session) and emit the frame. The caller RETURNS
+   * straight after — a clarification REPLACES the risky execution for this
+   * turn, so nothing is prepared, armed or posted to the host until the
+   * trader picks one of these options back.
+   */
+  function askClarification(session: Session, plan: ClarificationPlan, text: string): void {
+    const clarificationId = `c_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    if (!session.clarifications) session.clarifications = new Map()
+    rememberClarification(session.clarifications, clarificationId, {
+      options: plan.options,
+      resolutions: plan.resolutions,
+      text,
+      expiresAt: Date.now() + CLARIFICATION_TTL_MS,
+    })
+    const original = text.trim()
+    emit(session, {
+      type: 'clarification',
+      clarificationId,
+      question: plan.question,
+      options: plan.options,
+      ...(original ? { originalText: original.slice(0, 280) } : {}),
+      note: plan.note,
+    })
+    telemetry.recordUplink('clarification_asked')
+  }
+
   // ── per-turn routing ───────────────────────────────────────────────────
 
-  async function processTurn(session: Session, text: string): Promise<void> {
+  /**
+   * One turn. `resolved` is the clarified re-run: the trader picked an
+   * interpretation off a clarification card, so this turn skips classification
+   * entirely and runs the chosen IntentResult down the EXISTING execution
+   * paths below — no order, alert or host logic is duplicated for it.
+   */
+  async function processTurn(
+    session: Session,
+    text: string,
+    resolved?: IntentResult,
+  ): Promise<void> {
     const turnStart = Date.now()
     let intentRes: IntentResult
     let degraded = false
     // Span + latency around intent classification (intent-p95 rate-card number).
     const span = telemetry.startSpan('hippo.turn')
-    const intentStart = Date.now()
-    // Thread context for coreference ("what about ETH?" after a BTC turn) —
-    // interpret stage ONLY. First turn assembles to [] and the field is
-    // omitted; research calls below never see it.
-    const history = assembleHistory(session.journal.after(0))
-    try {
-      intentRes = await intel.intent({
-        text,
-        language: session.language,
-        ...(history.length > 0 ? { history } : {}),
-      })
-      telemetry.markHealthy()
-      // Recovered: a future degradation episode gets its banner again.
-      session.degradedBannerShown = false
-    } catch (err) {
-      degraded = true
-      enterDegraded(session, err)
-      intentRes = guessIntent(text)
+    if (resolved) {
+      // Nothing left to classify — re-classifying would land on the very
+      // guess the trader just corrected. No intent call, no history, and no
+      // intent-latency sample (that cost was paid on the asking turn).
+      intentRes = resolved
+    } else {
+      const intentStart = Date.now()
+      // Thread context for coreference ("what about ETH?" after a BTC turn) —
+      // interpret stage ONLY. First turn assembles to [] and the field is
+      // omitted; research calls below never see it.
+      const history = assembleHistory(session.journal.after(0))
+      try {
+        intentRes = await intel.intent({
+          text,
+          language: session.language,
+          ...(history.length > 0 ? { history } : {}),
+        })
+        telemetry.markHealthy()
+        // Recovered: a future degradation episode gets its banner again.
+        session.degradedBannerShown = false
+      } catch (err) {
+        degraded = true
+        enterDegraded(session, err)
+        intentRes = guessIntent(text)
+      }
+      telemetry.recordIntent(intentRes.intent, Date.now() - intentStart)
     }
-    telemetry.recordIntent(intentRes.intent, Date.now() - intentStart)
     span.setAttribute('hippo.intent', intentRes.intent)
     span.setAttribute('hippo.degraded', degraded)
     span.end()
@@ -1952,6 +2007,27 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (intentRes.intent === 'smalltalk' || intentRes.confidence < LOW_CONFIDENCE) {
       emit(session, nudgeFrame(session))
       return
+    }
+
+    // Confidence-aware clarification: a COSTLY intent (order, alert, host page)
+    // under the threshold is a guess, and guessing there costs money, durable
+    // state or the trader's page — so ASK. This runs BEFORE the interpretation
+    // card on purpose: "UNDERSTOOD — preparing an order ticket" above a
+    // question we're asking because we did NOT understand would be a lie.
+    //
+    // Skipped in degraded mode: guessIntent pins confidence at 0.5, so every
+    // costly turn would clarify — and its deterministic parse ("buy 0.05 btc")
+    // is a parse, not a guess. Skipped on a clarified re-run for the same
+    // reason a re-run skips classification.
+    if (!degraded && !resolved) {
+      const plan = buildClarification(intentRes, {
+        symbol: defaultSymbol(session),
+        venueName: session.partner.venueName,
+      })
+      if (plan) {
+        askClarification(session, plan, text)
+        return
+      }
     }
 
     // Persona read is cheap and unconditional (opt-in accrual + experience
@@ -2572,6 +2648,35 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           alerts.cancelById(session, uplink.alertId).catch((err) => {
             log.error({ err, alertId: uplink.alertId }, 'alert cancel failed')
           })
+          return
+        }
+        case 'clarification_choice': {
+          // Command, not conversation: no echo, no thinking, no classify.
+          //
+          // The uplink schema validated SHAPE only — zod cannot know which
+          // option ids we offered. takeChoice is the check that matters: the
+          // clarification must still be open (never answered, never expired)
+          // and the optionId must be one WE sent for it. Every refusal is an
+          // honest frame; none of them is a silent no-op, and none of them
+          // executes anything.
+          telemetry.recordUplink('clarification_choice')
+          const outcome = session.clarifications
+            ? takeChoice(session.clarifications, uplink.clarificationId, uplink.optionId)
+            : ({ ok: false, reason: 'unknown' } as const)
+          if (!outcome.ok) {
+            emit(session, choiceDeclineBanner(outcome.reason))
+            return
+          }
+          // Re-run the ORIGINAL turn with the chosen interpretation. The
+          // resolution carries the chosen option's label as its
+          // interpretation, so the read-back lands in-thread on the normal
+          // interpretation card and the transcript shows what was decided.
+          const turnT0 = Date.now()
+          processTurn(session, outcome.text, outcome.intent)
+            .catch((err) => {
+              log.error({ err, clarificationId: uplink.clarificationId }, 'clarified turn failed')
+            })
+            .finally(() => telemetry.recordTurnLatency(Date.now() - turnT0))
           return
         }
         case 'stream_stop': {
