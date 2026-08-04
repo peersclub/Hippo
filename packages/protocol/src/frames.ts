@@ -457,6 +457,43 @@ export const AlertFrame = z.object({
   tsIso: z.string().optional(), // ISO time of the state change, when known
 })
 
+/**
+ * Confidence-aware clarification (additive, August 2026) — the server ASKING
+ * instead of guessing. When the intent classifier lands below the confidence
+ * threshold on a COSTLY intent (placing an order, arming an alert, driving the
+ * host page), the gateway emits this frame rather than executing its best
+ * guess. Every string here is SERVER-AUTHORED and rendered VERBATIM — stop-line
+ * law, same posture as AlertFrame.conditionLabel: the SDK draws the question
+ * and the option labels, it never invents or re-words an interpretation.
+ *
+ * `options` is bounded 2..4 on purpose: one option is not a question, and five
+ * is a menu — past four the trader is reading a list instead of recognising
+ * their own sentence. The trader's pick returns as a clarification_choice
+ * uplink carrying the option id; the gateway re-validates it against the set it
+ * offered. Old SDKs render this via FallbackCard (fallback carried in base).
+ */
+export const ClarificationFrame = z.object({
+  ...base,
+  type: z.literal('clarification'),
+  clarificationId: z.string().min(1).max(64),
+  /** Server-authored, rendered verbatim, e.g. "Did you mean…?". */
+  question: z.string().min(1).max(200),
+  options: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(40), // echoed back on clarification_choice
+        label: z.string().min(1).max(120), // server-authored, rendered verbatim
+        hint: z.string().max(160).optional(), // one-line disambiguating detail
+      }),
+    )
+    .min(2)
+    .max(4),
+  /** What the trader actually said, so the card can show it back. */
+  originalText: z.string().max(280).optional(),
+  /** Server-authored one-line detail, e.g. "I can't place an order on a guess." */
+  note: z.string().max(280).optional(),
+})
+
 export const Frame = z.discriminatedUnion('type', [
   ResearchBriefFrame,
   OrderTicketFrame,
@@ -480,6 +517,7 @@ export const Frame = z.discriminatedUnion('type', [
   HostActionFrame,
   OrdersSummaryFrame,
   AlertFrame,
+  ClarificationFrame,
 ])
 
 /** Loose envelope: enough to render a FallbackCard for unknown future types. */
@@ -501,6 +539,7 @@ export type UploadStatus = z.infer<typeof UploadStatusFrame>
 export type HostAction = z.infer<typeof HostActionFrame>
 export type OrdersSummary = z.infer<typeof OrdersSummaryFrame>
 export type Alert = z.infer<typeof AlertFrame>
+export type Clarification = z.infer<typeof ClarificationFrame>
 export type OrderDraft = z.infer<typeof OrderDraftFrame>
 export type PriceTick = z.infer<typeof PriceTickFrame>
 export type Skeleton = z.infer<typeof SkeletonFrame>
