@@ -25,6 +25,7 @@
 import { randomUUID } from 'node:crypto'
 import type { VenueCapabilities } from '@hippo/protocol'
 import type { UserIdentityStore } from '@hippo/stores'
+import type { AccuracySignals } from '../accuracy-signals.js'
 import type { AlertsEngine } from '../alerts.js'
 import type { DraftFields, Session, SessionStore } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft, JournalEntry } from '../plugins/sse.js'
@@ -104,6 +105,10 @@ export type OrchestratorDeps = {
    * so in-flight orders survive a restart; the in-memory store exposes none
    * of those hooks and behaves exactly as before. */
   sessions: SessionStore
+  /** Implicit misunderstanding signals (src/accuracy-signals.ts). Optional:
+   * absent = the four hooks below are no-ops and nothing is recorded. Every
+   * hook is fire-and-forget — a turn never waits on or fails because of one. */
+  signals?: AccuracySignals
 }
 
 export type Orchestrator = {
@@ -1504,6 +1509,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       // Pre-confirm: nothing ever reached the venue — dismiss locally. A
       // dismissed replacement ticket also forgets what it would have
       // replaced (the old order stays untouched and working).
+      // Cancelled-instead-of-confirmed is accuracy evidence: record it BEFORE
+      // the quote is torn down below (src/accuracy-signals.ts).
+      deps.signals?.onTicketCancelled(session, ticketId)
       amendReplaces.delete(ticketId)
       ticketSessions.delete(ticketId)
       session.tickets.delete(ticketId)
@@ -2384,6 +2392,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           // lines in the SAME thinking frame (a second thinking frame would
           // strand a card on old SDKs — pushFrame only replaces the last
           // ephemeral item).
+          // Implicit accuracy evidence: a rapid rephrase is read from the
+          // journal BEFORE this turn's echo lands, so the last exchange there
+          // is still the previous turn (src/accuracy-signals.ts).
+          if (uplink.kind === 'user_text') deps.signals?.onUserText(session, uplink.text)
           emit(session, { type: 'user_echo', text: uplink.text })
           const looksLikeOrder = guessIntent(uplink.text).intent === 'action'
           emit(session, {
@@ -2416,6 +2428,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           const fixed = session.drafts.get(uplink.draftId)
           if (uplink.action === 'dismiss') {
             // Drop the pending draft, no frame — the SDK already collapsed it.
+            deps.signals?.onDraftDismissed(session, uplink.draftId, fixed)
             session.drafts.delete(uplink.draftId)
             return
           }
@@ -2535,6 +2548,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         }
         case 'feedback': {
           // Recorded for the L2 export pipeline (BE doc §4); counters only here.
+          // A thumbs-DOWN is also joined to the intent we classified for that
+          // frame's turn (src/accuracy-signals.ts) — the counter alone never
+          // said what we thought the trader wanted.
+          deps.signals?.onFeedback(session, uplink)
           telemetry.recordUplink(uplink.kind)
           return
         }
