@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from evals.runner.intent_scoring import aggregate_intent, render_intent_summary_md
 from evals.runner.scoring import CRITERIA
 
 # Launch gates (rubric + PRD section 6 + memo section 7)
@@ -204,3 +205,39 @@ def write_report(
         encoding="utf-8",
     )
     return report_dir, summary, verdicts
+
+
+def write_intent_report(
+    out_dir: Path,
+    results: list[dict],
+    *,
+    backend: str,
+    queries_path: str,
+    fail_under: float | None,
+) -> tuple[Path, dict]:
+    """Write intent-results.jsonl + intent-summary.{json,md}; return (dir, summary).
+
+    Lands in the same timestamped report directory shape as the answer-quality
+    run, under distinct filenames so both modes can share one directory.
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    report_dir = out_dir / timestamp
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    with (report_dir / "intent-results.jsonl").open("w", encoding="utf-8") as fh:
+        for row in results:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    summary = aggregate_intent(results)
+    (report_dir / "intent-summary.json").write_text(
+        json.dumps({"backend": backend, "queries": queries_path, "timestamp": timestamp,
+                    "fail_under": fail_under, "summary": summary},
+                   ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (report_dir / "intent-summary.md").write_text(
+        render_intent_summary_md(summary, backend=backend, queries_path=queries_path,
+                                 timestamp=timestamp, fail_under=fail_under),
+        encoding="utf-8",
+    )
+    return report_dir, summary
