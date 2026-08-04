@@ -126,6 +126,13 @@ export type IntentResult = {
    * Absent from older intelligence builds — callers default gracefully. */
   interpretation?: string
   restructuredQuery?: string
+  /** Plausible SECOND readings of a LOW-confidence COSTLY classification
+   * (additive, August 2026) — most-likely first, at most two, always CHEAP
+   * (query) intents. Present only below the clarification threshold; the
+   * clarification builder turns them into the safe options on its card.
+   * Untrusted like the rest of this payload: the builder renders only the
+   * cheap kinds it knows, so an unexpected value is ignored, never acted on. */
+  alternatives?: IntentKind[]
 }
 
 /** A candidate durable fact the extractor pulled from a turn. The intelligence

@@ -374,6 +374,35 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
   padding:5px 12px;border-radius:var(--hippo-radius-pill);border:1px solid rgba(var(--hippo-down-rgb),.45);color:var(--hippo-down)}
 .alertcard .alcancel:disabled{opacity:.5;cursor:default}
 @media (prefers-reduced-motion:reduce){.alertcard{animation:none}.alertcard .albadge .pulse{animation:none}}
+/* clarification card — the server ASKING instead of guessing. Deliberately
+   unlike an answer card: dashed amber edge, its own eyebrow and question mark,
+   no brief/ticket chrome. Settling dims the edge and swaps the options for the
+   chosen line, so the transcript still reads what was decided. Tokens only. */
+.clarify{align-self:flex-start;max-width:96%;width:100%;border-radius:15px;padding:13px;
+  background:var(--hippo-card);border:1px dashed rgba(var(--hippo-amber-rgb),.45);
+  display:flex;flex-direction:column;gap:9px;animation:msgIn .3s ease both}
+.clarify.settled{border-style:solid;border-color:var(--hippo-hairline)}
+.clarify .clhd{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.clarify .cleyebrow{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.14em;color:var(--hippo-amber)}
+.clarify.settled .cleyebrow{color:var(--hippo-text-faint)}
+.clarify .clmark{font-family:var(--hippo-font-display);font-size:14px;font-weight:600;color:var(--hippo-amber);opacity:.7}
+.clarify .clq{font-family:var(--hippo-font-display);font-weight:600;font-size:13.5px;line-height:1.4;color:var(--hippo-text-hi)}
+.clarify .clsaid{display:flex;flex-wrap:wrap;align-items:baseline;gap:7px}
+.clarify .clsaid-label{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-text-faint)}
+.clarify .clsaid-text{font-family:var(--hippo-font-body);font-size:11.5px;font-style:italic;color:var(--hippo-text-mid)}
+.clarify .clopts{display:flex;flex-direction:column;gap:7px}
+.clarify .clopt{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:start;
+  padding:9px 12px;border-radius:12px;border:1px solid var(--hippo-hairline);
+  background:var(--hippo-card-2);color:var(--hippo-text-hi);width:100%}
+.clarify .clopt:disabled{opacity:.55;cursor:default}
+.clarify .clopt-label{font-family:var(--hippo-font-body);font-size:12.5px;line-height:1.35;font-weight:500}
+.clarify .clopt-hint{font-family:var(--hippo-font-body);font-size:10.5px;line-height:1.35;color:var(--hippo-text-dim)}
+.clarify .clchosen{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+.clarify .clchosen-label{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-amber)}
+.clarify .clchosen-text{font-family:var(--hippo-font-body);font-size:12.5px;color:var(--hippo-text-hi)}
+.clarify .clsending{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.1em;color:var(--hippo-text-faint)}
+.clarify .clnote{font-family:var(--hippo-font-body);font-size:10.5px;line-height:1.45;color:var(--hippo-text-dim)}
+@media (prefers-reduced-motion:reduce){.clarify{animation:none}}
 /* consolidated orders card — full "show my orders" answer (scope + totals +
    rows). Reuses .oside / .fillbar so it reads like the rest of the order UI */
 .osumm{align-self:flex-start;max-width:96%;width:100%;border-radius:15px;padding:13px;

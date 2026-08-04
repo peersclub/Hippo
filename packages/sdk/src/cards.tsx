@@ -7,6 +7,7 @@ import type {
   Alert,
   Banner,
   BriefDelta,
+  Clarification,
   Frame,
   HostAction,
   Interpretation,
@@ -31,6 +32,7 @@ import {
   cancelAlertUplink,
   showCancelChip,
 } from './alerts-view.js'
+import { chosenOptionId, clarificationState, isAnswerable, pickOption } from './clarification.js'
 import {
   assembleDraftParams,
   initialLeverage,
@@ -1146,6 +1148,78 @@ function AlertCard({ frame }: { frame: Alert }) {
   )
 }
 
+/**
+ * Clarification card — the server ASKING instead of guessing, so this must
+ * never read as an answer: its own eyebrow, its own question mark, a dashed
+ * amber edge, and no brief/ticket chrome anywhere on it.
+ *
+ * `question`, `options[].label/hint`, `originalText` and `note` are all
+ * SERVER-AUTHORED and rendered VERBATIM — the SDK never invents or re-words an
+ * interpretation (stop-line law). A tap sends only the option's ID.
+ *
+ * One-shot: the pick lives in the clarificationMap signal (survives
+ * minimize/reopen and journal replay), and pickOption refuses a second tap
+ * before it sends anything. Like ticket and alert actions this rides transport
+ * `send` — live-only, never the offline outbox — so a disconnected panel
+ * disables the options and says why rather than queueing a stale answer.
+ */
+function ClarificationCard({ frame }: { frame: Clarification }) {
+  const L = locale.value
+  const st = clarificationState(frame.clarificationId)
+  const chosen = chosenOptionId(st)
+  const chosenLabel = chosen ? frame.options.find((o) => o.id === chosen)?.label : undefined
+  const offline = connection.value !== 'live'
+  const busy = st.phase === 'sending'
+  const answerable = isAnswerable(st)
+  return (
+    <div class={`clarify${answerable ? '' : ' settled'}`}>
+      <div class="clhd">
+        <span class="cleyebrow">{t(L, 'clarify_eyebrow')}</span>
+        <span class="clmark" aria-hidden="true">
+          ?
+        </span>
+      </div>
+      <div class="clq">{frame.question}</div>
+      {frame.originalText && (
+        <div class="clsaid">
+          <span class="clsaid-label">{t(L, 'clarify_you_said')}</span>
+          <span class="clsaid-text">“{frame.originalText}”</span>
+        </div>
+      )}
+      {answerable || !chosenLabel ? (
+        // No group role: each option is a button whose own label is the whole
+        // answer, and the question is the visible line directly above it.
+        <div class="clopts">
+          {frame.options.map((o) => (
+            <button
+              type="button"
+              class="clopt"
+              key={o.id}
+              disabled={busy || offline || !answerable}
+              aria-busy={busy && chosen === o.id}
+              title={offline ? t(L, 'clarify_offline_hint') : undefined}
+              onClick={() => void pickOption(frame.clarificationId, o.id, send)}
+            >
+              <span class="clopt-label">{o.label}</span>
+              {o.hint && <span class="clopt-hint">{o.hint}</span>}
+            </button>
+          ))}
+        </div>
+      ) : (
+        // Read-back: the transcript must show what was decided, not just that
+        // something was. The server re-states it on the next card too.
+        <div class="clchosen">
+          <span class="clchosen-label">{t(L, 'clarify_chosen')}</span>
+          <span class="clchosen-text">{chosenLabel}</span>
+        </div>
+      )}
+      {busy && <div class="clsending">{t(L, 'clarify_sending')}</div>}
+      {st.phase === 'failed' && <div class="action-failed">{t(L, 'clarify_failed')}</div>}
+      {frame.note && <div class="clnote">{frame.note}</div>}
+    </div>
+  )
+}
+
 export function FallbackCard({ frame }: { frame: UnknownFrame }) {
   const fb = frame.fallback
   if (!fb) return null
@@ -1199,6 +1273,8 @@ export function renderFrame(frame: Frame): JSX.Element | null {
       return <OrdersSummaryCard frame={frame} />
     case 'alert':
       return <AlertCard frame={frame} />
+    case 'clarification':
+      return <ClarificationCard frame={frame} />
     default:
       return null // orders_snapshot, pulse, price_tick, learned_memory & identity are handled by stores, never rendered in-thread
   }

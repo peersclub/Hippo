@@ -25,7 +25,15 @@ import {
   waitForJournal,
 } from './helpers.js'
 
-const intel = () => stubIntel({ intent: (text) => guessIntent(text) })
+/**
+ * `guessIntent` is the DEGRADED-mode classifier and pins confidence at 0.5;
+ * the production fast path returns 0.92–0.97 for these exact phrasings. These
+ * tests exercise host_action / orders routing, not the confidence policy, so
+ * the stub reports the confidence the real service would — otherwise every
+ * costly turn here would (correctly) land on a clarification card instead.
+ * That policy has its own coverage in clarify.test.ts.
+ */
+const intel = () => stubIntel({ intent: (text) => ({ ...guessIntent(text), confidence: 0.95 }) })
 
 let gw: TestGateway
 let sessions: SessionStore
