@@ -13,6 +13,8 @@
  *   GET /v1/learned-facts/session/:sessionId
  *   GET /v1/metrics  GET /v1/audit           GET /health
  *   GET /v1/tech/telemetry (gateway diagnostics + intelligence health)
+ *   GET /v1/intent-signals[/export] (implicit misunderstanding signals; the
+ *       export answers JSONL in the eval harness's row shape)
  *
  * Memory data stays owned by services/memory — this service proxies its
  * /admin surface with the internal token. Every mutating route writes one
@@ -167,6 +169,18 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       headers: { 'x-hippo-internal-token': internalToken, ...(init.headers ?? {}) },
       signal: AbortSignal.timeout(5_000),
     })
+  }
+
+  /** Allowlisted query passthrough for the gateway proxies — only the params
+   * the internal route understands travel, never whatever the browser sent. */
+  function queryString(query: Record<string, string | undefined>): string {
+    const params = new URLSearchParams()
+    for (const key of ['partnerId', 'limit', 'since', 'signal']) {
+      const value = query[key]
+      if (value) params.set(key, value)
+    }
+    const qs = params.toString()
+    return qs ? `?${qs}` : ''
   }
 
   /** Owner-gated routes (operator management). 403 for plain operators. */
@@ -861,6 +875,45 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     }
     return { gateway, intelligence }
   })
+
+  // ── implicit misunderstanding signals (gateway proxy) ────────────────────
+  // Rapid rephrases, abandoned tickets/drafts and thumbs-downs, joined to the
+  // intent we classified — the "Understanding" block on the Pilot page. Any
+  // authenticated operator may view; a read, so no audit row.
+  app.get<{ Querystring: Record<string, string | undefined> }>(
+    '/v1/intent-signals',
+    async (req, reply) => {
+      const op = operator(req, reply)
+      if (!op) return reply
+      try {
+        const res = await gatewayFetch(`/internal/intent-signals${queryString(req.query)}`)
+        return reply.code(res.status).send(await res.json())
+      } catch {
+        return reply.code(502).send({ error: 'gateway unreachable' })
+      }
+    },
+  )
+
+  // JSONL passthrough (NOT json — the body is the eval harness's row shape,
+  // one object per line, streamed to the operator as a file).
+  app.get<{ Querystring: Record<string, string | undefined> }>(
+    '/v1/intent-signals/export',
+    async (req, reply) => {
+      const op = operator(req, reply)
+      if (!op) return reply
+      try {
+        const res = await gatewayFetch(`/internal/intent-signals/export${queryString(req.query)}`)
+        const body = await res.text()
+        return reply
+          .code(res.status)
+          .type(res.ok ? 'application/x-ndjson' : 'application/json')
+          .header('content-disposition', 'attachment; filename="intent-signals.jsonl"')
+          .send(body)
+      } catch {
+        return reply.code(502).send({ error: 'gateway unreachable' })
+      }
+    },
+  )
 
   // ── partner detail (aggregated drill-down) ───────────────────────────────
   app.get<{ Params: { id: string } }>('/v1/partners/:id/detail', async (req, reply) => {

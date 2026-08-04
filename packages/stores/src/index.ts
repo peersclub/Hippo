@@ -22,6 +22,20 @@ export {
   InMemoryHostVenueStateStore,
   PostgresHostVenueStateStore,
 } from './host-venue-state-store.js'
+export {
+  clampSignalText,
+  INTENT_SIGNAL_KINDS,
+  INTENT_SIGNAL_TEXT_CAP,
+  INTENT_SIGNALS_LIST_CAP,
+  InMemoryIntentSignalStore,
+  type IntentSignal,
+  type IntentSignalKind,
+  type IntentSignalQuery,
+  type IntentSignalStore,
+  type IntentSignalSummary,
+  PostgresIntentSignalStore,
+  summarize,
+} from './intent-signal-store.js'
 export * from './jwt.js'
 export {
   InMemoryMauStore,

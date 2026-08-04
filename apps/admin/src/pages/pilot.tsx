@@ -52,6 +52,27 @@ type Metrics = {
   }>
 }
 
+/** GET /v1/intent-signals — implicit misunderstanding evidence (rapid
+ * rephrases, abandoned tickets/drafts, thumbs-downs joined to the intent we
+ * classified). The page reads the COUNTS only: the rows can carry trader text,
+ * and that reaches a human through the JSONL export, not a dashboard poll. */
+type SignalKind = 'rephrase' | 'ticket_abandoned' | 'draft_dismissed' | 'negative_feedback'
+
+type IntentSignals = {
+  summary: {
+    total: number
+    bySignal: Record<SignalKind, number>
+    byIntent: Record<string, number>
+  }
+}
+
+const SIGNAL_LABEL: Record<SignalKind, string> = {
+  rephrase: 'Rapid rephrase',
+  ticket_abandoned: 'Ticket abandoned',
+  draft_dismissed: 'Draft dismissed',
+  negative_feedback: 'Thumbs-down',
+}
+
 const REFRESH_MS = 30_000
 const HOUR_MS = 3_600_000
 
@@ -228,14 +249,84 @@ export function measuredCost(a: Assumptions, u: MeasuredUsage): number {
 
 const usd = (v: number) => (v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(4)}`)
 
+/**
+ * "Understanding" — the implicit accuracy evidence. Renders NOTHING until a
+ * signal exists: a row of zeros would read as "we're accurate", when it
+ * actually means "nobody has traded yet". Every number here is a TELL, not a
+ * verdict — the copy says so, because a rephrase count is not an error rate.
+ */
+function Understanding({ data }: { data: IntentSignals }) {
+  const { summary } = data
+  if (summary.total === 0) return null
+  const kinds = (Object.keys(SIGNAL_LABEL) as SignalKind[]).filter(
+    (k) => (summary.bySignal[k] ?? 0) > 0,
+  )
+  const confused = Object.entries(summary.byIntent)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+  return (
+    <>
+      <h2>Understanding</h2>
+      <p class="dim">
+        Implicit evidence that a turn was misread — <b>not labeled truth</b>. A trader who rephrases
+        within seconds of an answer, cancels a prepared ticket, dismisses a draft or votes a card
+        down is telling us something; each one may still be an ordinary follow-up or a change of
+        mind. Review the rows and promote the real misses into <code>evals/queries/</code>.
+      </p>
+      <div class="cards">
+        {kinds.map((k) => (
+          <div class="stat" key={k}>
+            <div class="n">{summary.bySignal[k]}</div>
+            <div class="l">{SIGNAL_LABEL[k]}</div>
+          </div>
+        ))}
+      </div>
+      {confused.length > 0 && (
+        <table style={{ maxWidth: '560px' }}>
+          <thead>
+            <tr>
+              <th>Classified intent</th>
+              <th>Signals</th>
+            </tr>
+          </thead>
+          <tbody>
+            {confused.map(([intent, n]) => (
+              <tr key={intent}>
+                <td>{intent}</td>
+                <td class="mono">{n}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p class="dim">
+        <a href="/api/v1/intent-signals/export" download="intent-signals.jsonl">
+          Download JSONL for review →
+        </a>{' '}
+        Rows carry <code>expected_intent: null</code>; a human labels them before they become test
+        cases. Text from traders who turned off learning is never stored, so those signals count
+        without exporting a row.
+      </p>
+    </>
+  )
+}
+
 export function PilotPage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null)
+  const [understanding, setUnderstanding] = useState<IntentSignals | null>(null)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
   const [assume, setAssume] = useState<Assumptions>(loadAssumptions)
 
   const state = useLoad(async () => {
     setMetrics(await get<Metrics>('/v1/metrics'))
     setUpdatedAt(new Date())
+    // Additive surface: an older gateway (or an unreachable one) simply leaves
+    // the Understanding block out rather than failing the whole page.
+    try {
+      setUnderstanding(await get<IntentSignals>('/v1/intent-signals?limit=1'))
+    } catch {
+      setUnderstanding(null)
+    }
   })
 
   useEffect(() => {
@@ -390,6 +481,8 @@ export function PilotPage() {
           </tbody>
         </table>
       )}
+
+      {understanding && <Understanding data={understanding} />}
 
       <h2>
         Cost / MAU{' '}

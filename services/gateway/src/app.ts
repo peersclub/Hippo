@@ -10,18 +10,23 @@ import { Uplink } from '@hippo/protocol'
 import {
   type AlertStore,
   getPool,
+  INTENT_SIGNALS_LIST_CAP,
   InMemoryAlertStore,
+  InMemoryIntentSignalStore,
   InMemoryMauStore,
   InMemoryPartnerStore,
   InMemoryPlanStore,
   InMemoryUploadedFileStore,
   InMemoryUserIdentityStore,
   InMemoryUserStore,
+  type IntentSignalKind,
+  type IntentSignalStore,
   type MauStore,
   monthKey,
   type PartnerStore,
   type PlanStore,
   PostgresAlertStore,
+  PostgresIntentSignalStore,
   PostgresMauStore,
   PostgresPartnerStore,
   PostgresPlanStore,
@@ -33,6 +38,7 @@ import {
   type UserStore,
 } from '@hippo/stores'
 import Fastify from 'fastify'
+import { createAccuracySignals, mergeSummaries, toEvalRows, toJsonl } from './accuracy-signals.js'
 import { createAlertsEngine } from './alerts.js'
 import { Diagnostics, instrumentClient } from './diagnostics.js'
 import { createOrchestrator } from './orchestrator/index.js'
@@ -85,6 +91,9 @@ export type GatewayOptions = {
   /** Durable price alerts (migration 017). Postgres when DATABASE_URL is set,
    * in-memory otherwise. */
   alertStore?: AlertStore
+  /** Implicit misunderstanding signals (migration 018). Postgres when
+   * DATABASE_URL is set, in-memory otherwise. */
+  intentSignalStore?: IntentSignalStore
   /** Alert poll cadence override (tests). Defaults to ALERT_POLL_MS ?? 15s. */
   alertPollMs?: number
   /** Override the session store (tests inject a Redis-backed one). Defaults to
@@ -137,6 +146,9 @@ export async function buildApp(opts: GatewayOptions = {}) {
     (usePg ? new PostgresUploadedFileStore(getPool()) : new InMemoryUploadedFileStore())
   const alertStore =
     opts.alertStore ?? (usePg ? new PostgresAlertStore(getPool()) : new InMemoryAlertStore())
+  const intentSignalStore =
+    opts.intentSignalStore ??
+    (usePg ? new PostgresIntentSignalStore(getPool()) : new InMemoryIntentSignalStore())
 
   const sessions =
     opts.sessions ??
@@ -174,6 +186,22 @@ export async function buildApp(opts: GatewayOptions = {}) {
     log: app.log,
     ...(opts.alertPollMs !== undefined ? { pollMs: opts.alertPollMs } : {}),
   })
+  const memory = instrumentClient(opts.memory ?? createMemoryClient(), diagnostics, {
+    update: 'memory-write',
+    clear: 'memory-write',
+    saveComposed: 'memory-write',
+    upsertLearnedFacts: 'memory-write',
+    clearLearnedFacts: 'memory-write',
+  })
+  // Implicit misunderstanding signals: rapid rephrases, abandoned tickets /
+  // dismissed drafts, thumbs-down joined to the intent we classified. Reads
+  // the persona ONLY for the learn opt-out (migration 012) — an opted-out
+  // trader's text is never stored, though the signal still counts.
+  const signals = createAccuracySignals({
+    store: intentSignalStore,
+    memory,
+    log: app.log,
+  })
   // Instrumented pass-through wrappers feed the diagnostics call log. The
   // market client is deliberately NOT wrapped: the shared price-tick poller
   // calls snapshot() every few seconds and would drown the 100-entry log.
@@ -184,13 +212,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
       respondStream: 'research',
     }),
     market,
-    memory: instrumentClient(opts.memory ?? createMemoryClient(), diagnostics, {
-      update: 'memory-write',
-      clear: 'memory-write',
-      saveComposed: 'memory-write',
-      upsertLearnedFacts: 'memory-write',
-      clearLearnedFacts: 'memory-write',
-    }),
+    memory,
     seam: instrumentClient(opts.seam ?? createSeamClient(), diagnostics, {
       prepare: 'order',
       prepareOrder: 'order',
@@ -206,6 +228,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
     // Durable ticket→session routing rides the session store: a no-op on the
     // in-memory store, restart-proof on Redis (see orchestrator/index.ts).
     sessions,
+    signals,
   })
 
   // Alert poll loop: unref'd interval, torn down with the app so a test
@@ -428,6 +451,59 @@ export async function buildApp(opts: GatewayOptions = {}) {
     }
   })
 
+  // ── implicit misunderstanding signals (admin "Understanding" + evals) ────
+  // Operator data (it can carry trader text), so it sits behind internalGuard
+  // like every other /internal surface. `partnerId` narrows to one partner;
+  // omitted, the route fans out over the partner registry — the pilot runs a
+  // handful of partners and each read is a single indexed query.
+  type SignalsQuery = { partnerId?: string; limit?: string; since?: string; signal?: string }
+
+  async function readSignals(q: SignalsQuery) {
+    const limit = Math.min(
+      Number(q.limit ?? INTENT_SIGNALS_LIST_CAP) || INTENT_SIGNALS_LIST_CAP,
+      500,
+    )
+    const since = Number(q.since)
+    const signal = q.signal as IntentSignalKind | undefined
+    const partnerIds = q.partnerId
+      ? [q.partnerId]
+      : (await partners.list()).map((p) => p.partnerId).slice(0, 50)
+    const perPartner = await Promise.all(
+      partnerIds.map(async (partnerId) => ({
+        rows: await intentSignalStore.list({
+          partnerId,
+          limit,
+          ...(Number.isFinite(since) && since > 0 ? { since } : {}),
+          ...(signal ? { signal } : {}),
+        }),
+        summary: await intentSignalStore.summary(partnerId),
+      })),
+    )
+    const rows = perPartner
+      .flatMap((p) => p.rows)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+    return { signals: rows, summary: mergeSummaries(perPartner.map((p) => p.summary)) }
+  }
+
+  app.get<{ Querystring: SignalsQuery }>('/internal/intent-signals', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    return readSignals(req.query)
+  })
+
+  // The point of the whole feature: production confusion as eval rows. JSONL
+  // in the harness's shape, `expected_intent: null` because this is OBSERVED
+  // evidence — a human labels it before it becomes a test case. Rows whose
+  // text was withheld (opted-out traders) are absent by construction.
+  app.get<{ Querystring: SignalsQuery }>('/internal/intent-signals/export', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const { signals } = await readSignals(req.query)
+    return reply
+      .type('application/x-ndjson')
+      .header('content-disposition', 'attachment; filename="intent-signals.jsonl"')
+      .send(toJsonl(toEvalRows(signals)))
+  })
+
   // ── live-session inventory + kill switch (admin panel) ──────────────────
   // Guarded by internalGuard (INTERNAL_API_TOKEN, timing-safe, fail-closed) —
   // revoking sessions and injecting venue events are mutating powers.
@@ -456,6 +532,8 @@ export async function buildApp(opts: GatewayOptions = {}) {
     uploadedFiles,
     alertStore,
     alerts,
+    intentSignalStore,
+    signals,
   }
 }
 
