@@ -741,3 +741,141 @@ describe('wave 2 — host verbs / alerts / protective exits (additive)', () => {
     expect(VenueCapabilities.safeParse({ spot: { protectiveExits: false } }).success).toBe(false)
   })
 })
+
+describe('confidence-aware clarification — clarification / clarification_choice (additive)', () => {
+  const upBase = { v: 1 as const, sessionId: 's_1', ts: 1_752_480_000_000 }
+  const options = [
+    { id: 'buy_spot', label: 'Buy 0.5 BTC on spot', hint: 'Settles from your USDT balance' },
+    { id: 'long_perp', label: 'Open a 0.5 BTC long perp', hint: 'Uses margin and leverage' },
+  ]
+
+  it('parses a clarification frame through the Frame union, verbatim strings intact', () => {
+    const r = parseFrame({
+      ...base,
+      type: 'clarification',
+      clarificationId: 'c_1',
+      question: 'Did you mean spot or perps?',
+      options,
+      originalText: 'get me half a bitcoin',
+      note: "I won't place an order on a guess.",
+      fallback: { text: 'Did you mean spot or perps?' },
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok && r.frame.type === 'clarification') {
+      expect(r.frame.question).toBe('Did you mean spot or perps?')
+      expect(r.frame.options.map((o) => o.id)).toEqual(['buy_spot', 'long_perp'])
+      expect(r.frame.options[0]?.label).toBe('Buy 0.5 BTC on spot')
+      expect(r.frame.originalText).toBe('get me half a bitcoin')
+    }
+  })
+
+  it('parses a minimal clarification — hint / originalText / note are all optional', () => {
+    const r = Frame.safeParse({
+      ...base,
+      type: 'clarification',
+      clarificationId: 'c_2',
+      question: 'Which one?',
+      options: [
+        { id: 'a', label: 'Alert above 70,000' },
+        { id: 'b', label: 'Alert below 70,000' },
+      ],
+    })
+    expect(r.success).toBe(true)
+    if (r.success && r.data.type === 'clarification') {
+      expect(r.data.options[0]?.hint).toBeUndefined()
+      expect(r.data.originalText).toBeUndefined()
+      expect(r.data.note).toBeUndefined()
+    }
+  })
+
+  it('rejects 1 option (not a question) and 5 options (a menu)', () => {
+    const mk = (n: number) =>
+      Frame.safeParse({
+        ...base,
+        type: 'clarification',
+        clarificationId: 'c_3',
+        question: 'Did you mean…?',
+        options: Array.from({ length: n }, (_, i) => ({ id: `o${i}`, label: `Option ${i}` })),
+      })
+    expect(mk(1).success).toBe(false)
+    expect(mk(2).success).toBe(true)
+    expect(mk(4).success).toBe(true)
+    expect(mk(5).success).toBe(false)
+    expect(mk(0).success).toBe(false)
+  })
+
+  it('rejects an oversized question and an oversized option label', () => {
+    const mk = (extra: object) =>
+      Frame.safeParse({
+        ...base,
+        type: 'clarification',
+        clarificationId: 'c_4',
+        question: 'Did you mean…?',
+        options,
+        ...extra,
+      })
+    expect(mk({ question: 'x'.repeat(201) }).success).toBe(false)
+    expect(mk({ question: 'x'.repeat(200) }).success).toBe(true)
+    expect(mk({ question: '' }).success).toBe(false)
+    expect(
+      mk({
+        options: [
+          { id: 'a', label: 'x'.repeat(121) },
+          { id: 'b', label: 'ok' },
+        ],
+      }).success,
+    ).toBe(false)
+    expect(
+      mk({
+        options: [
+          { id: 'a', label: 'ok', hint: 'x'.repeat(161) },
+          { id: 'b', label: 'ok' },
+        ],
+      }).success,
+    ).toBe(false)
+    expect(mk({ clarificationId: '' }).success).toBe(false)
+    expect(mk({ originalText: 'x'.repeat(281) }).success).toBe(false)
+  })
+
+  it('clarification_choice parses through the Uplink union and rejects a non-string optionId', () => {
+    const mk = (extra: object) =>
+      Uplink.safeParse({
+        ...upBase,
+        kind: 'clarification_choice',
+        clarificationId: 'c_1',
+        ...extra,
+      })
+    const ok = mk({ optionId: 'long_perp' })
+    expect(ok.success).toBe(true)
+    if (ok.success && ok.data.kind === 'clarification_choice') {
+      expect(ok.data.optionId).toBe('long_perp')
+      expect(ok.data.clarificationId).toBe('c_1')
+    }
+    expect(mk({ optionId: 2 }).success).toBe(false) // ids are strings, never indices
+    expect(mk({ optionId: '' }).success).toBe(false)
+    expect(mk({ optionId: 'x'.repeat(41) }).success).toBe(false)
+    expect(mk({}).success).toBe(false) // optionId is required
+    expect(
+      Uplink.safeParse({ ...upBase, kind: 'clarification_choice', optionId: 'buy_spot' }).success,
+    ).toBe(false) // clarificationId is required
+    expect(
+      Uplink.safeParse({ kind: 'clarification_choice', clarificationId: 'c_1', optionId: 'a' })
+        .success,
+    ).toBe(false) // base envelope is required
+  })
+
+  it('BACK-COMPAT: an old SDK sees an unknown type and renders the fallback, never a throw', () => {
+    // Same bytes as the frame above, minus the type this SDK knows — the
+    // FrameEnvelope path must still surface the server-authored fallback text.
+    const r = parseFrame({
+      ...base,
+      type: 'clarification_v2_future',
+      clarificationId: 'c_9',
+      question: 'Did you mean spot or perps?',
+      options,
+      fallback: { text: 'Did you mean spot or perps?' },
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.unknown?.fallback?.text).toBe('Did you mean spot or perps?')
+  })
+})

@@ -169,6 +169,25 @@ export const AlertActionUplink = z.object({
   action: z.enum(['cancel']),
 })
 
+/**
+ * Clarification answer (additive, August 2026) — the trader picked one of the
+ * options a `clarification` frame offered, resolving a low-confidence intent
+ * instead of letting the gateway guess. Carries only ids: the DISPLAY strings
+ * were server-authored, so nothing the SDK holds needs to come back.
+ *
+ * `optionId` must be one of the ids the matching clarification frame offered,
+ * but zod cannot know that set — it validates shape only. The GATEWAY
+ * re-validates the id against the options it actually sent for
+ * `clarificationId` (and that the clarification is still open) before acting;
+ * an unknown or stale id is rejected, never executed on trust.
+ */
+export const ClarificationChoiceUplink = z.object({
+  ...base,
+  kind: z.literal('clarification_choice'),
+  clarificationId: z.string().min(1).max(64),
+  optionId: z.string().min(1).max(40),
+})
+
 export const Uplink = z.discriminatedUnion('kind', [
   UserTextUplink,
   ChipTapUplink,
@@ -181,6 +200,7 @@ export const Uplink = z.discriminatedUnion('kind', [
   SettingsUplink,
   StreamStopUplink,
   AlertActionUplink,
+  ClarificationChoiceUplink,
 ])
 
 export type Uplink = z.infer<typeof Uplink>
