@@ -2,3 +2,7 @@
 #   fakeredis — in-process Redis double so cache tests need no real server.
 -r requirements.txt
 fakeredis>=2.20
+# pytest was never declared here — the suite only ran where a venv happened
+# to have it, which is why CI never noticed 16 test files going unrun.
+pytest>=8
+pytest-subtests>=0.12
