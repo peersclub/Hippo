@@ -18,7 +18,7 @@ All four remain open. Nothing in the August cleanup touched `price.ts`, `bridge.
 
 ## Fixed — the six uncontroversial findings (August 2026)
 
-All six shipped together on branch `fix/stop-line-six` as one commit, *fix(sdk): six stop-line honesty fixes — draw only what the server sends*. Each one was a place where the SDK put words on the screen that the server had not written.
+All six shipped together as one commit, `02313a0` — *fix(sdk): six stop-line honesty fixes — draw only what the server sends* — on branch `fix/stop-line-six`, [PR #101](https://github.com/peersclub/Hippo/pull/101). Each one was a place where the SDK put words on the screen that the server had not written.
 
 **The filled receipt now keeps the server's own sentence.** A terminal `lifecycle` frame's `statusLine` is the server's description of a completed trade, and the card was throwing it away in favour of a localized "Order filled". The new `terminalTitle()` in `lifecycle-view.ts` draws the server's line whenever there is one and reaches for the localized string only when a filled frame arrives without a `statusLine` at all; a non-filled terminal without one gets no invented headline.
 
