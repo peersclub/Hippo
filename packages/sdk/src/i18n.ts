@@ -168,6 +168,9 @@ export type MessageKey =
   | 'clarify_sending'
   | 'clarify_offline_hint'
   | 'clarify_failed'
+  // Neutral positions empty state — deliberately claims NOTHING about the
+  // account (an empty frame can be a failed fetch, not a flat book).
+  | 'positions_empty'
 
 type Catalog = Record<MessageKey, string>
 
@@ -320,6 +323,7 @@ const en: Catalog = {
   clarify_sending: 'SENDING…',
   clarify_offline_hint: 'Reconnect to answer this',
   clarify_failed: "Couldn't send your choice — nothing was decided. Tap again.",
+  positions_empty: 'Nothing to show',
 }
 
 // First pass — pending native review.
@@ -470,6 +474,7 @@ const hi: Catalog = {
   clarify_sending: 'भेजा जा रहा है…',
   clarify_offline_hint: 'जवाब देने के लिए दोबारा जुड़ें',
   clarify_failed: 'आपका चुनाव भेजा नहीं जा सका — कुछ तय नहीं हुआ। दोबारा दबाएँ।',
+  positions_empty: 'दिखाने के लिए कुछ नहीं',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -628,6 +633,7 @@ const hiLatn: Catalog = {
   clarify_sending: 'BHEJA JA RAHA HAI…',
   clarify_offline_hint: 'Jawab dene ke liye dobara connect karo',
   clarify_failed: 'Aapka choice bhej nahi paye — kuch tay nahi hua. Dobara tap karo.',
+  positions_empty: 'Dikhane ke liye kuch nahi',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -781,6 +787,7 @@ const ar: Catalog = {
   clarify_sending: 'جارٍ الإرسال…',
   clarify_offline_hint: 'أعد الاتصال للإجابة',
   clarify_failed: 'تعذّر إرسال اختيارك — لم يُتخذ أي إجراء. المس مرة أخرى.',
+  positions_empty: 'لا شيء لعرضه',
 }
 
 const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }

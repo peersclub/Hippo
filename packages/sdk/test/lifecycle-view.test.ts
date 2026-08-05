@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   cancelAffordance,
   confirmPendingSteps,
-  fillCaption,
+  fillMeter,
   isInFlight,
   journeySteps,
   sideBadge,
+  terminalTitle,
   ticketStateClass,
 } from '../src/lifecycle-view.js'
 
@@ -92,20 +93,44 @@ describe('sideBadge', () => {
   })
 })
 
-describe('fillCaption — server numbers only', () => {
-  it('renders the server Filled row + fillPct', () => {
-    expect(fillCaption([{ label: 'Filled', value: '0.02 / 0.05' }], 40)).toEqual({
-      left: 'FILLED 0.02 / 0.05',
-      right: '40%',
-    })
+describe('terminalTitle — the server describes its own completed trade', () => {
+  it('a filled receipt keeps the SERVER’s statusLine, not the localized string', () => {
+    expect(terminalTitle('filled', 'FILLED 0.05 BTC @ $61,240', 'Order filled')).toBe(
+      'FILLED 0.05 BTC @ $61,240',
+    )
+  })
+
+  it('the localized fallback appears only when a filled frame carries no statusLine', () => {
+    expect(terminalTitle('filled', '', 'Order filled')).toBe('Order filled')
+    expect(terminalTitle('filled', '   ', 'Order filled')).toBe('Order filled')
+  })
+
+  it('non-filled terminals draw their statusLine and never inherit "Order filled"', () => {
+    expect(terminalTitle('cancelled', 'ORDER #A31 CANCELLED', 'Order filled')).toBe(
+      'ORDER #A31 CANCELLED',
+    )
+    expect(terminalTitle('cancelled', '', 'Order filled')).toBe('')
+    expect(terminalTitle('expired', '', 'Order filled')).toBe('')
+  })
+})
+
+describe('fillMeter — the percentage is the server’s, the money is not rebuilt', () => {
+  it('renders the server fillPct', () => {
+    expect(fillMeter(40)).toEqual({ pct: '40%' })
+    expect(fillMeter(0)).toEqual({ pct: '0%' })
   })
 
   it('no fillPct → no bar, no invented progress', () => {
-    expect(fillCaption([{ label: 'Filled', value: '1 / 2' }], undefined)).toBeNull()
+    expect(fillMeter(undefined)).toBeNull()
   })
 
-  it('fillPct without a Filled row still captions honestly', () => {
-    expect(fillCaption([], 60)).toEqual({ left: 'FILLED', right: '60%' })
+  it('takes no rows at all — a non-English frame can no longer lose its fill value', () => {
+    // The old caption located the value with /^filled$/i over row labels and
+    // recomposed "FILLED <value>"; a German or Hindi row label matched
+    // nothing and the money disappeared. The meter now carries only the
+    // percentage — the card draws the server's rows verbatim instead.
+    expect(fillMeter.length).toBe(1)
+    expect(JSON.stringify(fillMeter(60))).not.toMatch(/[0-9]+\s*\/\s*[0-9]+/)
   })
 })
 

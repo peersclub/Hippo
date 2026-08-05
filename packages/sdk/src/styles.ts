@@ -528,9 +528,11 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .shrlive{margin-inline-start:auto;font-family:var(--hippo-font-mono);font-size:8.5px;letter-spacing:.12em;color:var(--hippo-up)}
 .shrcard h3{font-family:var(--hippo-font-display);font-size:15px;font-weight:600;line-height:1.3}
 .shrcard p{font-size:12px;line-height:1.55;color:var(--hippo-text-mid)}
+/* The whole brief is on the card — a long one SCROLLS here, it is never
+   truncated (a caveat in the last paragraph is part of the claim). */
+.shrprose{display:flex;flex-direction:column;gap:8px;max-height:44vh;overflow-y:auto}
 .shrfoot{display:flex;justify-content:space-between;gap:8px;font-family:var(--hippo-font-mono);font-size:8.5px;
   letter-spacing:.1em;color:var(--hippo-text-faint)}
-.shrfoot .lnk{color:var(--hippo-amber)}
 /* The printed advice-line disclaimer — part of the card, not chrome */
 .shrdisc{font-family:var(--hippo-font-mono);font-size:8px;letter-spacing:.16em;color:var(--hippo-text-dim);text-align:center;
   border-top:1px dashed rgba(var(--hippo-white-rgb),.08);padding-top:9px}
