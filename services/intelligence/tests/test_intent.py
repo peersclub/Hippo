@@ -644,5 +644,180 @@ class HostActionOrdersLLMPath(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["interpretation"])
 
 
+class HarnessFoundGaps(unittest.TestCase):
+    """The five English-path parser gaps the intent-accuracy harness surfaced
+    (evals/queries/v1-intents.jsonl rows i184, i144, i053, i118, i077).
+
+    Each test opens with the EXACT string that used to fail, then pins the
+    sibling phrasings that must keep working — a fix that trades one parse for
+    another is not a fix.
+    """
+
+    # 1 — article residue in extract_protective_exits ------------------------
+    def test_with_a_stop_no_longer_kills_the_whole_order(self) -> None:
+        # Was: the "with" connector was consumed but the article "a" survived,
+        # the limit-price residue check saw "at 71000 a" and rejected the
+        # ENTIRE parse — no order at all, not merely a dropped stop.
+        self.assertEqual(
+            parse_order("sell 0.4 btc at 71000 with a stop at 73k"),
+            {
+                "side": "sell",
+                "size": "0.4",
+                "instrument": "BTC/USDT",
+                "orderType": "limit",
+                "limitPrice": "71000",
+                "stopLossPrice": "73000",
+            },
+        )
+
+    def test_articles_in_both_exits(self) -> None:
+        order = parse_order(
+            "buy 0.5 btc at 60000 with a stop loss at 55k and a take profit at 70k"
+        )
+        assert order is not None
+        self.assertEqual(order["limitPrice"], "60000")
+        self.assertEqual(order["stopLossPrice"], "55000")
+        self.assertEqual(order["takeProfitPrice"], "70000")
+
+    def test_sibling_exit_phrasings_unchanged(self) -> None:
+        for text, exits in (
+            ("buy 1 eth with a stop at 3000", {"stopLossPrice": "3000"}),
+            ("buy 0.1 btc with stop at 55,000", {"stopLossPrice": "55000"}),
+            ("buy 1 eth stop loss 60000", {"stopLossPrice": "60000"}),
+            (
+                "long 3 eth 10x sl 60k tp 75k",
+                {"stopLossPrice": "60000", "takeProfitPrice": "75000"},
+            ),
+            ("buy 0.2 btc take profit at 75k", {"takeProfitPrice": "75000"}),
+        ):
+            with self.subTest(text=text):
+                order = parse_order(text)
+                assert order is not None, text
+                for key, value in exits.items():
+                    self.assertEqual(order.get(key), value, text)
+
+    def test_bare_order_without_exits_is_byte_identical(self) -> None:
+        self.assertEqual(
+            parse_order("sell 0.4 btc at 71000"),
+            {
+                "side": "sell",
+                "size": "0.4",
+                "instrument": "BTC/USDT",
+                "orderType": "limit",
+                "limitPrice": "71000",
+            },
+        )
+
+    # 2 — bare "at <price>" alert -------------------------------------------
+    def test_bare_alert_level_routes_like_crosses(self) -> None:
+        # Was: returned nothing at all for want of a direction word. Direction
+        # is the gateway's call (target vs live price) — the parser only marks
+        # it 'cross', exactly as "crosses"/"hits" already did.
+        result = fast_path("set an alert for BTC at 65000")
+        assert result is not None
+        self.assertEqual(result["intent"], "alert")
+        self.assertEqual(
+            result["alertIntent"],
+            {
+                "action": "create",
+                "symbol": "BTC/USDT",
+                "direction": "cross",
+                "price": 65000.0,
+            },
+        )
+
+    # 3 — plural "indicators" ------------------------------------------------
+    def test_plural_indicators_hits_the_hint(self) -> None:
+        # Was: _INDICATOR_HINT matched only the singular, so a clear-all read
+        # as research. No single indicator is named → no slug, which the
+        # gateway turns into a clear-all or an honest decline.
+        ha = parse_host_action("clear all indicators from the chart")
+        assert ha is not None
+        self.assertEqual(ha["action"], "remove_indicator")
+        self.assertNotIn("indicator", ha)
+        ha = parse_host_action("show the indicators")
+        assert ha is not None
+        self.assertEqual(ha["action"], "apply_indicator")
+
+    # 4 — two filler words in _SET_SYMBOL_RE ---------------------------------
+    def test_switch_me_over_to_sets_the_symbol(self) -> None:
+        # Was: the allowance was ONE filler word, so "me over" fell through.
+        self.assertEqual(
+            parse_host_action("switch me over to matic/usdt"),
+            {"action": "set_symbol", "params": {"symbol": "MATIC/USDT"}},
+        )
+
+    def test_switch_filler_allowance_stays_bounded(self) -> None:
+        # The allowance is a word LIST, not ".*" — arbitrary text still defers.
+        self.assertIsNone(parse_host_action("switch when you get a chance to eth"))
+
+    def test_shorter_switch_phrasings_unchanged(self) -> None:
+        for text in ("switch to ETH", "switch me to eth", "switch back to eth"):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    parse_host_action(text),
+                    {"action": "set_symbol", "params": {"symbol": "ETH/USDT"}},
+                )
+
+    # 5 — "margin" in _PORTFOLIO_RE ------------------------------------------
+    def test_margin_usage_is_portfolio(self) -> None:
+        for text in ("how much margin am I using", "how much free margin do I have"):
+            with self.subTest(text=text):
+                result = fast_path(text)
+                assert result is not None, text
+                self.assertEqual(result["intent"], "portfolio", text)
+
+    def test_margin_mode_stays_a_concept_question(self) -> None:
+        # "cross margin" / "isolated margin" name a margin MODE, not a balance —
+        # they must not be stolen from the concept branch.
+        for text in (
+            "what's the difference between isolated and cross margin?",
+            "what is cross margin",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(rule_classify(text)["intent"], "concept", text)
+
+
+class FastPathOrderIsLoadBearing(unittest.TestCase):
+    """The fast-path order IS the disambiguation logic. A widened regex must
+    not steal a match from a later branch — these are the near-misses that
+    catch it."""
+
+    def test_near_miss_table(self) -> None:
+        for text, intent in (
+            # prefill runs BEFORE the order parsers
+            ("fill the ticket to buy 0.1 btc", "host_action"),
+            # amend runs BEFORE orders_query
+            ("change my order to 0.2", "action"),
+            # orders_query runs BEFORE portfolio
+            ("show all my orders", "orders_query"),
+            # advice runs before everything
+            ("should I buy BTC", "advice"),
+            # host_action must not swallow a plain positions question
+            ("what are my positions?", "portfolio"),
+            # alert cue + level, not an order
+            ("set an alert for BTC at 65000", "alert"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(rule_classify(text)["intent"], intent, text)
+
+    def test_confidence_gap_around_the_clarify_threshold_stays_empty(self) -> None:
+        # Fast-path hits land in 0.92–0.97, rule fallbacks in 0.6–0.8. Nothing
+        # this module emits may sit inside the gap the gateway clarifies on.
+        for text in (
+            "sell 0.4 btc at 71000 with a stop at 73k",
+            "set an alert for BTC at 65000",
+            "clear all indicators from the chart",
+            "switch me over to matic/usdt",
+            "how much margin am I using",
+        ):
+            with self.subTest(text=text):
+                confidence = rule_classify(text)["confidence"]
+                self.assertTrue(
+                    confidence <= 0.8 or confidence >= 0.92,
+                    f"{text}: confidence {confidence} lands in the clarify gap",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

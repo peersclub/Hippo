@@ -498,7 +498,7 @@ function guessNavigate(t: string): HostActionIntent | undefined {
  * SAME normalization the degraded order parser applies. The orchestrator
  * re-validates the final pair against the context bridge's symbol rule. */
 const SET_SYMBOL_RE =
-  /\b(?:switch(?:\s+(?:me|over|back))?\s+to|change\s+(?:(?:the\s+)?(?:pair|symbol|market|chart)\s+)?to|show\s+me|pull\s+up|go\s+to)\s+\$?([a-z][a-z0-9]{1,9})(?:\s*\/\s*([a-z0-9]{2,10}))?\b(?!\s+(?:price|prices|news|analysis|funding|volume|vol|brief|order|orders))/
+  /\b(?:switch(?:\s+(?:me|over|back)){0,2}\s+to|change\s+(?:(?:the\s+)?(?:pair|symbol|market|chart)\s+)?to|show\s+me|pull\s+up|go\s+to)\s+\$?([a-z][a-z0-9]{1,9})(?:\s*\/\s*([a-z0-9]{2,10}))?\b(?!\s+(?:price|prices|news|analysis|funding|volume|vol|brief|order|orders))/
 
 const NOT_ASSETS = new Set([
   'the',

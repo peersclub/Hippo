@@ -110,7 +110,11 @@ _TP_RE = re.compile(
     r"\b(?:take[\s-]*profit|tp)\s*(?:at|@|:|=)?\s*" + _PROTECTIVE_PRICE,
     re.IGNORECASE,
 )
-_CONNECTOR_RE = re.compile(r"\b(?:with|and)\b|,", re.IGNORECASE)
+# Joining words AND their articles. "with a stop at 73k" used to leave the bare
+# "a" behind once the SL phrase was consumed, and the limit-price residue check
+# ("trailing text we don't understand") then rejected the WHOLE order — an
+# article is noise in an order's trailing text, never a parameter.
+_CONNECTOR_RE = re.compile(r"\b(?:with|and|an?|the)\b|,", re.IGNORECASE)
 
 
 def _protective_price(m: re.Match) -> str:
@@ -413,7 +417,7 @@ _REMOVE_RE = re.compile(
     re.IGNORECASE,
 )
 _INDICATOR_HINT = re.compile(
-    r"\b(?:rsi|sma\d*|ema\d*|vol|volume|moving\s*average|ma\d*|indicator)\b",
+    r"\b(?:rsi|sma\d*|ema\d*|vol|volume|moving\s*average|ma\d*|indicators?)\b",
     re.IGNORECASE,
 )
 
@@ -476,7 +480,9 @@ _NAV_RE = re.compile(
     re.IGNORECASE,
 )
 _SET_SYMBOL_RE = re.compile(
-    r"\b(?:switch(?:\s+(?:me|over|back))?\s+to|"
+    # Up to two filler words ("switch me over to …") — bounded on purpose: the
+    # allowance is an explicit word LIST, so it can never swallow arbitrary text.
+    r"\b(?:switch(?:\s+(?:me|over|back)){0,2}\s+to|"
     r"change\s+(?:(?:the\s+)?(?:pair|symbol|market|chart)\s+)?to|"
     r"show\s+me|pull\s+up|go\s+to)\s+\$?([a-z][a-z0-9]{1,9})"
     r"(?:\s*/\s*([a-z0-9]{2,10}))?\b"
@@ -619,6 +625,11 @@ _ALERT_BELOW_RE = re.compile(
     re.IGNORECASE,
 )
 _ALERT_CROSS_RE = re.compile(r"\b(?:cross(?:es)?|hits?|reach(?:es)?|touch(?:es)?)\b", re.IGNORECASE)
+# A bare level — "set an alert for BTC at 65000" — names no direction at all.
+# It is the SAME shape as "crosses 65000": a line to be notified about, whose
+# side is only knowable against the live price. It routes to 'cross' so the
+# gateway resolves above/below at creation; the parser still invents nothing.
+_ALERT_AT_RE = re.compile(r"(?:\bat\b|@)\s*\$?\s*\d", re.IGNORECASE)
 # "70k" / "70,000" / "$70000.50" — k multiplies by 1000.
 _ALERT_PRICE_RE = re.compile(r"\$?\s*(?P<num>\d[\d,]*(?:\.\d+)?)\s*(?P<kilo>k\b)?", re.IGNORECASE)
 _ALERT_CANCEL_RE = re.compile(
@@ -653,8 +664,9 @@ def parse_alert(text: str) -> dict[str, Any] | None:
 
     Create → {"action": "create", "symbol", "direction": above|below|cross, "price"}.
     Cancel → {"action": "cancel", "symbol"?} ("cancel my btc alert").
-    Deliberately strict: a create needs cue + asset + price + a direction word —
-    anything less falls through to the normal classifier rather than guessing.
+    Deliberately strict: a create needs cue + asset + price + a level phrasing
+    (a direction word, a cross verb, or a bare "at <price>") — anything less
+    falls through to the normal classifier rather than guessing.
     """
     if _ALERT_CANCEL_RE.search(text):
         out: dict[str, Any] = {"action": "cancel"}
@@ -674,7 +686,9 @@ def parse_alert(text: str) -> dict[str, Any] | None:
         direction = "above"
     elif _ALERT_BELOW_RE.search(text):
         direction = "below"
-    elif _ALERT_CROSS_RE.search(text):
+    elif _ALERT_CROSS_RE.search(text) or _ALERT_AT_RE.search(text):
+        # "crosses 70k" and the bare "at 65000" are the same request: a level,
+        # side unknown until the live price is read. Same "resolve later" marker.
         direction = "cross"
     else:
         return None
@@ -718,8 +732,13 @@ _ADVICE_BAIT = [
         r"\b(?:kharid|bech|lena)\w*\b.*\bchahiye\b",
     )
 ]
+# "margin" here means the trader's OWN margin ("how much margin am I using").
+# "cross margin" / "isolated margin" name a margin MODE — a concept question,
+# not a balance — so those two spellings are excluded rather than stolen from
+# the concept branch below.
 _PORTFOLIO_RE = re.compile(
-    r"\b(?:positions?|p\s?&\s?l|pnl|portfolio|holdings?|balance|my orders?)\b",
+    r"\b(?:positions?|p\s?&\s?l|pnl|portfolio|holdings?|balance|my orders?"
+    r"|(?<!cross )(?<!isolated )margin)\b",
     re.IGNORECASE,
 )
 _ACTION_VERB_START = re.compile(r"^\s*(?:buy|sell)\b", re.IGNORECASE)
