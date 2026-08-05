@@ -54,8 +54,28 @@ class AlertCreateParsing(unittest.TestCase):
         self.assertIsNone(parse_alert("alert me when btc moons"))
         # No recognized asset → never guess an instrument.
         self.assertIsNone(parse_alert("alert me when it crosses 70k"))
-        # No direction word → never guess a side.
-        self.assertIsNone(parse_alert("alert me about btc at 70k"))
+        # No level phrasing at all → nothing to arm.
+        self.assertIsNone(parse_alert("alert me about btc around 70k"))
+
+    def test_bare_at_level_arms_the_alert(self) -> None:
+        # A bare "at <price>" names a LEVEL, not a side — same shape as
+        # "crosses 65000". It arms with the 'cross' resolve-later marker and
+        # the gateway picks above/below against the live price. (Was: the
+        # parser declined the whole alert for want of a direction word.)
+        self.assertEqual(
+            parse_alert("set an alert for BTC at 65000"),
+            {"action": "create", "symbol": "BTC/USDT", "direction": "cross", "price": 65000.0},
+        )
+        self.assertEqual(
+            parse_alert("alert me about btc at 70k"),
+            {"action": "create", "symbol": "BTC/USDT", "direction": "cross", "price": 70000.0},
+        )
+
+    def test_bare_at_level_never_overrides_an_explicit_direction(self) -> None:
+        # "at" appearing alongside a real direction word must not downgrade it.
+        alert = parse_alert("tell me if ETH drops below 3000 at some point")
+        assert alert is not None
+        self.assertEqual(alert["direction"], "below")
 
 
 class AlertCancelParsing(unittest.TestCase):
