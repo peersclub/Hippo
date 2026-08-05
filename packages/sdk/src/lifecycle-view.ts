@@ -125,17 +125,33 @@ export function sideBadge(
 }
 
 /**
- * Fill-bar caption: left text is the server's own "Filled" row value (the
- * SDK never computes money), right text is the server's fillPct. Null when
- * there's no fillPct — the bar only draws server truth.
+ * Terminal receipt headline. The SERVER's statusLine is its description of
+ * the completed trade ("FILLED", "ORDER #A31 CANCELLED — NOTHING EXECUTED")
+ * — draw it verbatim. `filledFallback` is the caller's localized "Order
+ * filled", used ONLY when a filled frame carries no statusLine at all; a
+ * non-filled frame without one gets no invented headline.
  */
-export function fillCaption(
-  rows: Array<{ label: string; value: string }>,
-  fillPct: number | undefined,
-): { left: string; right: string } | null {
+export function terminalTitle(phase: Phase, statusLine: string, filledFallback: string): string {
+  if (statusLine.trim() !== '') return statusLine
+  return phase === 'filled' ? filledFallback : ''
+}
+
+/**
+ * Fill meter: the percentage IS the server's fillPct. Null when there's no
+ * fillPct — the bar never draws a guess.
+ *
+ * It deliberately takes NO rows. The old version located the fill VALUE by
+ * matching row labels against /^filled$/i and recomposed "FILLED <value>",
+ * so a frame whose rows are in any other language rendered a bare "FILLED"
+ * with the money missing. The lifecycle frame carries no structural field for
+ * the fill value, so the card renders the server's ROWS VERBATIM (in the
+ * server's own words) instead of reconstructing a caption out of them. If the
+ * protocol ever grows a structural fill field, it belongs here — not another
+ * locale regex.
+ */
+export function fillMeter(fillPct: number | undefined): { pct: string } | null {
   if (fillPct === undefined) return null
-  const filled = rows.find((r) => /^filled$/i.test(r.label))?.value
-  return { left: filled ? `FILLED ${filled}` : 'FILLED', right: `${fillPct}%` }
+  return { pct: `${fillPct}%` }
 }
 
 /** What cancel affordance the card offers, from wire truth only. */

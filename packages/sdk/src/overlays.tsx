@@ -24,7 +24,7 @@ import {
   showLearnedFacts,
   showLearnedMemoryToggle,
 } from './settings.js'
-import { COPIED_FLASH_MS, shareLink } from './share.js'
+import { briefClipboardText, COPIED_FLASH_MS, shareCardView } from './share.js'
 import {
   entitlements,
   glass,
@@ -441,21 +441,24 @@ export function FilesSheet() {
 
 /**
  * Share overlay (baseline §6) — a live, co-branded card, not a screenshot.
- * Renders entirely from the brief's frame data; the short link is a
- * placeholder until the share backend exists.
+ * Renders entirely from the brief's frame data: the server's LIVE flag, the
+ * server's headline, EVERY server paragraph. No short link is drawn (see
+ * share.ts) and the copy action puts the brief's own prose on the clipboard,
+ * never a fabricated address.
  */
 export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
+  const L = locale.value
   const [copied, setCopied] = useState(false)
   const timer = useRef(0)
   useEffect(() => () => clearTimeout(timer.current), [])
-  const link = shareLink(frame.id)
+  const view = shareCardView(frame)
   const close = () => {
     shareFrame.value = null
   }
   const copy = () => {
     // Clipboard can be unavailable (permissions, non-secure host) — the
-    // link stays visible on the card either way.
-    void navigator.clipboard?.writeText(link).catch(() => {})
+    // button simply doesn't confirm. Same text as the brief's ⧉ COPY.
+    void navigator.clipboard?.writeText(briefClipboardText(frame)).catch(() => {})
     setCopied(true)
     clearTimeout(timer.current)
     timer.current = window.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
@@ -467,34 +470,36 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
         class="shrcard"
         role="dialog"
         aria-modal="true"
-        aria-label={t(locale.value, 'share_card')}
+        aria-label={t(L, 'share_card')}
         ref={cardRef}
       >
         <div class="shrbrand">
           <span class="shrmark">H</span>
           <b>Hippo</b>
           <span class="on">on {venueName.value}</span>
-          <span class="shrlive">● LIVE</span>
+          {/* Same gate as the in-thread brief card: LIVE is the server's
+              flag, so a stale brief never exports as live. */}
+          {view.live && <span class="shrlive">● LIVE</span>}
         </div>
-        <h3>{frame.headline}</h3>
-        {frame.paragraphs[0] && <p>{frame.paragraphs[0]}</p>}
+        <h3>{view.headline}</h3>
+        {/* The WHOLE brief travels — a caveat in paragraph 2 is part of the
+            claim. A long brief scrolls inside the card; nothing is cut. */}
+        <div class="shrprose">
+          {view.paragraphs.map((p) => (
+            <p key={p}>{p}</p>
+          ))}
+        </div>
         {frame.spark && <SparklineSvg points={frame.spark.points} />}
         <div class="shrfoot">
           <span>{frame.liveBar?.asOf}</span>
-          <span class="lnk">{link}</span>
         </div>
         {/* NON-NEGOTIABLE: printed on the card itself so viral distribution
             never crosses the advice line (baseline §6). Do not remove. */}
         <div class="shrdisc">MARKET INFORMATION · NOT INVESTMENT ADVICE</div>
         <button type="button" class="obcta" onClick={copy}>
-          {copied ? 'COPIED ✓' : 'Copy link'}
+          {copied ? t(L, 'copied') : t(L, 'copy_brief')}
         </button>
-        <button
-          type="button"
-          class="shrx"
-          aria-label={t(locale.value, 'close_share')}
-          onClick={close}
-        >
+        <button type="button" class="shrx" aria-label={t(L, 'close_share')} onClick={close}>
           ✕
         </button>
       </div>

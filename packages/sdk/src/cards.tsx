@@ -52,14 +52,16 @@ import { type Locale, type MessageKey, t } from './i18n.js'
 import {
   cancelAffordance,
   confirmPendingSteps,
-  fillCaption,
+  fillMeter,
   isInFlight,
   journeySteps,
   sideBadge,
+  terminalTitle,
   ticketStateClass,
 } from './lifecycle-view.js'
 import { emptyLabelKey, hasFill, orderedRows, scopeLabelKey, totalCells } from './orders-summary.js'
 import { dispatch } from './outbox.js'
+import { positionsEmptyText } from './positions-view.js'
 import { briefClipboardText, COPIED_FLASH_MS } from './share.js'
 import { connection, feedbackMap, livePrice, locale, shareFrame, thread } from './state.js'
 import { interruptedStreamIds } from './streaming.js'
@@ -657,7 +659,7 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
   if (isInFlight(frame.phase)) {
     const steps = journeySteps(frame.phase, frame.stage)
     const affordance = cancelAffordance(frame.phase, frame.stage, frame.cancellable)
-    const fill = fillCaption(frame.rows, frame.fillPct)
+    const fill = fillMeter(frame.fillPct)
     const cancel = async () => {
       setCancelFailed(false)
       const ok = await send({ kind: 'ticket_action', ticketId: frame.ticketId, action: 'cancel' })
@@ -693,11 +695,25 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
             </button>
           )}
         </div>
+        {/* The server's own rows, drawn verbatim: on a partial this is where
+            the fill quantity lives, in the SERVER's language. The meter below
+            never reconstructs that money into a caption. */}
+        {frame.rows.length > 0 && (
+          <div class="tb">
+            {frame.rows.map((r) => (
+              <div class="trow" key={r.label}>
+                <span class="lab">{r.label}</span>
+                <b>{r.value}</b>
+              </div>
+            ))}
+          </div>
+        )}
         {fill && (
           <div class="fillwrap">
             <div class="fillmeta">
-              <span>{fill.left}</span>
-              <span class="pct">{fill.right}</span>
+              {/* Chrome label (localized) + the server's percentage — no money. */}
+              <span>{t(L, 'journey_filled')}</span>
+              <span class="pct">{fill.pct}</span>
             </div>
             <div class="fillbar">
               {/* Width is the server's number — the bar never animates toward a guess. */}
@@ -719,7 +735,10 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
   return (
     <div class={`ticket${stateCls ? ` ${stateCls}` : ''}`}>
       <div class="th">
-        <span class="tt">{frame.phase === 'filled' ? t(L, 'order_filled') : frame.statusLine}</span>
+        {/* The server described this completed trade — draw its words. The
+            localized "Order filled" is only the fallback for a filled frame
+            that arrived without a statusLine. */}
+        <span class="tt">{terminalTitle(frame.phase, frame.statusLine, t(L, 'order_filled'))}</span>
         <span class={badge.cls}>{badge.text}</span>
       </div>
       {frame.rows.length > 0 && (
@@ -774,16 +793,18 @@ function AdviceDeclineCard({ frame }: { frame: AdviceDecline }) {
 }
 
 function PositionsCard({ frame }: { frame: Positions }) {
+  const L = locale.value
   return (
     <div class="bubble">
       <div class="eyebrow">
         <span>POSITIONS</span>
       </div>
       {frame.rows.length === 0 ? (
-        // Honest empty state — a fresh account has no positions; nothing is
-        // ever fabricated to fill the card.
+        // Empty rows are ambiguous (flat account, failed fetch, partial venue
+        // answer) — so the card never says the account is flat. Server text
+        // when it authored one; otherwise a neutral line that claims nothing.
         <div class="pos-row">
-          <span class="dim">No open positions yet — trades you place appear here live.</span>
+          <span class="dim">{positionsEmptyText(frame.emptyText, t(L, 'positions_empty'))}</span>
         </div>
       ) : (
         frame.rows.map((r) => (

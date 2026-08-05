@@ -1,31 +1,62 @@
 import { describe, expect, it } from 'vitest'
-import {
-  briefClipboardText,
-  COPY_DISCLAIMER,
-  SHARE_LINK_BASE,
-  shareLink,
-  shareSlug,
-} from '../src/share.js'
+import * as shareModule from '../src/share.js'
+import { briefClipboardText, COPY_DISCLAIMER, shareCardView } from '../src/share.js'
 
-describe('share slug', () => {
-  it('is deterministic for the same frame id', () => {
-    expect(shareSlug('frame-abc-123')).toBe(shareSlug('frame-abc-123'))
+describe('shareCardView — the shared artifact is the server’s, whole', () => {
+  const brief = {
+    live: false,
+    headline: 'BTC is down 4.2% on ETF outflows',
+    paragraphs: [
+      'Spot ETFs saw $412M of outflows over three sessions.',
+      'That said, funding is still positive and the move may be flow-driven, not a trend.',
+    ],
+  }
+
+  it('a NON-LIVE brief exports without the LIVE badge', () => {
+    expect(shareCardView(brief).live).toBe(false)
+    expect(shareCardView({ ...brief, live: undefined }).live).toBe(false)
   })
 
-  it('is always 4 lowercase base36 chars', () => {
-    for (const id of ['a', 'frame-1', 'a-very-long-frame-identifier-0000', '☃']) {
-      expect(shareSlug(id)).toMatch(/^[0-9a-z]{4}$/)
-    }
+  it('only the server’s live flag turns the badge on', () => {
+    expect(shareCardView({ ...brief, live: true }).live).toBe(true)
   })
 
-  it('differs across different frame ids', () => {
-    expect(shareSlug('frame-1')).not.toBe(shareSlug('frame-2'))
+  it('a two-paragraph brief shares BOTH — the caveat travels', () => {
+    const view = shareCardView(brief)
+    expect(view.paragraphs).toHaveLength(2)
+    expect(view.paragraphs[1]).toContain('may be flow-driven')
   })
 
-  it('builds the placeholder short link', () => {
-    const link = shareLink('frame-1')
-    expect(link.startsWith(SHARE_LINK_BASE)).toBe(true)
-    expect(link).toBe(`hippo.app/s/${shareSlug('frame-1')}`)
+  it('never truncates, however many paragraphs the server wrote', () => {
+    const many = Array.from({ length: 7 }, (_, i) => `para ${i}`)
+    expect(shareCardView({ ...brief, paragraphs: many }).paragraphs).toEqual(many)
+  })
+
+  it('draws the server’s headline verbatim', () => {
+    expect(shareCardView(brief).headline).toBe(brief.headline)
+  })
+})
+
+describe('the share card fabricates no address', () => {
+  it('the module exports no link or slug builder at all', () => {
+    // The dead `hippo.app/s/<slug>` placeholder is gone, not merely unused:
+    // nothing can render or copy an address that resolves nowhere.
+    expect(Object.keys(shareModule).sort()).toEqual([
+      'COPIED_FLASH_MS',
+      'COPY_DISCLAIMER',
+      'briefClipboardText',
+      'shareCardView',
+    ])
+  })
+
+  it('the clipboard carries the brief’s own prose, never a URL', () => {
+    const text = briefClipboardText({
+      headline: 'BTC is down 4.2%',
+      paragraphs: ['Outflows led the move.'],
+      stats: [],
+    })
+    expect(text).not.toContain('hippo.app')
+    expect(text).toContain('Outflows led the move.')
   })
 })
 

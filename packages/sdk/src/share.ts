@@ -1,33 +1,37 @@
 /**
  * Share-card logic — pure and testable. Baseline §6: sharing produces a
- * live, co-branded card, not a screenshot. There is no share backend yet;
- * the overlay renders entirely from the brief's frame data, and the short
- * link is a deterministic placeholder derived from the frame id so the
- * same brief always previews the same slug.
+ * live, co-branded card, not a screenshot. There is no share backend yet, so
+ * the overlay renders entirely from the brief's frame data.
+ *
+ * NO SHORT LINK IS DRAWN. The card used to print a client-fabricated
+ * `hippo.app/s/<slug>` and copy it to the clipboard — a URL that looks live
+ * and resolves nowhere. The link comes back when a share service issues a
+ * real slug on the frame; until then the card shows no address at all.
  */
 
-export const SHARE_LINK_BASE = 'hippo.app/s/'
-
-/** How long "Copy link" reads COPIED ✓ before flipping back. */
+/** How long the copy button reads "Copied" before flipping back. */
 export const COPIED_FLASH_MS = 1500
 
 /**
- * Deterministic fake slug from a frame id — FNV-1a 32-bit folded to base36,
- * always 4 lowercase alphanumeric chars. Replaced by a server-issued slug
- * once the share backend exists.
+ * What the share card draws, straight off the frame — no invention, no
+ * truncation:
+ *  - `live` IS the server's `live` flag (same gate as the in-thread brief
+ *    card). A stale brief must never export wearing a LIVE badge.
+ *  - EVERY paragraph travels. The card used to render `paragraphs[0]` only,
+ *    so a caveat or qualifier the server put in paragraph 2 vanished from the
+ *    most distributable surface — meaning-changing truncation of financial
+ *    commentary. The overlay scrolls a long brief rather than cutting it.
  */
-export function shareSlug(frameId: string): string {
-  let h = 0x811c9dc5
-  for (let i = 0; i < frameId.length; i++) {
-    h ^= frameId.charCodeAt(i)
-    h = Math.imul(h, 0x01000193) >>> 0
+export function shareCardView(frame: { live?: boolean; headline: string; paragraphs: string[] }): {
+  live: boolean
+  headline: string
+  paragraphs: string[]
+} {
+  return {
+    live: frame.live === true,
+    headline: frame.headline,
+    paragraphs: frame.paragraphs,
   }
-  return h.toString(36).padStart(4, '0').slice(-4)
-}
-
-/** Placeholder short link shown on the share card, e.g. "hippo.app/s/k3x9". */
-export function shareLink(frameId: string): string {
-  return `${SHARE_LINK_BASE}${shareSlug(frameId)}`
 }
 
 /** The advice line travels with every copied brief — same non-negotiable

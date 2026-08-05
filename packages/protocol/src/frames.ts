@@ -169,6 +169,12 @@ export const PositionsFrame = z.object({
       tone: z.enum(['pos', 'neg', 'neutral']).default('neutral'),
     }),
   ),
+  /** Server-authored empty state (additive, Aug 2026). An empty `rows[]` is
+   * ambiguous — flat account, failed venue fetch, partial multi-venue answer
+   * — and only the server knows which. When it says so here the SDK draws
+   * this verbatim; without it the SDK falls back to a neutral line that makes
+   * no claim about the account. */
+  emptyText: z.string().optional(),
 })
 
 export const RejectionTicketFrame = z.object({
