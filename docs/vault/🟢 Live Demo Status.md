@@ -10,7 +10,8 @@
 | Surface                   | Link                                    | Access                                                       |
 | ------------------------- | --------------------------------------- | ------------------------------------------------------------ |
 | **Demo** (the main event) | https://hippo-host-demo.vercel.app      | Open, click the **Ask Hippo** pill — no login                |
-| Test guide                | https://hippo-host-demo.vercel.app/how  | Open — walks every flow with expected results                |
+| **Test matrix** (current) | https://hippo-host-demo.vercel.app/testing | Open — every shipped use case as of Aug 5, with expected results and a Known limits section |
+| Test guide (older)        | https://hippo-host-demo.vercel.app/how  | Open — the original narrative walkthrough; superseded by /testing for coverage |
 | Operator admin            | https://hippo-admin-six.vercel.app      | Login below                                                  |
 | Partner portal            | https://hippo-partner-portal.vercel.app | Login below                                                  |
 | Marketing site            | https://hippo-site.vercel.app           | Open — no login                                              |
