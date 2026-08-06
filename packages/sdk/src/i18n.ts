@@ -171,6 +171,43 @@ export type MessageKey =
   // Neutral positions empty state — deliberately claims NOTHING about the
   // account (an empty frame can be a failed fetch, not a flat book).
   | 'positions_empty'
+  // Live-bar row under a brief. `copy_brief`/`copied` above are the same
+  // action the share overlay uses — the row reuses them rather than
+  // hardcoding its own words.
+  | 'refresh'
+  | 'refresh_now'
+  | 'refreshing'
+  | 'share_brief'
+  // 👎 follow-up: the question, the three eval-harness reasons, and the
+  // collapsed acknowledgements. feedback.ts carries the KEYS, not the words.
+  | 'feedback_what_off'
+  | 'feedback_skip'
+  | 'feedback_reason_inaccurate'
+  | 'feedback_reason_shallow'
+  | 'feedback_reason_outdated'
+  | 'feedback_thanks'
+  | 'feedback_noted'
+  | 'feedback_noted_thanks'
+  // Card badges + the chrome labels that WRAP a server value. Only the label
+  // is translated; the value ({age}, {id}) is the server's, drawn verbatim.
+  | 'badge_live'
+  | 'cached_brief' // interpolates {age}
+  | 'market_brief'
+  | 'brief_interrupted'
+  | 'cancel_order'
+  | 'venue_order' // interpolates {id}
+  | 'rejected'
+  | 'fallback_open'
+  // Onboarding chrome. The consent rows and the ground-rules claims are NOT
+  // here — they are counsel-owned copy (see the header note).
+  | 'ob_welcome_to'
+  | 'ob_future_title'
+  | 'ob_tagline' // interpolates {venue}
+  | 'ob_show_more'
+  | 'ob_next'
+  | 'ob_ask_anything'
+  | 'ob_data_plain_words'
+  | 'share_on' // interpolates {venue}
 
 type Catalog = Record<MessageKey, string>
 
@@ -324,6 +361,35 @@ const en: Catalog = {
   clarify_offline_hint: 'Reconnect to answer this',
   clarify_failed: "Couldn't send your choice — nothing was decided. Tap again.",
   positions_empty: 'Nothing to show',
+  refresh: 'Refresh',
+  refresh_now: 'Refresh now',
+  refreshing: 'Refreshing…',
+  share_brief: 'Share this brief',
+  feedback_what_off: 'WHAT WAS OFF?',
+  feedback_skip: 'skip',
+  feedback_reason_inaccurate: 'Inaccurate',
+  feedback_reason_shallow: 'Too shallow',
+  feedback_reason_outdated: 'Outdated',
+  feedback_thanks: 'THANKS',
+  feedback_noted: 'NOTED',
+  feedback_noted_thanks: 'NOTED — THANKS',
+  badge_live: 'LIVE',
+  cached_brief: 'CACHED BRIEF · {age}',
+  market_brief: 'MARKET BRIEF',
+  brief_interrupted:
+    'BRIEF INTERRUPTED — the connection dropped before it finished. Ask again for a complete answer.',
+  cancel_order: 'CANCEL',
+  venue_order: 'VENUE ORDER · {id}',
+  rejected: 'REJECTED',
+  fallback_open: 'Open',
+  ob_welcome_to: 'WELCOME TO',
+  ob_future_title: 'The Future of Trading',
+  ob_tagline: 'Hippo — your conversational trading agent, built for {venue}.',
+  ob_show_more: 'Show me more',
+  ob_next: 'Next',
+  ob_ask_anything: 'Ask your market anything.',
+  ob_data_plain_words: 'Your data, in plain words',
+  share_on: 'on {venue}',
 }
 
 // First pass — pending native review.
@@ -475,6 +541,34 @@ const hi: Catalog = {
   clarify_offline_hint: 'जवाब देने के लिए दोबारा जुड़ें',
   clarify_failed: 'आपका चुनाव भेजा नहीं जा सका — कुछ तय नहीं हुआ। दोबारा दबाएँ।',
   positions_empty: 'दिखाने के लिए कुछ नहीं',
+  refresh: 'रिफ़्रेश',
+  refresh_now: 'अभी रिफ़्रेश करें',
+  refreshing: 'रिफ़्रेश हो रहा है…',
+  share_brief: 'यह ब्रीफ़ शेयर करें',
+  feedback_what_off: 'क्या गड़बड़ थी?',
+  feedback_skip: 'छोड़ें',
+  feedback_reason_inaccurate: 'गलत',
+  feedback_reason_shallow: 'बहुत सतही',
+  feedback_reason_outdated: 'पुराना',
+  feedback_thanks: 'धन्यवाद',
+  feedback_noted: 'नोट किया',
+  feedback_noted_thanks: 'नोट किया — धन्यवाद',
+  badge_live: 'लाइव',
+  cached_brief: 'कैश्ड ब्रीफ़ · {age}',
+  market_brief: 'मार्केट ब्रीफ़',
+  brief_interrupted: 'ब्रीफ़ अधूरा रह गया — पूरा होने से पहले कनेक्शन टूट गया। पूरे जवाब के लिए दोबारा पूछें।',
+  cancel_order: 'रद्द करें',
+  venue_order: 'वेन्यू ऑर्डर · {id}',
+  rejected: 'अस्वीकृत',
+  fallback_open: 'खोलें',
+  ob_welcome_to: 'स्वागत है',
+  ob_future_title: 'ट्रेडिंग का भविष्य',
+  ob_tagline: 'Hippo — आपका संवादी ट्रेडिंग एजेंट, {venue} के लिए बना।',
+  ob_show_more: 'और दिखाएँ',
+  ob_next: 'आगे',
+  ob_ask_anything: 'अपने बाज़ार से कुछ भी पूछें।',
+  ob_data_plain_words: 'आपका डेटा, सरल शब्दों में',
+  share_on: '{venue} पर',
 }
 
 // First pass — Hinglish (romanized), pending native review. Common product
@@ -634,6 +728,35 @@ const hiLatn: Catalog = {
   clarify_offline_hint: 'Jawab dene ke liye dobara connect karo',
   clarify_failed: 'Aapka choice bhej nahi paye — kuch tay nahi hua. Dobara tap karo.',
   positions_empty: 'Dikhane ke liye kuch nahi',
+  refresh: 'Refresh',
+  refresh_now: 'Abhi refresh karo',
+  refreshing: 'Refresh ho raha hai…',
+  share_brief: 'Yeh brief share karo',
+  feedback_what_off: 'KYA GADBAD THI?',
+  feedback_skip: 'skip',
+  feedback_reason_inaccurate: 'Galat',
+  feedback_reason_shallow: 'Bahut shallow',
+  feedback_reason_outdated: 'Purana',
+  feedback_thanks: 'THANKS',
+  feedback_noted: 'NOTE KIYA',
+  feedback_noted_thanks: 'NOTE KIYA — THANKS',
+  badge_live: 'LIVE',
+  cached_brief: 'CACHED BRIEF · {age}',
+  market_brief: 'MARKET BRIEF',
+  brief_interrupted:
+    'BRIEF ADHOORA REH GAYA — poora hone se pehle connection toot gaya. Poore jawab ke liye dobara poochho.',
+  cancel_order: 'CANCEL',
+  venue_order: 'VENUE ORDER · {id}',
+  rejected: 'REJECTED',
+  fallback_open: 'Kholo',
+  ob_welcome_to: 'WELCOME TO',
+  ob_future_title: 'Trading ka future',
+  ob_tagline: 'Hippo — aapka conversational trading agent, {venue} ke liye bana.',
+  ob_show_more: 'Aur dikhao',
+  ob_next: 'Aage',
+  ob_ask_anything: 'Apne market se kuch bhi poochho.',
+  ob_data_plain_words: 'Aapka data, seedhe shabdon mein',
+  share_on: '{venue} par',
 }
 
 // First pass — pending native review. Modern Standard Arabic; the brand word
@@ -788,9 +911,42 @@ const ar: Catalog = {
   clarify_offline_hint: 'أعد الاتصال للإجابة',
   clarify_failed: 'تعذّر إرسال اختيارك — لم يُتخذ أي إجراء. المس مرة أخرى.',
   positions_empty: 'لا شيء لعرضه',
+  refresh: 'تحديث',
+  refresh_now: 'حدّث الآن',
+  refreshing: 'جارٍ التحديث…',
+  share_brief: 'مشاركة هذا الموجز',
+  feedback_what_off: 'ما الخطأ؟',
+  feedback_skip: 'تخطٍ',
+  feedback_reason_inaccurate: 'غير دقيق',
+  feedback_reason_shallow: 'سطحي جدًا',
+  feedback_reason_outdated: 'قديم',
+  feedback_thanks: 'شكرًا',
+  feedback_noted: 'تم التسجيل',
+  feedback_noted_thanks: 'تم التسجيل — شكرًا',
+  badge_live: 'مباشر',
+  // {age} / {id} stay Western-numeral server values — see the header note.
+  cached_brief: 'موجز مخزَّن · {age}',
+  market_brief: 'موجز السوق',
+  brief_interrupted:
+    'انقطع الموجز — سقط الاتصال قبل أن يكتمل. اسأل مرة أخرى للحصول على إجابة كاملة.',
+  cancel_order: 'إلغاء',
+  venue_order: 'أمر المنصّة · {id}',
+  rejected: 'مرفوض',
+  fallback_open: 'فتح',
+  ob_welcome_to: 'مرحبًا بك في',
+  ob_future_title: 'مستقبل التداول',
+  ob_tagline: 'Hippo — وكيل التداول الحواري الخاص بك، مصمَّم لـ {venue}.',
+  ob_show_more: 'أرِني المزيد',
+  ob_next: 'التالي',
+  ob_ask_anything: 'اسأل سوقك عن أي شيء.',
+  ob_data_plain_words: 'بياناتك، بكلمات واضحة',
+  share_on: 'على {venue}',
 }
 
-const CATALOGS: Record<Locale, Partial<Catalog>> = { en, hi, 'hi-Latn': hiLatn, ar }
+/** Exported for the coverage suite, which asserts set equality across the four
+ *  locales at runtime (the `Catalog` type already enforces it at build time —
+ *  the test is the belt to that braces). */
+export const CATALOGS: Record<Locale, Catalog> = { en, hi, 'hi-Latn': hiLatn, ar }
 
 /** Normalize an arbitrary locale string to a supported Locale; default en. */
 export function resolveLocale(raw: string | null | undefined): Locale {

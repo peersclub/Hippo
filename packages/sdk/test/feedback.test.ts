@@ -2,18 +2,27 @@ import { describe, expect, it } from 'vitest'
 import {
   FEEDBACK_REASONS,
   type FeedbackState,
-  feedbackDoneLabel,
+  feedbackDoneKey,
   feedbackTransition,
 } from '../src/feedback.js'
+import { t } from '../src/i18n.js'
 
 const idle: FeedbackState = { phase: 'idle' }
+
+/** The state machine now answers a catalog key. These assertions still pin the
+ * rendered English, so routing the label through i18n cannot quietly reword it
+ * — the indirection is new, the copy is not. */
+const doneEn = (state: FeedbackState): string | null => {
+  const key = feedbackDoneKey(state)
+  return key === null ? null : t('en', key)
+}
 
 describe('feedback state machine', () => {
   it('👍 thanks instantly and sends the vote', () => {
     const t = feedbackTransition(idle, { type: 'vote', vote: 'up' })
     expect(t.state).toEqual({ phase: 'thanked' })
     expect(t.uplink).toEqual({ vote: 'up' })
-    expect(feedbackDoneLabel(t.state)).toBe('THANKS')
+    expect(doneEn(t.state)).toBe('THANKS')
   })
 
   it('👎 sends the vote-only uplink immediately, then asks', () => {
@@ -27,7 +36,7 @@ describe('feedback state machine', () => {
     const t = feedbackTransition(asking, { type: 'reason', reason: 'too_shallow' })
     expect(t.state).toEqual({ phase: 'noted', withReason: true })
     expect(t.uplink).toEqual({ vote: 'down', reason: 'too_shallow' })
-    expect(feedbackDoneLabel(t.state)).toBe('NOTED — THANKS')
+    expect(doneEn(t.state)).toBe('NOTED — THANKS')
   })
 
   it('skip dismisses without sending anything further', () => {
@@ -35,7 +44,7 @@ describe('feedback state machine', () => {
     const t = feedbackTransition(asking, { type: 'skip' })
     expect(t.state).toEqual({ phase: 'noted', withReason: false })
     expect(t.uplink).toBeUndefined()
-    expect(feedbackDoneLabel(t.state)).toBe('NOTED')
+    expect(doneEn(t.state)).toBe('NOTED')
   })
 
   it('terminal states ignore further events — feedback is one-shot', () => {

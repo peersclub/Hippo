@@ -6,12 +6,16 @@
  * the front end's direct contribution to the IP.
  */
 
+import type { MessageKey } from './i18n.js'
+
 export type FeedbackReason = 'inaccurate' | 'too_shallow' | 'outdated'
 
-export const FEEDBACK_REASONS: ReadonlyArray<{ reason: FeedbackReason; label: string }> = [
-  { reason: 'inaccurate', label: 'Inaccurate' },
-  { reason: 'too_shallow', label: 'Too shallow' },
-  { reason: 'outdated', label: 'Outdated' },
+/** Reason CHIPS carry catalog keys, never words — the card localizes them at
+ * render. The `reason` values are the wire enum and stay English. */
+export const FEEDBACK_REASONS: ReadonlyArray<{ reason: FeedbackReason; labelKey: MessageKey }> = [
+  { reason: 'inaccurate', labelKey: 'feedback_reason_inaccurate' },
+  { reason: 'too_shallow', labelKey: 'feedback_reason_shallow' },
+  { reason: 'outdated', labelKey: 'feedback_reason_outdated' },
 ]
 
 export type FeedbackState =
@@ -60,9 +64,9 @@ export function feedbackTransition(state: FeedbackState, event: FeedbackEvent): 
   }
 }
 
-/** Collapsed label for terminal states. */
-export function feedbackDoneLabel(state: FeedbackState): string | null {
-  if (state.phase === 'thanked') return 'THANKS'
-  if (state.phase === 'noted') return state.withReason ? 'NOTED — THANKS' : 'NOTED'
+/** Collapsed label for terminal states — a catalog key, localized by the card. */
+export function feedbackDoneKey(state: FeedbackState): MessageKey | null {
+  if (state.phase === 'thanked') return 'feedback_thanks'
+  if (state.phase === 'noted') return state.withReason ? 'feedback_noted_thanks' : 'feedback_noted'
   return null
 }

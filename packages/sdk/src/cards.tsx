@@ -43,7 +43,7 @@ import {
 import {
   FEEDBACK_REASONS,
   type FeedbackEvent,
-  feedbackDoneLabel,
+  feedbackDoneKey,
   feedbackTransition,
 } from './feedback.js'
 import { isStale, LANDED_FLASH_MS, STALE_CHECK_INTERVAL_MS, staleAgeLabel } from './freshness.js'
@@ -104,6 +104,7 @@ function ThumbSvg({ down }: { down?: boolean }) {
 }
 
 function LiveBarRow({ frame }: { frame: ResearchBrief }) {
+  const L = locale.value
   const lb = frame.liveBar
   // Feedback lives in a keyed signal map (not component state) so "already
   // gave feedback" survives minimize/reopen; the reducer's terminal states
@@ -171,7 +172,7 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
     clearTimeout(copyTimer.current)
     copyTimer.current = window.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
   }
-  const done = feedbackDoneLabel(fb)
+  const doneKey = feedbackDoneKey(fb)
   return (
     <>
       <div class={`livebar${stale ? ' stale' : ''}`}>
@@ -187,33 +188,38 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
             aria-busy={pending}
             onClick={refresh}
           >
-            {pending ? '⟳ REFRESHING…' : stale ? '↻ REFRESH NOW' : '↻ REFRESH'}
+            {pending ? '⟳ ' : '↻ '}
+            {t(L, pending ? 'refreshing' : stale ? 'refresh_now' : 'refresh')}
           </button>
         )}
-        <button type="button" onClick={copy} aria-label={t(locale.value, 'copy_brief')}>
-          {copied ? 'COPIED ✓' : '⧉ COPY'}
+        {/* No aria-label: the visible words ARE the accessible name, so a
+            screen reader can never announce a different language (or a
+            different action) from the one on the glass. Same two keys the
+            share overlay uses — one action, one pair of strings. */}
+        <button type="button" onClick={copy}>
+          {copied ? `${t(L, 'copied')} ✓` : `⧉ ${t(L, 'copy_brief')}`}
         </button>
         {lb.shareable && (
           <button type="button" onClick={share}>
-            ↗ SHARE
+            ↗ {t(L, 'share_brief')}
           </button>
         )}
         {lb.feedback && fb.phase !== 'asking' && (
           <span class="fb">
-            {done ? (
-              <span class="done">{done}</span>
+            {doneKey ? (
+              <span class="done">{t(L, doneKey)}</span>
             ) : (
               <>
                 <button
                   type="button"
-                  aria-label={t(locale.value, 'feedback_helpful')}
+                  aria-label={t(L, 'feedback_helpful')}
                   onClick={() => applyFeedback({ type: 'vote', vote: 'up' })}
                 >
                   <ThumbSvg />
                 </button>
                 <button
                   type="button"
-                  aria-label={t(locale.value, 'feedback_not_helpful')}
+                  aria-label={t(L, 'feedback_not_helpful')}
                   onClick={() => applyFeedback({ type: 'vote', vote: 'down' })}
                 >
                   <ThumbSvg down />
@@ -225,7 +231,7 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
       </div>
       {fb.phase === 'asking' && (
         <div class="fbask">
-          <span class="q">WHAT WAS OFF?</span>
+          <span class="q">{t(L, 'feedback_what_off')}</span>
           {FEEDBACK_REASONS.map((r) => (
             <button
               type="button"
@@ -233,11 +239,11 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
               key={r.reason}
               onClick={() => applyFeedback({ type: 'reason', reason: r.reason })}
             >
-              {r.label}
+              {t(L, r.labelKey)}
             </button>
           ))}
           <button type="button" class="fbskip" onClick={() => applyFeedback({ type: 'skip' })}>
-            skip
+            {t(L, 'feedback_skip')}
           </button>
         </div>
       )}
@@ -246,17 +252,22 @@ function LiveBarRow({ frame }: { frame: ResearchBrief }) {
 }
 
 function ResearchBriefCard({ frame }: { frame: ResearchBrief }) {
+  const L = locale.value
   return (
     <div class="bubble">
       <div class="eyebrow">
         <span>{frame.eyebrow}</span>
         <span class="eyebrow-right">
-          {frame.live && <span class="live">● LIVE</span>}
+          {frame.live && <span class="live">● {t(L, 'badge_live')}</span>}
           {frame.model && <span class="model-tag">{frame.model}</span>}
         </span>
       </div>
       {frame.liveBar?.cached && (
-        <span class="cache-badge">CACHED BRIEF · {frame.liveBar.cacheAge}</span>
+        // Chrome label around the server's own age string — the age is drawn
+        // verbatim, only the words around it are translated.
+        <span class="cache-badge">
+          {t(L, 'cached_brief', { age: frame.liveBar.cacheAge ?? '' })}
+        </span>
       )}
       <h3>{frame.headline}</h3>
       {frame.paragraphs.map((p) => (
@@ -691,7 +702,7 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
               title={connection.value !== 'live' ? t(L, 'ticket_offline_hint') : undefined}
               onClick={cancel}
             >
-              CANCEL
+              {t(L, 'cancel_order')}
             </button>
           )}
         </div>
@@ -751,7 +762,9 @@ function LifecycleCard({ frame }: { frame: Lifecycle }) {
           ))}
         </div>
       )}
-      {frame.venueOrderId && <div class="oid">VENUE ORDER · {frame.venueOrderId}</div>}
+      {frame.venueOrderId && (
+        <div class="oid">{t(locale.value, 'venue_order', { id: frame.venueOrderId })}</div>
+      )}
     </div>
   )
 }
@@ -797,7 +810,7 @@ function PositionsCard({ frame }: { frame: Positions }) {
   return (
     <div class="bubble">
       <div class="eyebrow">
-        <span>POSITIONS</span>
+        <span>{t(L, 'orders_positions')}</span>
       </div>
       {frame.rows.length === 0 ? (
         // Empty rows are ambiguous (flat account, failed fetch, partial venue
@@ -820,11 +833,12 @@ function PositionsCard({ frame }: { frame: Positions }) {
 }
 
 function RejectionCard({ frame }: { frame: RejectionTicket }) {
+  const L = locale.value
   return (
     <div class="ticket err">
       <div class="th">
         <span class="tt">{frame.title}</span>
-        <span class="side sell">REJECTED</span>
+        <span class="side sell">{t(L, 'rejected')}</span>
       </div>
       <div class="tb">
         <p class="errbody">{frame.reason}</p>
@@ -934,9 +948,9 @@ function StreamingBriefCard({ frame }: { frame: BriefDelta }) {
   return (
     <div class="bubble">
       <div class="eyebrow">
-        <span>MARKET BRIEF</span>
+        <span>{t(L, 'market_brief')}</span>
         <span class="eyebrow-right">
-          {!interrupted && <span class="live">● LIVE</span>}
+          {!interrupted && <span class="live">● {t(L, 'badge_live')}</span>}
           {frame.model && <span class="model-tag">{frame.model}</span>}
         </span>
       </div>
@@ -946,8 +960,7 @@ function StreamingBriefCard({ frame }: { frame: BriefDelta }) {
       </p>
       {interrupted && (
         <div class="stream-cut" role="status">
-          ⚠ BRIEF INTERRUPTED — the connection dropped before it finished. Ask again for a complete
-          answer.
+          ⚠ {t(L, 'brief_interrupted')}
         </div>
       )}
     </div>
@@ -1250,7 +1263,7 @@ export function FallbackCard({ frame }: { frame: UnknownFrame }) {
         {fb.text}{' '}
         {fb.href && (
           <a href={fb.href} target="_blank" rel="noreferrer">
-            Open →
+            {t(locale.value, 'fallback_open')} →
           </a>
         )}
       </p>
