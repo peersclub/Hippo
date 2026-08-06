@@ -17,10 +17,21 @@ from providers import Message, ProviderRouter
 from prompts import INTENT_HISTORY_SUFFIX, INTENT_RETRY_SUFFIX, INTENT_SYSTEM_PROMPT
 from textutil import canonical_text, extract_json_object
 
+# The taxonomy the product routes on. This set gates BOTH the deterministic
+# fast paths and anything the LLM proposes (_validate_classification rejects an
+# intent that is not here), so an intent missing from it is unreachable on the
+# model path no matter what the prompt says. Kept EQUAL to the prompt's enum
+# (prompts.py INTENT_SYSTEM_PROMPT), the gateway's IntentKind and the eval
+# harness's INTENTS by services/gateway/test/intent-parity.test.ts.
 INTENTS = {
     "research", "concept", "action", "advice", "portfolio", "smalltalk",
     # Host-interaction wave (July 2026): chart control + consolidated orders.
     "host_action", "orders_query",
+    # Price alerts (August 2026). Was deterministic-only — the fast path
+    # emitted it while this set rejected it, so every phrasing outside
+    # _ALERT_CUE_RE (give me a heads up if btc breaks 70k) silently became
+    # research and nothing was ever armed. The LLM path now reaches it.
+    "alert",
 }
 LANGUAGES = {"en", "hi", "hinglish"}
 
@@ -44,6 +55,36 @@ CLARIFY_THRESHOLD = 0.85
 # honest decline downstream (the gateway never guesses an unsupported one).
 _TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
 _INDICATORS = {"sma20", "sma50", "ema20", "rsi", "vol"}
+
+# Every host verb this service may emit — the union of what parse_host_action
+# returns and what _validate_host_action accepts from the LLM. Kept EQUAL to
+# the prompt's hostAction.action enum, the gateway's HOST_ACTION_VERBS and the
+# protocol's "Well-known verbs" doc line by the parity test.
+_HOST_ACTION_VERBS = frozenset({
+    "set_timeframe", "apply_indicator", "remove_indicator",
+    # Wider verbs (August 2026) — the parser emitted these long before the
+    # prompt or the validator knew them.
+    "navigate", "set_symbol", "prefill_ticket",
+})
+# navigate targets the demo host advertises; anything else is not a target we
+# can honestly forward, so the payload is dropped rather than guessed.
+_NAV_TARGETS = frozenset({"trade", "settings", "how"})
+
+# Every field an order payload may carry on the wire. The LLM-side validator
+# rebuilds orders from exactly these keys, so a key missing here is a field
+# SILENTLY STRIPPED off a real trade — which is how perp orders ("go long 0.5
+# btc with 10x leverage") reached the gateway shaped like spot orders.
+# Kept EQUAL to the prompt's order schema and the gateway's OrderIntent.
+_ORDER_FIELDS = frozenset({
+    "capability", "side", "size", "instrument", "orderType", "limitPrice",
+    "stopLossPrice", "takeProfitPrice",
+    # futures_perp + fractional close:
+    "direction", "leverage", "marginMode", "action", "reduceOnly",
+    "sizeFraction",
+})
+# Venue caps are the real authority (the gateway clamps against
+# capabilities.maxLeverage); this bound only rejects nonsense from the model.
+_LEVERAGE_MAX = 200
 
 # Intent-path LLM deadline, well inside the gateway's 3s /v1/intent abort.
 # A merely SLOW (not dead) model must trip ProviderError → mock fallback here;
@@ -564,8 +605,11 @@ def parse_host_action(text: str) -> dict[str, Any] | None:
     remove = bool(_REMOVE_RE.search(t))
     apply = bool(_APPLY_RE.search(t))
     if (remove or apply) and _INDICATOR_HINT.search(t):
-        action = "remove_indicator" if remove else "apply_indicator"
-        out: dict[str, Any] = {"action": action}
+        # Spelled as two literals (not a variable) so the emitted verb
+        # vocabulary is greppable from source — the parity test scrapes it.
+        out: dict[str, Any] = (
+            {"action": "remove_indicator"} if remove else {"action": "apply_indicator"}
+        )
         ind = canonical_indicator(t)
         if ind:
             out["indicator"] = ind
@@ -945,21 +989,78 @@ def _ensure_alternatives(result: dict[str, Any], text: str) -> dict[str, Any]:
 
 
 # --- LLM output validation ------------------------------------------------------
-def _validate_order(raw: object) -> dict[str, str] | None:
+def _validate_leverage(raw: object) -> int | None:
+    """Positive whole leverage within a sane bound, else None. The venue's
+    real cap is enforced downstream; this only rejects nonsense."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+    elif isinstance(raw, str):
+        m = re.search(r"\d+(?:\.\d+)?", raw)
+        if not m:
+            return None
+        value = float(m.group(0))
+    else:
+        return None
+    lev = int(value)
+    return lev if 1 <= lev <= _LEVERAGE_MAX else None
+
+
+def _validate_size_fraction(raw: object) -> float | None:
+    """A fraction in (0, 1], else None. "50%"/"0.5" both land on 0.5."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+    elif isinstance(raw, str):
+        parsed = parse_size_fraction(raw)
+        if parsed is not None:
+            return parsed
+        try:
+            value = float(raw.strip().rstrip("%"))
+        except ValueError:
+            return None
+        if value > 1:
+            value /= 100.0
+    else:
+        return None
+    return value if 0 < value <= 1 else None
+
+
+def _validate_order(raw: object) -> dict[str, Any] | None:
+    """Validate an LLM-proposed order payload.
+
+    Rebuilds the order from the allowlisted `_ORDER_FIELDS` — including the
+    PERPETUAL block (capability/direction/leverage/marginMode/action/
+    reduceOnly) and `sizeFraction`. Those used to be dropped on the floor:
+    "go long 0.5 btc with 10x leverage" misses the ^-anchored regex fast path,
+    so the LLM is the only parser that sees it, and its answer arrived at the
+    gateway shaped like a SPOT market buy — with the gateway's raw-text
+    long/short safety net suppressed (it is gated on `!order`) and the
+    close/reduce bypass unreachable (it keys on action/reduceOnly), which
+    resubmits a close as an OPEN. Downstream re-validates every field against
+    the venue's advertised capabilities; nothing here is trusted blindly.
+    """
     if not isinstance(raw, dict):
         return None
     side = raw.get("side")
-    size = raw.get("size")
     instrument = raw.get("instrument")
-    if side not in ("buy", "sell") or not size or not isinstance(instrument, str):
+    if side not in ("buy", "sell") or not isinstance(instrument, str):
+        return None
+    size = raw.get("size")
+    fraction = _validate_size_fraction(raw.get("sizeFraction"))
+    # A fractional close carries an EMPTY size on purpose — the gateway
+    # resolves it against the live position. Anything else needs a real size.
+    if not size and fraction is None:
         return None
     base = instrument.split("/")[0].strip()
     asset = normalize_asset(base) or (base.upper() if base.isalpha() else None)
     if not asset:
         return None
-    order: dict[str, str] = {
+    order: dict[str, Any] = {
         "side": side,
-        "size": str(size),
+        "size": str(size) if size else "",
         "instrument": to_pair(asset),
         "orderType": "limit" if raw.get("orderType") == "limit" else "market",
     }
@@ -967,6 +1068,8 @@ def _validate_order(raw: object) -> dict[str, str] | None:
         if not raw.get("limitPrice"):
             return None
         order["limitPrice"] = str(raw["limitPrice"])
+    if fraction is not None:
+        order["sizeFraction"] = fraction
     # Protective exits from the LLM: pass through as money strings when the
     # model extracted them ("with stop at 60k" phrased too loosely for the
     # regex). Downstream (gateway + seam) re-validates — never trusted blindly.
@@ -974,17 +1077,62 @@ def _validate_order(raw: object) -> dict[str, str] | None:
         order["stopLossPrice"] = str(raw["stopLossPrice"])
     if raw.get("takeProfitPrice"):
         order["takeProfitPrice"] = str(raw["takeProfitPrice"])
+
+    direction = raw.get("direction")
+    direction = direction if direction in ("long", "short") else None
+    action = raw.get("action")
+    action = action if action in ("open", "close") else None
+    reduce_only = raw.get("reduceOnly") is True
+    # A direction word or a leverage/margin field IS a perp order, whatever the
+    # model put in `capability` — mirrors parse_perp, which never needed the tag.
+    leverage = _validate_leverage(raw.get("leverage"))
+    margin_mode = raw.get("marginMode") if raw.get("marginMode") in ("isolated", "cross") else None
+    is_perp = (
+        raw.get("capability") == "futures_perp"
+        or direction is not None
+        or leverage is not None
+        or margin_mode is not None
+    )
+    if is_perp:
+        order["capability"] = "futures_perp"
+        order["action"] = action or ("close" if reduce_only or fraction is not None else "open")
+        if direction is None:
+            # Inverse of parse_perp's mapping: open buy = long, open sell =
+            # short, close buy = short, close sell = long. Deterministic, so a
+            # model that named a leverage but forgot the direction still routes
+            # perp-shaped instead of silently degrading to spot.
+            opening = order["action"] == "open"
+            direction = "long" if (opening == (side == "buy")) else "short"
+        order["direction"] = direction
+        order["leverage"] = leverage if leverage is not None else 10
+        order["marginMode"] = margin_mode or "isolated"
+        order["reduceOnly"] = reduce_only or order["action"] == "close"
+    else:
+        # Spot stays untagged (the gateway reads a missing capability as spot)
+        # so a plain "buy 0.5 btc" is byte-identical to what it always was —
+        # except that a close/reduce marker now survives, which is what keeps
+        # the gateway's close bypass from resubmitting a reduce as an OPEN.
+        if action is not None:
+            order["action"] = action
+        if reduce_only or (fraction is not None and action == "close"):
+            order["reduceOnly"] = True
     return order
 
 
 def _validate_host_action(raw: object) -> dict[str, Any] | None:
-    """Validate an LLM-proposed host_action payload. set_timeframe REQUIRES a
-    supported timeframe; apply/remove attach an indicator only when it maps to a
-    supported slug (else omitted → the gateway declines)."""
+    """Validate an LLM-proposed host_action payload.
+
+    Accepts every verb in `_HOST_ACTION_VERBS` — the wider verbs (navigate,
+    set_symbol, prefill_ticket) have been coming out of parse_host_action since
+    August 2026 while this validator still rejected them, so on the LLM path
+    they were dropped and the turn fell through to the rules. set_timeframe
+    REQUIRES a supported timeframe; apply/remove attach an indicator only when
+    it maps to a supported slug (else omitted → the gateway declines).
+    """
     if not isinstance(raw, dict):
         return None
     action = raw.get("action")
-    if action not in ("set_timeframe", "apply_indicator", "remove_indicator"):
+    if action not in _HOST_ACTION_VERBS:
         return None
     if action == "set_timeframe":
         tf = raw.get("timeframe")
@@ -994,13 +1142,85 @@ def _validate_host_action(raw: object) -> dict[str, Any] | None:
         if tf not in _TIMEFRAMES:
             return None
         return {"action": action, "timeframe": tf}
-    out: dict[str, Any] = {"action": action}
-    ind = raw.get("indicator")
-    if isinstance(ind, str) and ind.strip():
-        canon = ind if ind in _INDICATORS else canonical_indicator(ind)
-        if canon:
-            out["indicator"] = canon
-    return out
+    if action in ("apply_indicator", "remove_indicator"):
+        out: dict[str, Any] = {"action": action}
+        ind = raw.get("indicator")
+        if isinstance(ind, str) and ind.strip():
+            canon = ind if ind in _INDICATORS else canonical_indicator(ind)
+            if canon:
+                out["indicator"] = canon
+        return out
+    params = raw.get("params")
+    params = params if isinstance(params, dict) else {}
+    if action == "navigate":
+        target = params.get("target")
+        if not isinstance(target, str) or target.strip().lower() not in _NAV_TARGETS:
+            return None  # no honest target → let retry/rules decide
+        return {"action": action, "params": {"target": target.strip().lower()}}
+    if action == "set_symbol":
+        symbol = params.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            return None
+        base = symbol.split("/")[0].strip()
+        asset = normalize_asset(base) or (base.upper() if base.isalpha() else None)
+        if not asset:
+            return None
+        return {"action": action, "params": {"symbol": to_pair(asset)}}
+    # prefill_ticket: only the fields the trader actually said. Side/qty may be
+    # absent — the gateway declines honestly rather than inventing a ticket.
+    out_params: dict[str, str] = {}
+    side = params.get("side")
+    if isinstance(side, str):
+        word = side.strip().lower()
+        if word in ("buy", "sell", "long", "short"):
+            out_params["side"] = "buy" if word == "long" else "sell" if word == "short" else word
+    for key in ("qty", "price"):
+        value = params.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out_params[key] = _format_amount(float(value))
+        elif isinstance(value, str) and re.fullmatch(r"\s*\$?[\d,]*\.?\d+\s*", value):
+            out_params[key] = value.strip().lstrip("$").replace(",", "")
+    return {"action": action, "params": out_params}
+
+
+def _validate_alert(raw: object) -> dict[str, Any] | None:
+    """Validate an LLM-proposed alertIntent payload, else None.
+
+    Same shape parse_alert returns. A create needs BOTH a recognisable symbol
+    and a positive price — without them there is nothing to arm, so the
+    payload (and the whole classification) is rejected rather than guessed. An
+    unnamed/unknown direction becomes 'cross': the gateway resolves above/below
+    against the live price at creation, which is the one safe default.
+    """
+    if not isinstance(raw, dict):
+        return None
+    action = raw.get("action")
+    if action not in ("create", "cancel"):
+        return None
+    symbol_raw = raw.get("symbol")
+    symbol: str | None = None
+    if isinstance(symbol_raw, str) and symbol_raw.strip():
+        base = symbol_raw.split("/")[0].strip()
+        asset = normalize_asset(base) or (base.upper() if base.isalpha() else None)
+        if asset:
+            symbol = to_pair(asset)
+    if action == "cancel":
+        out: dict[str, Any] = {"action": "cancel"}
+        if symbol:
+            out["symbol"] = symbol
+        return out
+    price_raw = raw.get("price")
+    price: float | None = None
+    if isinstance(price_raw, (int, float)) and not isinstance(price_raw, bool):
+        price = float(price_raw)
+    elif isinstance(price_raw, str):
+        price = _alert_price(price_raw)
+    if symbol is None or price is None or price <= 0:
+        return None
+    direction = raw.get("direction")
+    if direction not in ("above", "below", "cross"):
+        direction = "cross"
+    return {"action": "create", "symbol": symbol, "direction": direction, "price": price}
 
 
 def _validate_orders_query(raw: object) -> dict[str, Any]:
@@ -1055,6 +1275,13 @@ def _validate_classification(
         result["ordersQuery"] = _validate_orders_query(
             parsed.get("ordersQuery") or parsed.get("orders_query")
         )
+    elif parsed["intent"] == "alert":
+        alert = _validate_alert(parsed.get("alertIntent") or parsed.get("alert"))
+        if alert is None:
+            # Claimed alert but nothing armable — same posture as host_action:
+            # let retry/rules decide rather than emit an alert with no level.
+            return None
+        result["alertIntent"] = alert
     return result
 
 
@@ -1067,18 +1294,55 @@ _INTERP_TEMPLATES = {
     "advice": "This asks for a call — I'll share facts, not advice.",
     "portfolio": "Checking your own positions and balance.",
     "smalltalk": "Just saying hi.",
-    "host_action": "Adjusting the chart on the page.",
+    # Generic host fallback for a verb we have no copy for yet. The per-VERB
+    # lines below are what a trader actually sees; this only catches a verb
+    # added to the taxonomy before its copy was written.
+    "host_action": "Adjusting the page for you.",
     "orders_query": "Pulling together your orders.",
+    "alert": "Setting up a price alert.",
 }
+
+# The three verbs that really do touch the chart. Everything else on the page
+# (route, market, ticket) must NOT claim to.
+_CHART_VERBS = frozenset({"set_timeframe", "apply_indicator", "remove_indicator"})
+
+# Per-VERB "understanding" copy. Before this, every host verb rendered
+# "Adjusting the chart on the page." — so "go to the settings page" and "fill
+# the order form to buy 0.1 btc" showed chart copy directly above a correct
+# "Ticket → BUY 0.1" chip, i.e. the card contradicted the frames beneath it.
+# The gateway's degraded-mode mirror is defaultInterpretation() in
+# orchestrator/index.ts; both must cover every verb in the shared enum.
+_HOST_VERB_INTERP = {
+    "set_timeframe": "Adjusting the chart timeframe on the page.",
+    "apply_indicator": "Adding an indicator to the chart.",
+    "remove_indicator": "Removing an indicator from the chart.",
+    "navigate": "Taking you to another page.",
+    "set_symbol": "Switching the page to a different market.",
+    "prefill_ticket": "Filling in the order ticket for you to review.",
+}
+
+
+def default_interpretation(result: dict[str, Any]) -> str:
+    """The deterministic "here's what I understood" line for a classification.
+
+    Verb- and payload-aware: a host_action reads its own verb, an alert its
+    own create/cancel. Pure; never advice.
+    """
+    intent = result.get("intent")
+    if intent == "host_action":
+        verb = (result.get("hostAction") or {}).get("action")
+        return _HOST_VERB_INTERP.get(verb, _INTERP_TEMPLATES["host_action"])
+    if intent == "alert":
+        action = (result.get("alertIntent") or {}).get("action")
+        return "Managing your price alerts." if action == "cancel" else _INTERP_TEMPLATES["alert"]
+    return _INTERP_TEMPLATES.get(intent, "Working on it.")
 
 
 def _ensure_interpretation(result: dict[str, Any], text: str) -> dict[str, Any]:
     """Guarantee interpretation + restructuredQuery are present. The answer
     engine falls back to the raw text if restructuredQuery is absent, but the
     UI card always wants a summary line."""
-    result.setdefault(
-        "interpretation", _INTERP_TEMPLATES.get(result["intent"], "Working on it.")
-    )
+    result.setdefault("interpretation", default_interpretation(result))
     result.setdefault("restructuredQuery", text.strip())
     return result
 
