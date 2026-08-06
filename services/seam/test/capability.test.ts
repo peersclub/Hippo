@@ -39,6 +39,39 @@ class SpotOnlyAdapter implements VenueAdapter {
   onEvent(): void {}
 }
 
+/**
+ * Minimal perp-only venue — the counterpart that proves BOTH prepare wires gate
+ * on capabilities. prepare()/prepareOrder() deliberately SUCCEED, so a route
+ * that skipped the gate answers 200 and the test fails loudly instead of
+ * passing for the wrong reason.
+ */
+class PerpOnlyAdapter implements VenueAdapter {
+  async capabilities(): Promise<VenueCapabilitiesShape> {
+    return { futures_perp: { maxLeverage: 20, marginModes: ['isolated'] } }
+  }
+  async prepare(_req: PrepareRequest): Promise<PreparedTicket> {
+    return {
+      ticketId: 't_ungated',
+      side: 'buy',
+      instrument: 'BTC/USDT',
+      orderType: 'market',
+      rows: [],
+      sideLabel: 'BUY · MKT',
+    }
+  }
+  async prepareOrder(): Promise<PreparedTicket> {
+    return this.prepare({} as PrepareRequest)
+  }
+  async confirm(): Promise<void> {}
+  async cancel(): Promise<boolean> {
+    return true
+  }
+  async portfolio(): Promise<Portfolio> {
+    return { positions: [], openOrders: [] }
+  }
+  onEvent(): void {}
+}
+
 const TOKEN = 'tok'
 const HDR = { 'x-hippo-internal-token': TOKEN, 'content-type': 'application/json' }
 
@@ -263,3 +296,147 @@ describe('protective exits (attached stop-loss / take-profit)', () => {
     expect(badType.statusCode).toBe(400)
   })
 })
+
+/**
+ * The legacy /v1/prepare wire. It shipped with NO capability gate while its
+ * sibling /v1/prepare-order had one — and the gateway routes every plain spot
+ * order to the ungated wire, so a venue that never advertised spot would still
+ * get spot orders placed against it. Every gate case that exists for
+ * /v1/prepare-order is mirrored here.
+ */
+describe('legacy /v1/prepare carries the same gates as /v1/prepare-order', () => {
+  /** A spot request both wires parse: plain PrepareRequest fields plus the
+   *  `capability` tag /v1/prepare-order needs (which /v1/prepare ignores). */
+  const SPOT_PROBE = {
+    capability: 'spot',
+    partnerId: 'p',
+    userId: 'u1',
+    side: 'buy',
+    size: '0.1',
+    instrument: 'BTC/USDT',
+    orderType: 'market',
+  }
+
+  it('mirror — happy path: a venue that advertises spot still prepares (200)', async () => {
+    const app = buildService(new SimVenueAdapter(), { internalToken: TOKEN })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: JSON.stringify(SPOT_PROBE),
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().ticketId).toMatch(/^t_/)
+  })
+
+  it('mirror — capability gate: a spot order is rejected (422) on a venue without spot', async () => {
+    const app = buildService(new PerpOnlyAdapter(), { internalToken: TOKEN })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: JSON.stringify(SPOT_PROBE),
+    })
+    expect(res.statusCode).toBe(422)
+    expect(res.json().error).toMatch(/not supported/i)
+    // The adapter would have HAPPILY prepared it — only the gate stopped it.
+    expect(res.json().ticketId).toBeUndefined()
+  })
+
+  it('mirror — protective exits: refused loudly rather than silently stripped', async () => {
+    // /v1/prepare has no protective-exit fields in its parse, so accepting a
+    // request that carries them would drop the trader's stop-loss on the floor.
+    // Both a money-string and a wrong-typed number are a hard 400 that names
+    // the wire which does carry protection.
+    const app = buildService(new SimVenueAdapter(), { internalToken: TOKEN })
+    for (const stopLossPrice of ['55000', 55_000 as unknown as string]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/prepare',
+        headers: HDR,
+        payload: JSON.stringify({ ...SPOT_PROBE, stopLossPrice }),
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/prepare-order/)
+    }
+    const tp = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: JSON.stringify({ ...SPOT_PROBE, takeProfitPrice: '70000' }),
+    })
+    expect(tp.statusCode).toBe(400)
+  })
+
+  it('mirror — a malformed body is still a 400, checked before the gate', async () => {
+    const app = buildService(new PerpOnlyAdapter(), { internalToken: TOKEN })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: HDR,
+      payload: JSON.stringify({ ...SPOT_PROBE, instrument: 'nonsense' }),
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('mirror — the internal-token guard runs before anything else', async () => {
+    const app = buildService(new SimVenueAdapter(), { internalToken: TOKEN })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prepare',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify(SPOT_PROBE),
+    })
+    expect(res.statusCode).toBe(401)
+  })
+
+  /**
+   * ROUTE PARITY. The defect was not "this one route forgot the gate" — it was
+   * "nothing forces a NEW prepare wire to have one". So rather than name the
+   * two routes we know about, read every prepare route back out of Fastify's
+   * own router and require the gate from each. A third prepare wire lands in
+   * this list the moment it is registered, and ships red until it gates.
+   */
+  it('route parity: EVERY registered prepare route runs the capability gate', async () => {
+    const app = buildService(new PerpOnlyAdapter(), { internalToken: TOKEN })
+    await app.ready()
+
+    const routes = registeredPrepareRoutes(app)
+    // Sanity: the enumeration really walked the router (a parser that silently
+    // found nothing would make the loop below vacuously green).
+    expect(routes).toEqual(expect.arrayContaining(['/v1/prepare', '/v1/prepare-order']))
+
+    for (const url of routes) {
+      const res = await app.inject({
+        method: 'POST',
+        url,
+        headers: HDR,
+        payload: JSON.stringify(SPOT_PROBE),
+      })
+      expect(res.statusCode, `${url} did not gate a spot order on a venue without spot`).toBe(422)
+      expect(res.json().error, url).toMatch(/not supported/i)
+    }
+  })
+})
+
+/**
+ * Every POST route whose path contains "prepare", read out of Fastify's router
+ * via printRoutes(). The printout is a radix tree — `/v1/prepare` with a
+ * `-order` child — so segments are re-joined by indentation depth to recover
+ * full paths.
+ */
+function registeredPrepareRoutes(app: ReturnType<typeof buildService>): string[] {
+  const stack: string[] = []
+  const found: string[] = []
+  for (const line of app.printRoutes({ commonPrefix: false }).split('\n')) {
+    const branch = /^((?:[│ ] {3})*)(?:├── |└── )(.*)$/.exec(line)
+    if (!branch) continue
+    const depth = branch[1].length / 4
+    const methods = / \(([A-Z, ]+)\)$/.exec(branch[2])
+    stack[depth] = methods ? branch[2].slice(0, -methods[0].length) : branch[2]
+    stack.length = depth + 1
+    const path = stack.join('')
+    if (methods?.[1].split(', ').includes('POST') && path.includes('prepare')) found.push(path)
+  }
+  return found
+}
