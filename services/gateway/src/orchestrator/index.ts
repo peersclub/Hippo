@@ -191,10 +191,26 @@ function learnedMemoryLabel(type: string, value: string): string {
   return LEARNED_MEMORY_LABEL[type]?.(value) ?? `${type}: ${value}`
 }
 
+/** Per-VERB host-action copy. Degraded mode detects navigate / set_symbol /
+ * prefill_ticket just like the primary path does, so a single "Adjusting the
+ * chart on the page." line made the understanding card contradict the frames
+ * under it — chart copy above a correct "Ticket → BUY 0.1" chip. Mirror of the
+ * intelligence service's `_HOST_VERB_INTERP` (intent.py); `intent-parity.test.ts`
+ * asserts this map covers every verb in HOST_ACTION_VERBS. */
+const HOST_VERB_INTERPRETATION: Record<string, string> = {
+  set_timeframe: 'Adjusting the chart timeframe on the page.',
+  apply_indicator: 'Adding an indicator to the chart.',
+  remove_indicator: 'Removing an indicator from the chart.',
+  navigate: 'Taking you to another page.',
+  set_symbol: 'Switching the page to a different market.',
+  prefill_ticket: 'Filling in the order ticket for you to review.',
+}
+
 /** Fallback interpretation summary when stage-1 didn't supply one (degraded
  * mode / older intelligence build). One neutral line per intent — never
- * advice. */
-function defaultInterpretation(intent: string): string {
+ * advice. `verb` is the detected host_action verb, so page commands describe
+ * what they actually do instead of all claiming to touch the chart. */
+export function defaultInterpretation(intent: string, verb?: string): string {
   switch (intent) {
     case 'research':
       return 'Looking up live market info for this.'
@@ -207,7 +223,7 @@ function defaultInterpretation(intent: string): string {
     case 'portfolio':
       return 'Checking your own positions.'
     case 'host_action':
-      return 'Adjusting the chart on the page.'
+      return (verb ? HOST_VERB_INTERPRETATION[verb] : undefined) ?? 'Adjusting the page for you.'
     case 'orders_query':
       return 'Pulling together your orders.'
     case 'alert':
@@ -2210,7 +2226,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // which layers were applied.
     emit(session, {
       type: 'interpretation',
-      summary: intentRes.interpretation ?? defaultInterpretation(intentRes.intent),
+      summary:
+        intentRes.interpretation ??
+        defaultInterpretation(intentRes.intent, intentRes.hostAction?.action),
       intent: intentRes.intent,
       memoryScopes: mem.scopes,
     })

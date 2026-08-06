@@ -22,6 +22,13 @@ const EXTRACT_TIMEOUT_MS = 4_000
  * service's own LLM breaker). */
 const BREAKER_MS = 15_000
 
+/**
+ * The taxonomy the product routes on. Kept EQUAL to the intelligence service's
+ * `INTENTS` (intent.py), the intent prompt's enum (prompts.py) and the eval
+ * harness's `INTENTS` (evals/runner/intent_scoring.py) by
+ * `test/intent-parity.test.ts` — a wave that teaches one side a new intent and
+ * forgets the others turns that test red.
+ */
 export type IntentKind =
   | 'research'
   | 'concept'
@@ -34,6 +41,25 @@ export type IntentKind =
   | 'orders_query'
   // Price alerts (August 2026): conversational create/cancel of durable alerts.
   | 'alert'
+
+/**
+ * Every host verb this codebase knows how to detect and describe. Mirrors the
+ * intelligence service's `_HOST_ACTION_VERBS`, the intent prompt's
+ * `hostAction.action` enum and the protocol's "Well-known verbs" doc line —
+ * `test/intent-parity.test.ts` asserts all four agree. The HOST is still the
+ * authority on which verbs it actually supports (ContextUplink.hostActions);
+ * this list only bounds what we detect and what copy we can write for it.
+ */
+export const HOST_ACTION_VERBS = [
+  'set_timeframe',
+  'apply_indicator',
+  'remove_indicator',
+  'navigate',
+  'set_symbol',
+  'prefill_ticket',
+] as const
+
+export type HostActionVerb = (typeof HOST_ACTION_VERBS)[number]
 
 /** Host-action intent (host_action). `action` is an open string mirroring
  * @hippo/protocol HostActionFrame (wave 2): the orchestrator gates emission on

@@ -13,10 +13,17 @@ from __future__ import annotations
 
 from collections import Counter
 
-# The nine intents the product actually routes on. `alert` is emitted by the
-# alert fast path but deliberately absent from intent.py's INTENTS set (that
-# set gates *LLM-proposed* intents; alerts are deterministic-only), so it is
-# listed here explicitly rather than imported.
+# The nine intents the product actually routes on. Duplicated (not imported)
+# so the harness stays stdlib-only and importable without the service on the
+# path; services/gateway/test/intent-parity.test.ts asserts this tuple stays
+# EQUAL to intent.py's INTENTS, the prompt's enum and the gateway's IntentKind.
+#
+# `alert` used to carry a note here saying it was deliberately absent from
+# intent.py's INTENTS because "alerts are deterministic-only". That stopped
+# being true: the gateway (IntentKind), the protocol (AlertFrame) and
+# intent.py's own _COSTLY_INTENTS all treat alert as first-class, and the
+# omission meant the LLM path could never return one — every alert phrasing
+# outside _ALERT_CUE_RE silently became research. It is now in INTENTS too.
 INTENTS: tuple[str, ...] = (
     "action", "advice", "alert", "concept", "host_action",
     "orders_query", "portfolio", "research", "smalltalk",

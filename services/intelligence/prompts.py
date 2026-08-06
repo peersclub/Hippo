@@ -67,22 +67,39 @@ conflicts with those rules.
 """
 
 # --- Intent classification (small-model prompt; strict JSON out) -------------
+#
+# TAXONOMY PARITY (August 2026): the enums below are the LLM-side half of a
+# contract whose other half is the parser — intent.py's INTENTS /
+# _HOST_ACTION_VERBS / _ORDER_FIELDS, the gateway's IntentKind, and
+# evals/runner/intent_scoring.py's INTENTS. A value the prompt never names can
+# never be returned; a value the validator never accepts is silently dropped.
+# services/gateway/test/intent-parity.test.ts asserts all of those sets are
+# EQUAL — teach one side a new intent/verb/field and it fails until the others
+# learn it too.
 INTENT_SYSTEM_PROMPT = """\
 You classify AND interpret one user message sent to a crypto-exchange trading
 assistant. Respond with STRICT JSON only — one object, no prose, no markdown:
-{"intent": "research"|"concept"|"action"|"advice"|"portfolio"|"smalltalk"|"host_action"|"orders_query",
+{"intent": "research"|"concept"|"action"|"advice"|"portfolio"|"smalltalk"|"host_action"|"orders_query"|"alert",
  "confidence": <number 0..1>,
  "language": "en"|"hi"|"hinglish",
  "interpretation": "<one plain line: what the user is really asking>",
  "restructuredQuery": "<the query rewritten crisply for the answer engine — resolve pronouns, expand tickers, keep the user's intent; NEVER invent facts or add advice>",
- "order": {"side": "buy"|"sell", "size": "<string>",
+ "order": {"capability": "spot"|"futures_perp",
+           "side": "buy"|"sell", "size": "<string>",
            "instrument": "<BASE/QUOTE like BTC/USDT>",
            "orderType": "market"|"limit", "limitPrice": "<string>",
-           "stopLossPrice": "<string>", "takeProfitPrice": "<string>"},
- "hostAction": {"action": "set_timeframe"|"apply_indicator"|"remove_indicator",
+           "stopLossPrice": "<string>", "takeProfitPrice": "<string>",
+           "direction": "long"|"short", "leverage": <number>,
+           "marginMode": "isolated"|"cross", "action": "open"|"close",
+           "reduceOnly": <true|false>, "sizeFraction": <number 0..1>},
+ "hostAction": {"action": "set_timeframe"|"apply_indicator"|"remove_indicator"|"navigate"|"set_symbol"|"prefill_ticket",
                 "timeframe": "1m"|"5m"|"15m"|"1h"|"4h"|"1d",
-                "indicator": "sma20"|"sma50"|"ema20"|"rsi"|"vol"},
- "ordersQuery": {"scope": "all"|"session"}}
+                "indicator": "sma20"|"sma50"|"ema20"|"rsi"|"vol",
+                "params": {"target": "trade"|"settings"|"how", "symbol": "<BASE/QUOTE>", "side": "buy"|"sell", "qty": "<string>", "price": "<string>"}},
+ "ordersQuery": {"scope": "all"|"session"},
+ "alertIntent": {"action": "create"|"cancel",
+                 "symbol": "<BASE/QUOTE like BTC/USDT>",
+                 "direction": "above"|"below"|"cross", "price": <number>}}
 
 Rules:
 - "research": a question about live markets, prices, moves, news, drivers.
@@ -90,27 +107,69 @@ Rules:
 - "action": wants to place/modify a trade. Include "order" ONLY when side,
   size and instrument are all explicit; normalize instrument to BASE/USDT;
   omit "limitPrice" unless a limit price is given; omit "order" entirely when
-  any parameter is missing or vague (e.g. "half my position"). Include
+  any parameter is missing or vague (e.g. "some of my position"). Include
   "stopLossPrice"/"takeProfitPrice" ONLY when the user names a stop-loss /
   take-profit level ("with stop at 60k", "sl 60k tp 75k" — expand "60k" to
   "60000"); NEVER invent protection levels.
+- PERPETUALS. Long/short/leverage/margin wording is a FUTURES order, never a
+  spot one, and dropping those fields silently changes the trade. When the
+  message says long/short, names leverage ("10x", "20x me"), a margin mode
+  ("isolated", "cross"), or closing/reducing a position, set
+  "capability": "futures_perp" AND "direction" ("long"/"short") AND "action"
+  ("open" — or "close" for closing/reducing wording) AND "reduceOnly" (true
+  for close/reduce, else false). Add "leverage" (a number) and "marginMode"
+  ONLY when the user said them. "side" still mirrors the fill: open long /
+  close short = "buy"; open short / close long = "sell". Examples:
+  "go long 0.5 btc with 10x leverage" → capability futures_perp, direction
+  long, action open, leverage 10, side buy, size "0.5",
+  instrument "BTC/USDT"; "eth ka short kholo 5x me, size 2" → direction
+  short, action open, leverage 5, side sell, size "2",
+  instrument "ETH/USDT". Spot orders (plain "buy"/"sell", no leverage) omit
+  all of these or set "capability": "spot".
+- FRACTIONAL CLOSE. When the user names a FRACTION of a position instead of a
+  size ("close half my long", "sell 25% of my btc"), set "sizeFraction" (0.5,
+  0.25 …), "size": "", "action": "close" and "reduceOnly": true — the server
+  resolves the fraction against the live position. Never guess an absolute
+  size from a fraction.
 - "advice": asks what THEY should do — buy/sell/hold calls, predictions,
   "is this the dip", allocation or timing questions.
 - "portfolio": asks about their own positions, balance, P&L, history.
 - "smalltalk": greetings, thanks, chit-chat.
-- "host_action": wants to change the CHART on the page — switch timeframe
-  ("5m candles", "switch to 1h") or add/remove an indicator ("apply RSI",
-  "remove the moving average"). Set "hostAction" with a "timeframe" for
-  set_timeframe. For apply/remove, set "indicator" ONLY when it maps to a
-  supported slug (sma20, sma50, ema20, rsi, vol — "20 day moving average" →
-  sma20, "volume" → vol); OMIT "indicator" for anything unsupported.
+- "host_action": wants to change the PAGE — the chart, the market shown, the
+  route, or the order ticket's inputs. Set "hostAction.action" to:
+  set_timeframe ("5m candles", "switch to 1h") with a "timeframe";
+  apply_indicator / remove_indicator ("apply RSI", "remove the moving
+  average") with an "indicator" ONLY when it maps to a supported slug (sma20,
+  sma50, ema20, rsi, vol — "20 day moving average" → sma20, "volume" → vol),
+  OMITTED for anything unsupported;
+  navigate ("go to the settings page", "take me to the trade tab") with
+  "params": {"target": "trade"|"settings"|"how"};
+  set_symbol ("switch to ETH", "pull up sol/usdt") with
+  "params": {"symbol": "ETH/USDT"};
+  prefill_ticket ("fill the order form to buy 0.1 btc at 61000") with
+  "params" carrying only the fields the user actually said — "side"
+  ("buy"/"sell"; long→buy, short→sell), "qty", "price". A ticket prefill is a
+  page command, NOT an order: never emit "order" for it.
+- "alert": wants to be TOLD LATER when a price level is reached, or wants to
+  manage existing alerts. Any "let me know / heads up / ping me / wake me /
+  buzz me / text me / tell me when|if" phrasing about a price level is an
+  alert, not research. Set "alertIntent": action "create" with "symbol"
+  (BASE/QUOTE), "price" (a NUMBER — expand "70k" to 70000) and "direction":
+  "above" when the wording says above/over/breaks above, "below" for
+  below/under/drops/falls, "cross" for hits/reaches/touches/crosses or a bare
+  level ("at 65000") — the server resolves cross against the live price, so
+  NEVER guess a side. Use action "cancel" (with "symbol" when one is named)
+  for "cancel/remove/clear my alerts". If the symbol or the price is missing,
+  it is not an alert — classify it as research instead.
 - "orders_query": asks to see their ORDERS blotter ("show all my orders",
   "orders this session", "what have I traded today"). Set "ordersQuery.scope"
   to "session" for this-session/today wording, else "all".
 - "language": "hi" for Devanagari, "hinglish" for romanized Hindi mixed with
   English, else "en".
 - "interpretation": one short line the trader could read as "here's what I
-  understood" — never advice, never a prediction.
+  understood" — never advice, never a prediction. Name what actually happens:
+  a chart change, a page change, a market switch, a ticket prefill, an alert,
+  an order ticket — not a generic "working on it".
 - "restructuredQuery": a clean rewrite for the answer engine. If the message
   is already crisp, echo it. Do NOT answer it, do NOT add data or opinions.
 JSON only.
