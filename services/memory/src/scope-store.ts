@@ -16,15 +16,37 @@ export type MemoryDoc = { body: string; updatedAt: number }
 
 export const GLOBAL_ID = 'global'
 /** Bodies are curated by a super-admin, not user input — but bound the size
- * so a paste can't blow the prompt budget. */
+ * so a paste can't blow the prompt budget. Applies to the four editable prose
+ * documents (global / host / user note / session note), each of which is ONE
+ * layer of the composed block. */
 export const MAX_BODY = 8_000
+
+/**
+ * Cap for the composed snapshot, which is a different kind of value from a
+ * prose body: it is the AUDIT RECORD of the block that was actually sent to
+ * the model, not an input to the prompt budget. Clamping it to MAX_BODY made
+ * the record disagree with what the model received — and because the clamp
+ * slices the TAIL while composeMemory orders layers platform → venue → user →
+ * session, the layers lost were exactly the user/session ones an operator
+ * opens the inspector to read.
+ *
+ * The number: a composed block is at most four layers of MAX_BODY plus the
+ * scope labels, the persona line and the learned-fact lines — ~33k chars of
+ * structure. 64_000 is 8 × MAX_BODY, comfortably above that, so a real
+ * snapshot is never truncated, while an unbounded write still can't land.
+ * `memory_session.composed` is Postgres `text` (migration 010) with no
+ * declared length limit, so the column holds this with room to spare.
+ */
+export const MAX_COMPOSED = 64_000
 
 export function emptyDoc(): MemoryDoc {
   return { body: '', updatedAt: 0 }
 }
 
-function clampBody(body: string): string {
-  return body.length > MAX_BODY ? body.slice(0, MAX_BODY) : body
+/** The one clamp helper. Both backings call it with the SAME cap for the same
+ * write — that symmetry is the invariant `memory.test.ts` now enforces. */
+function clampTo(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) : value
 }
 
 /** A session's stored note + the composed-memory snapshot that was sent. */
@@ -157,7 +179,8 @@ export function mergeLearnedFacts(
   }
   // Return most-recent-first for a stable, meaningful read order.
   return facts.sort(
-    (a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt || a.type.localeCompare(b.type),
+    (a, b) =>
+      b.updatedAt - a.updatedAt || b.createdAt - a.createdAt || a.type.localeCompare(b.type),
   )
 }
 
@@ -211,14 +234,14 @@ export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
     return this.global
   }
   async setGlobal(body: string, now: number) {
-    this.global = { body: clampBody(body), updatedAt: now }
+    this.global = { body: clampTo(body, MAX_BODY), updatedAt: now }
     return this.global
   }
   async getHost(partnerId: string) {
     return this.host.get(partnerId) ?? emptyDoc()
   }
   async setHost(partnerId: string, body: string, now: number) {
-    const doc = { body: clampBody(body), updatedAt: now }
+    const doc = { body: clampTo(body, MAX_BODY), updatedAt: now }
     this.host.set(partnerId, doc)
     return doc
   }
@@ -226,7 +249,7 @@ export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
     return this.userNotes.get(this.key(partnerId, userId)) ?? emptyDoc()
   }
   async setUserNote(partnerId: string, userId: string, body: string, now: number) {
-    const doc = { body: clampBody(body), updatedAt: now }
+    const doc = { body: clampTo(body, MAX_BODY), updatedAt: now }
     this.userNotes.set(this.key(partnerId, userId), doc)
     return doc
   }
@@ -242,7 +265,13 @@ export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
     now: number,
   ) {
     const prev = this.sessions.get(sessionId) ?? emptySession()
-    this.sessions.set(sessionId, { ...prev, partnerId, userId, composed, updatedAt: now })
+    this.sessions.set(sessionId, {
+      ...prev,
+      partnerId,
+      userId,
+      composed: clampTo(composed, MAX_COMPOSED),
+      updatedAt: now,
+    })
   }
 
   private learned = new Map<string, LearnedFact[]>()
@@ -293,7 +322,7 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
       : emptyDoc()
   }
   async setGlobal(body: string, now: number): Promise<MemoryDoc> {
-    const clamped = clampBody(body)
+    const clamped = clampTo(body, MAX_BODY)
     await this.pool.query(
       `INSERT INTO memory_global (id, body, updated_at) VALUES ($1, $2, $3)
        ON CONFLICT (id) DO UPDATE SET body = $2, updated_at = $3`,
@@ -311,7 +340,7 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
       : emptyDoc()
   }
   async setHost(partnerId: string, body: string, now: number): Promise<MemoryDoc> {
-    const clamped = clampBody(body)
+    const clamped = clampTo(body, MAX_BODY)
     await this.pool.query(
       `INSERT INTO memory_host (partner_id, body, updated_at) VALUES ($1, $2, $3)
        ON CONFLICT (partner_id) DO UPDATE SET body = $2, updated_at = $3`,
@@ -334,7 +363,7 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
     body: string,
     now: number,
   ): Promise<MemoryDoc> {
-    const clamped = clampBody(body)
+    const clamped = clampTo(body, MAX_BODY)
     await this.pool.query(
       `INSERT INTO memory_user_notes (partner_id, user_id, body, updated_at) VALUES ($1, $2, $3, $4)
        ON CONFLICT (partner_id, user_id) DO UPDATE SET body = $3, updated_at = $4`,
@@ -369,7 +398,7 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
       `INSERT INTO memory_session (session_id, partner_id, user_id, composed, updated_at)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (session_id) DO UPDATE SET partner_id = $2, user_id = $3, composed = $4, updated_at = $5`,
-      [sessionId, partnerId, userId, clampBody(composed), now],
+      [sessionId, partnerId, userId, clampTo(composed, MAX_COMPOSED), now],
     )
   }
 
@@ -430,7 +459,11 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
     } finally {
       client.release()
     }
-    return this.getLearnedFacts(scope, ids)
+    // Read back against the SAME `now` the write used. Falling through to the
+    // wall clock here made this backing disagree with the in-memory twin for
+    // any injected timestamp: facts written at an older `now` were pruned out
+    // of the returned set even though they had just been persisted.
+    return this.getLearnedFacts(scope, ids, now)
   }
 
   async getLearnedFacts(

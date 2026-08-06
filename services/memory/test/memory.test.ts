@@ -426,13 +426,261 @@ describe('scope-memory documents (global / host / user note)', () => {
   })
 })
 
-describe('scope store clamps oversized bodies', () => {
-  it('truncates a body beyond MAX_BODY', async () => {
-    const { InMemoryScopeMemoryStore, MAX_BODY } = await import('../src/scope-store.js')
-    const store = new InMemoryScopeMemoryStore()
+/**
+ * The scope store's header promises "two backings, one surface": an in-memory
+ * Map for dev/tests and Postgres in production, behaving identically. Every
+ * test in this repo drives the in-memory twin, so a divergence in the Postgres
+ * backing is structurally invisible — which is exactly how `putComposed` came
+ * to clamp the composed snapshot to MAX_BODY on one side and store it whole on
+ * the other.
+ *
+ * This suite drives EVERY write method on the surface through BOTH backings and
+ * asserts they persist the same thing. The Postgres side runs against a stub
+ * pool that captures the SQL and its bound parameters (no new dependency, and
+ * the captured params are the actual bytes the column would receive).
+ */
+describe('scope-store parity — one surface, two backings', () => {
+  type Captured = { sql: string; params: readonly unknown[] }
+
+  /** Pulls the value bound to `table`.`column` out of a captured INSERT, by
+   * mapping the statement's column list onto its `$n` placeholders. */
+  function insertedValues(calls: readonly Captured[], table: string, column: string): string[] {
+    const out: string[] = []
+    for (const { sql, params } of calls) {
+      const m = /INSERT INTO\s+(\w+)\s*\(([^)]*)\)\s*VALUES\s*\(([^)]*)\)/is.exec(sql)
+      if (!m || m[1] !== table) continue
+      const columns = m[2].split(',').map((c) => c.trim())
+      const placeholders = m[3].split(',').map((p) => p.trim())
+      const at = columns.indexOf(column)
+      if (at === -1) continue
+      const n = Number(placeholders[at]?.replace('$', ''))
+      out.push(String(params[n - 1]))
+    }
+    return out
+  }
+
+  /** Statements the store issued against `table`, whatever the verb. */
+  function statementsFor(calls: readonly Captured[], table: string): Captured[] {
+    return calls.filter((c) => c.sql.includes(table))
+  }
+
+  /** Hand-rolled stub pg pool: records every statement + params and answers
+   * reads with an empty result set. Enough to observe what the Postgres backing
+   * WRITES, which is the thing that drifted. */
+  function stubPool() {
+    const calls: Captured[] = []
+    const query = async (sql: string, params: readonly unknown[] = []) => {
+      calls.push({ sql, params })
+      return { rows: [] as Record<string, unknown>[], rowCount: 0 }
+    }
+    const pool = {
+      query,
+      connect: async () => ({ query, release: () => {} }),
+    }
+    return { calls, pool }
+  }
+
+  async function bothBackings() {
+    const { InMemoryScopeMemoryStore, PostgresScopeMemoryStore } = await import(
+      '../src/scope-store.js'
+    )
+    const { calls, pool } = stubPool()
+    return {
+      memory: new InMemoryScopeMemoryStore(),
+      // The store only ever calls .query/.connect; the stub satisfies both.
+      postgres: new PostgresScopeMemoryStore(pool as unknown as never),
+      calls,
+    }
+  }
+
+  const NOW = 1_700_000_000_000
+  const IDS = { partnerId: 'pA', userId: 'u1' }
+
+  // Every write on ScopeMemoryStore that persists a string, with how to read
+  // that string back out of each backing. Adding a write to the interface
+  // without adding it here fails the exhaustiveness test below.
+  type ParityCase = {
+    method: string
+    /** Oversized on purpose: parity only matters where a clamp could apply. */
+    write: (store: {
+      setGlobal: (b: string, n: number) => Promise<unknown>
+      setHost: (p: string, b: string, n: number) => Promise<unknown>
+      setUserNote: (p: string, u: string, b: string, n: number) => Promise<unknown>
+      putComposed: (s: string, p: string, u: string, c: string, n: number) => Promise<unknown>
+      // biome-ignore lint/suspicious/noExplicitAny: structural call across both backings
+      upsertLearnedFacts: (...args: any[]) => Promise<unknown>
+    }) => Promise<unknown>
+    /** What the in-memory twin ended up holding. */
+    // biome-ignore lint/suspicious/noExplicitAny: reads differ per method
+    readMemory: (store: any) => Promise<string[]>
+    /** What the Postgres backing bound into its INSERT. */
+    readPostgres: (calls: readonly Captured[]) => string[]
+  }
+
+  const OVERSIZED = 8_000 * 3
+
+  const CASES: ParityCase[] = [
+    {
+      method: 'setGlobal',
+      write: (s) => s.setGlobal('g'.repeat(OVERSIZED), NOW),
+      readMemory: async (s) => [(await s.getGlobal()).body],
+      readPostgres: (c) => insertedValues(c, 'memory_global', 'body'),
+    },
+    {
+      method: 'setHost',
+      write: (s) => s.setHost('pA', 'h'.repeat(OVERSIZED), NOW),
+      readMemory: async (s) => [(await s.getHost('pA')).body],
+      readPostgres: (c) => insertedValues(c, 'memory_host', 'body'),
+    },
+    {
+      method: 'setUserNote',
+      write: (s) => s.setUserNote('pA', 'u1', 'n'.repeat(OVERSIZED), NOW),
+      readMemory: async (s) => [(await s.getUserNote('pA', 'u1')).body],
+      readPostgres: (c) => insertedValues(c, 'memory_user_notes', 'body'),
+    },
+    {
+      method: 'putComposed',
+      // The regression that started this: a real composed block is four layers
+      // deep, so it routinely exceeds a single layer's MAX_BODY.
+      write: (s) => s.putComposed('s1', 'pA', 'u1', 'c'.repeat(OVERSIZED), NOW),
+      readMemory: async (s) => [(await s.getSession('s1')).composed],
+      readPostgres: (c) => insertedValues(c, 'memory_session', 'composed'),
+    },
+    {
+      method: 'upsertLearnedFacts',
+      write: (s) =>
+        s.upsertLearnedFacts(
+          'user',
+          IDS,
+          [{ type: 't', value: 'v'.repeat(OVERSIZED), confidence: 1 }],
+          NOW,
+        ),
+      readMemory: async (s) =>
+        (await s.getLearnedFacts('user', IDS, NOW)).map((f: { value: string }) => f.value),
+      readPostgres: (c) => insertedValues(c, 'memory_learned_facts', 'fact_value'),
+    },
+  ]
+
+  it('the parity table covers every write method on the surface', async () => {
+    const { InMemoryScopeMemoryStore, PostgresScopeMemoryStore } = await import(
+      '../src/scope-store.js'
+    )
+    // The Postgres class carries no private helpers, so its prototype IS the
+    // surface. Both backings must implement all of it, and every write must be
+    // covered here — a new one shows up as a failure, not as silent drift.
+    const surface = Object.getOwnPropertyNames(PostgresScopeMemoryStore.prototype)
+      .filter((n) => n !== 'constructor')
+      .sort()
+    const reads = ['getGlobal', 'getHost', 'getLearnedFacts', 'getSession', 'getUserNote']
+    // clearLearnedFacts persists no string; it has its own parity test below.
+    const writes = [...CASES.map((c) => c.method), 'clearLearnedFacts']
+    expect(surface).toEqual([...reads, ...writes].sort())
+
+    const twin = new InMemoryScopeMemoryStore() as unknown as Record<string, unknown>
+    for (const method of surface) expect(typeof twin[method]).toBe('function')
+  })
+
+  it.each(
+    CASES.map((c) => [c.method, c] as const),
+  )('%s persists an identical payload in both backings', async (_name, testCase) => {
+    const { memory, postgres, calls } = await bothBackings()
+    await testCase.write(memory)
+    await testCase.write(postgres as unknown as Parameters<typeof testCase.write>[0])
+
+    const stored = await testCase.readMemory(memory)
+    const sent = testCase.readPostgres(calls)
+    // Length first — that is the invariant that actually broke.
+    expect(sent.map((v) => v.length)).toEqual(stored.map((v) => v.length))
+    expect(sent).toEqual(stored)
+  })
+
+  it('clearLearnedFacts targets the same scope keys in both backings', async () => {
+    const { memory, postgres, calls } = await bothBackings()
+    await memory.upsertLearnedFacts('user', IDS, [{ type: 't', value: 'v', confidence: 1 }], NOW)
+
+    expect(await memory.clearLearnedFacts('user', IDS)).toBe(1)
+    expect(await memory.getLearnedFacts('user', IDS, NOW)).toEqual([])
+
+    await postgres.clearLearnedFacts('user', IDS)
+    const [del] = statementsFor(calls, 'memory_learned_facts')
+    expect(del.sql).toMatch(/^DELETE FROM memory_learned_facts/)
+    expect(del.params).toEqual([IDS.partnerId, IDS.userId])
+
+    // Session scope keys on the session id alone, same on both sides.
+    const session = await bothBackings()
+    await session.memory.upsertLearnedFacts(
+      'session',
+      { sessionId: 's1' },
+      [{ type: 't', value: 'v', confidence: 1 }],
+      NOW,
+    )
+    expect(await session.memory.clearLearnedFacts('session', { sessionId: 's1' })).toBe(1)
+    await session.postgres.clearLearnedFacts('session', { sessionId: 's1' })
+    const [sessionDel] = statementsFor(session.calls, 'memory_learned_facts')
+    expect(sessionDel.params).toEqual(['s1'])
+  })
+
+  it('keeps the composed snapshot whole past MAX_BODY — it is an audit record', async () => {
+    const { MAX_BODY, MAX_COMPOSED } = await import('../src/scope-store.js')
+    const { memory, postgres, calls } = await bothBackings()
+    // A four-layer composed block: what composeMemory actually produces at the
+    // limit. Clamping this to MAX_BODY dropped the TAIL, i.e. the user and
+    // session layers — precisely what an operator opens the inspector to read.
+    const composed = ['PLATFORM', 'VENUE', 'USER', 'SESSION']
+      .map((label) => `[${label}]\n${label[0].repeat(MAX_BODY)}`)
+      .join('\n\n')
+    expect(composed.length).toBeGreaterThan(MAX_BODY)
+    expect(composed.length).toBeLessThanOrEqual(MAX_COMPOSED)
+
+    await memory.putComposed('s1', 'pA', 'u1', composed, NOW)
+    await postgres.putComposed('s1', 'pA', 'u1', composed, NOW)
+
+    expect((await memory.getSession('s1')).composed).toBe(composed)
+    expect(insertedValues(calls, 'memory_session', 'composed')).toEqual([composed])
+    // The tail — the layers the old clamp ate — is intact.
+    expect((await memory.getSession('s1')).composed).toContain('[SESSION]')
+  })
+
+  it('clamps the composed snapshot at MAX_COMPOSED in both backings', async () => {
+    const { MAX_COMPOSED } = await import('../src/scope-store.js')
+    const { memory, postgres, calls } = await bothBackings()
+    const huge = 'z'.repeat(MAX_COMPOSED + 500)
+    await memory.putComposed('s1', 'pA', 'u1', huge, NOW)
+    await postgres.putComposed('s1', 'pA', 'u1', huge, NOW)
+
+    expect((await memory.getSession('s1')).composed.length).toBe(MAX_COMPOSED)
+    expect(insertedValues(calls, 'memory_session', 'composed')[0].length).toBe(MAX_COMPOSED)
+  })
+
+  it('still clamps prose bodies at MAX_BODY in both backings', async () => {
+    const { MAX_BODY } = await import('../src/scope-store.js')
+    const { memory, postgres, calls } = await bothBackings()
     const huge = 'x'.repeat(MAX_BODY + 500)
-    const doc = await store.setGlobal(huge, 1)
-    expect(doc.body.length).toBe(MAX_BODY)
+
+    expect((await memory.setGlobal(huge, NOW)).body.length).toBe(MAX_BODY)
+    expect((await memory.setHost('pA', huge, NOW)).body.length).toBe(MAX_BODY)
+    expect((await memory.setUserNote('pA', 'u1', huge, NOW)).body.length).toBe(MAX_BODY)
+
+    await postgres.setGlobal(huge, NOW)
+    await postgres.setHost('pA', huge, NOW)
+    await postgres.setUserNote('pA', 'u1', huge, NOW)
+    for (const [table] of [['memory_global'], ['memory_host'], ['memory_user_notes']]) {
+      expect(insertedValues(calls, table, 'body')[0].length).toBe(MAX_BODY)
+    }
+  })
+
+  it('reads learned facts back against the same `now` the upsert wrote with', async () => {
+    const { LEARNED_FACT_TTL_MS } = await import('../src/scope-store.js')
+    const { postgres, calls } = await bothBackings()
+    // The in-memory twin filters its return with the injected `now`; the
+    // Postgres backing used to fall through to the wall clock, so a write at an
+    // older timestamp came back empty. The read-back's TTL cutoff pins it.
+    const past = Date.now() - LEARNED_FACT_TTL_MS * 2
+    await postgres.upsertLearnedFacts('user', IDS, [{ type: 't', value: 'v', confidence: 1 }], past)
+    const select = statementsFor(calls, 'memory_learned_facts').find((c) =>
+      c.sql.startsWith('SELECT'),
+    )
+    expect(select?.params).toEqual([IDS.partnerId, IDS.userId, past - LEARNED_FACT_TTL_MS])
   })
 })
 
@@ -462,8 +710,18 @@ describe('learned facts — provenance-tracked auto-learning', () => {
   it('re-observing the same (type,value) updates confidence in place, no duplicate', async () => {
     const { InMemoryScopeMemoryStore } = await import('../src/scope-store.js')
     const store = new InMemoryScopeMemoryStore()
-    await store.upsertLearnedFacts('user', ids, [{ type: 'risk', value: 'low', confidence: 0.5 }], 1)
-    await store.upsertLearnedFacts('user', ids, [{ type: 'risk', value: 'low', confidence: 0.8 }], 2)
+    await store.upsertLearnedFacts(
+      'user',
+      ids,
+      [{ type: 'risk', value: 'low', confidence: 0.5 }],
+      1,
+    )
+    await store.upsertLearnedFacts(
+      'user',
+      ids,
+      [{ type: 'risk', value: 'low', confidence: 0.8 }],
+      2,
+    )
     const facts = await store.getLearnedFacts('user', ids, 2)
     expect(facts).toHaveLength(1)
     expect(facts[0].confidence).toBeCloseTo(0.8)
@@ -601,7 +859,11 @@ describe('learned-facts HTTP surface', () => {
     expect(denied.statusCode).toBe(401)
     expect(denied.body).not.toContain('risk')
 
-    const got = await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u1/facts', headers: auth })
+    const got = await app.inject({
+      method: 'GET',
+      url: '/v1/scope/user/pA/u1/facts',
+      headers: auth,
+    })
     expect(got.statusCode).toBe(200)
     expect(got.json()).toHaveLength(1)
     expect(got.json()[0]).toMatchObject({ type: 'risk', value: 'low', source: 'auto' })
@@ -613,7 +875,9 @@ describe('learned-facts HTTP surface', () => {
     })
     expect(del.json()).toEqual({ cleared: 1 })
     expect(
-      (await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u1/facts', headers: auth })).json(),
+      (
+        await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u1/facts', headers: auth })
+      ).json(),
     ).toEqual([])
     await app.close()
   })
@@ -629,9 +893,9 @@ describe('learned-facts HTTP surface', () => {
     })
     expect(empty.statusCode).toBe(200)
     expect(empty.json()).toEqual([])
-    expect((await app.inject({ method: 'GET', url: '/v1/scope/session/s1/facts' })).statusCode).toBe(
-      401,
-    )
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/scope/session/s1/facts' })).statusCode,
+    ).toBe(401)
     await app.close()
   })
 
@@ -659,8 +923,17 @@ describe('learned-facts HTTP surface', () => {
       },
     })
     expect(put.statusCode).toBe(200)
-    const got = await app.inject({ method: 'GET', url: '/v1/scope/session/s1/facts', headers: auth })
-    expect(got.json().map((f: { value: string }) => f.value).sort()).toEqual(['BTC', 'concise'])
+    const got = await app.inject({
+      method: 'GET',
+      url: '/v1/scope/session/s1/facts',
+      headers: auth,
+    })
+    expect(
+      got
+        .json()
+        .map((f: { value: string }) => f.value)
+        .sort(),
+    ).toEqual(['BTC', 'concise'])
 
     // Malformed entries are dropped, not fatal (fire-and-forget must not 500).
     const junk = await app.inject({

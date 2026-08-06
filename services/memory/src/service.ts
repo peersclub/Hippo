@@ -22,6 +22,7 @@ import {
   InMemoryScopeMemoryStore,
   type LearnedFactInput,
   MAX_BODY,
+  MAX_COMPOSED,
   type ScopeMemoryStore,
 } from './scope-store.js'
 import {
@@ -47,7 +48,8 @@ function parseFactInputs(raw: unknown): LearnedFactInput[] {
     if (typeof r.type !== 'string' || typeof r.value !== 'string') continue
     if (typeof r.confidence !== 'number' || !Number.isFinite(r.confidence)) continue
     const fact: LearnedFactInput = { type: r.type, value: r.value, confidence: r.confidence }
-    if (typeof r.source === 'string' && FACT_SOURCES.has(r.source)) fact.source = r.source as FactSource
+    if (typeof r.source === 'string' && FACT_SOURCES.has(r.source))
+      fact.source = r.source as FactSource
     out.push(fact)
   }
   return out
@@ -303,6 +305,10 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     service: 'memory',
     personas: await store.size(),
     maxBody: MAX_BODY,
+    // The composed snapshot is an audit record, not a prompt layer, so it has
+    // its own (much larger) cap — published so the inspector can say honestly
+    // whether a snapshot it is showing was truncated.
+    maxComposed: MAX_COMPOSED,
   }))
 
   return app
