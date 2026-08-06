@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AssetworksVenueAdapter } from '../src/assetworks-venue.js'
-import type { LifecycleEvent, PrepareRequest } from '../src/types.js'
+import type { FuturesPerpPlan, LifecycleEvent, PrepareRequest } from '../src/types.js'
 
 const CREDS = {
   apiKey: 'aw-key',
@@ -28,6 +28,10 @@ function makeFetch(opts: {
   /** Terminal status returned by /orders/status once the order leaves the book
    *  (50 = CANCELED, 20 = SETTLED). Default 20 keeps the historical fill path. */
   terminalStatus?: number
+  /** When set, the host serves /v1/capabilities advertising this perp leverage
+   *  bound. Omit it and the endpoint 404s, so the adapter's OFFLINE fallback
+   *  capabilities are what get exercised. */
+  advertisedMaxLeverage?: number
 }) {
   const openSequence = [...(opts.openSequence ?? [])]
   const handoffStates = [...(opts.handoffStates ?? ['placed'])]
@@ -44,6 +48,23 @@ function makeFetch(opts: {
       return new Response(JSON.stringify({ confirmSurface: opts.surface ?? 'api' }), {
         status: 200,
       })
+    if (u.endsWith('/v1/capabilities')) {
+      if (opts.advertisedMaxLeverage === undefined)
+        return new Response('not found', { status: 404 })
+      return new Response(
+        JSON.stringify({
+          capabilities: {
+            spot: { protectiveExits: true },
+            futures_perp: {
+              maxLeverage: opts.advertisedMaxLeverage,
+              marginModes: ['isolated', 'cross'],
+              protectiveExits: true,
+            },
+          },
+        }),
+        { status: 200 },
+      )
+    }
     if (u.endsWith('/api/v1/trade/orders')) {
       // The signature must be present and the body byte-identical to what was signed.
       const headers = (init?.headers ?? {}) as Record<string, string>
@@ -416,5 +437,77 @@ describe('AssetworksVenueAdapter', () => {
         takeProfitPrice: '70000',
       }),
     ).rejects.toThrow(/buy orders only/i)
+  })
+})
+
+/**
+ * The leverage bound must be the one capabilities() ADVERTISES, never a second
+ * hardcoded number. The adapter used to reject `leverage > 50` outright while
+ * capabilities() served the host's live maxLeverage: raise the host to 100, ask
+ * for 75, and the adapter threw → seam 502 → the gateway offered the trader a
+ * "Try again" that could never succeed.
+ *
+ * Why the existing suite never caught it: every other perp case here uses
+ * leverage 5 or 10, both comfortably under the hardcoded 50, so the advertised
+ * and enforced bounds were never asked to disagree.
+ */
+describe('AssetworksVenueAdapter — leverage bound follows the advertised capability', () => {
+  const perpPlan = (leverage: number): FuturesPerpPlan => ({
+    capability: 'futures_perp',
+    partnerId: 'p',
+    userId: 'u1',
+    instrument: 'BTC/USDT',
+    direction: 'long',
+    action: 'open',
+    leverage,
+    marginMode: 'isolated',
+    size: '0.5',
+    reduceOnly: false,
+    orderType: 'market',
+  })
+
+  const adapterFor = (advertisedMaxLeverage?: number) =>
+    new AssetworksVenueAdapter({
+      ...CREDS,
+      fetchImpl: makeFetch({
+        surface: 'api',
+        openSequence: [[]],
+        ...(advertisedMaxLeverage !== undefined ? { advertisedMaxLeverage } : {}),
+      }) as unknown as typeof fetch,
+    })
+
+  it('host advertising 100× accepts 75× and rejects 101× with the real bound in the message', async () => {
+    const adapter = adapterFor(100)
+    expect((await adapter.capabilities()).futures_perp?.maxLeverage).toBe(100)
+
+    // 75× is inside what the host advertises — the old hardcoded `> 50` threw here.
+    const ticket = await adapter.prepareOrder(perpPlan(75))
+    expect(ticket.sideLabel).toContain('75×')
+    expect(ticket.rows.find((r) => r.label === 'Leverage')?.value).toBe('75×')
+
+    // Over the advertised bound: rejected, and the copy names the number the
+    // trader can actually use rather than a stale 50.
+    await expect(adapter.prepareOrder(perpPlan(101))).rejects.toThrow(/100/)
+    await expect(adapter.prepareOrder(perpPlan(101))).rejects.toThrow('venue max 100×')
+  })
+
+  it('host advertising 10× rejects 40× — the bound follows the host DOWN as well as up', async () => {
+    const adapter = adapterFor(10)
+    expect((await adapter.capabilities()).futures_perp?.maxLeverage).toBe(10)
+    await expect(adapter.prepareOrder(perpPlan(40))).rejects.toThrow('venue max 10×')
+    await expect(adapter.prepareOrder(perpPlan(10))).resolves.toBeTruthy()
+  })
+
+  it('offline: the enforced bound IS the fallback capabilities constant — one number, not two', async () => {
+    // /v1/capabilities 404s, so capabilities() serves the offline fallback and
+    // prepareFutures must enforce exactly that value.
+    const adapter = adapterFor()
+    const fallback = (await adapter.capabilities()).futures_perp?.maxLeverage
+    expect(fallback).toBe(50)
+    if (fallback === undefined) throw new Error('fallback capabilities must advertise maxLeverage')
+    await expect(adapter.prepareOrder(perpPlan(fallback))).resolves.toBeTruthy()
+    await expect(adapter.prepareOrder(perpPlan(fallback + 1))).rejects.toThrow(
+      `venue max ${fallback}×`,
+    )
   })
 })

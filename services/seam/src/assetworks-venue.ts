@@ -64,6 +64,17 @@ const MARKET_DATA_URL = process.env.MARKET_DATA_URL ?? 'http://localhost:8790'
 const HOST_TIMEOUT_MS = 5_000
 const POLL_WARN_INTERVAL_MS = 30_000
 
+/**
+ * The leverage bound the OFFLINE capabilities fallback advertises. It is the
+ * only hardcoded leverage number in this adapter: prepareFutures() reads its
+ * bound from capabilities() (which is live from the host when reachable, this
+ * constant when not), so the advertised max and the enforced max can never
+ * diverge. Raise the host's maxLeverage and the adapter follows it — the old
+ * hardcoded `> 50` rejection told traders to retry an order that could never
+ * succeed.
+ */
+const FALLBACK_MAX_LEVERAGE = 50
+
 const toPairName = (instrument: string): string => instrument.replace('/', '-').toUpperCase()
 const formatPrice = (n: number): string =>
   n >= 1000
@@ -268,7 +279,11 @@ export class AssetworksVenueAdapter implements VenueAdapter {
     }
     return {
       spot: { protectiveExits: true },
-      futures_perp: { maxLeverage: 50, marginModes: ['isolated', 'cross'], protectiveExits: true },
+      futures_perp: {
+        maxLeverage: FALLBACK_MAX_LEVERAGE,
+        marginModes: ['isolated', 'cross'],
+        protectiveExits: true,
+      },
     }
   }
 
@@ -287,8 +302,15 @@ export class AssetworksVenueAdapter implements VenueAdapter {
   private async prepareFutures(plan: FuturesPerpPlan): Promise<PreparedTicket> {
     const sizeNum = Number(plan.size)
     if (!Number.isFinite(sizeNum) || sizeNum <= 0) throw new Error('invalid order size')
-    if (!Number.isFinite(plan.leverage) || plan.leverage < 1 || plan.leverage > 50)
-      throw new Error('invalid leverage (venue max 50×)')
+    // Enforce the bound the venue ADVERTISES (live from the host, or the
+    // offline fallback) — never a second, hardcoded one. A hardcoded bound
+    // below the advertised max means capabilities() offers leverage the
+    // adapter then refuses, and the trader is handed a "Try again" that can
+    // never succeed.
+    const maxLeverage =
+      (await this.capabilities()).futures_perp?.maxLeverage ?? FALLBACK_MAX_LEVERAGE
+    if (!Number.isFinite(plan.leverage) || plan.leverage < 1 || plan.leverage > maxLeverage)
+      throw new Error(`invalid leverage (venue max ${maxLeverage}×)`)
     const isLimit = plan.orderType === 'limit'
     const entry = isLimit ? Number(plan.limitPrice) : await this.quote(plan.instrument)
     if (!Number.isFinite(entry) || entry <= 0) throw new Error('invalid price')

@@ -364,10 +364,28 @@ export function buildService(
     }
   }
 
+  // Legacy (pre-capability) prepare — an untagged PrepareRequest is ALWAYS a
+  // spot order, so it carries the same capability gate as /v1/prepare-order
+  // under a fixed 'spot' capability. Without it the gateway (which routes every
+  // plain spot order here) could place spot on a venue that never advertised
+  // spot. Both wires must gate; see the route-parity test in capability.test.ts.
   app.post('/v1/prepare', async (req, reply) => {
     if (!internalGuard(req, reply)) return reply
     const parsed = parsePrepare(req.body)
     if (parsed === null) return reply.code(400).send({ error: 'invalid prepare request' })
+    // parsePrepare has no protective-exit fields, so a request that carries
+    // them here would be silently stripped of the trader's protection — the one
+    // unacceptable outcome. Refuse loudly and name the wire that does carry
+    // them (which is where the gateway already routes protected spot).
+    const rawBody = req.body as Record<string, unknown>
+    if (rawBody.stopLossPrice !== undefined || rawBody.takeProfitPrice !== undefined)
+      return reply.code(400).send({
+        error:
+          'attached stop-loss/take-profit is not carried by /v1/prepare — use /v1/prepare-order',
+      })
+    const caps = await adapter.capabilities()
+    if (caps.spot === undefined)
+      return reply.code(422).send({ error: `capability 'spot' not supported on this venue` })
     try {
       const ticket = await adapter.prepare(parsed)
       record({
