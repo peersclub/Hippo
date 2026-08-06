@@ -7,14 +7,21 @@
  *   POST /v1/partners/:id/suspend|activate|plan
  *   GET/POST         /v1/plans               PATCH/DELETE /v1/plans/:id
  *   GET /v1/users    POST /v1/users/:partnerId/:userId/block|unblock
- *   GET /v1/memory   GET/PUT /v1/memory/:partnerId/:userId
- *   POST /v1/memory/:partnerId/:userId/clear DELETE .../purge
+ *   GET/DELETE /v1/memory                    (DELETE = bulk partner purge)
+ *   GET/PUT/DELETE /v1/memory/:partnerId/:userId  (DELETE = hard purge)
+ *   POST /v1/memory/:partnerId/:userId/clear
  *   GET/DELETE /v1/learned-facts/user/:partnerId/:userId
  *   GET /v1/learned-facts/session/:sessionId
  *   GET /v1/metrics  GET /v1/audit           GET /health
  *   GET /v1/tech/telemetry (gateway diagnostics + intelligence health)
  *   GET /v1/intent-signals[/export] (implicit misunderstanding signals; the
  *       export answers JSONL in the eval harness's row shape)
+ *
+ * That route list is not decoration: admin.test.ts parses it and asserts the
+ * router actually serves every path named above. It once advertised a
+ * single-persona GET that was never registered, and the panel worked around
+ * the gap by scanning page one of the list — which reported "no memory held"
+ * for anyone past row 50. A docblock that can lie is a bug waiting to ship.
  *
  * Memory data stays owned by services/memory — this service proxies its
  * /admin surface with the internal token. Every mutating route writes one
@@ -584,6 +591,35 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       const qs = new URLSearchParams(req.query).toString()
       const res = await memoryFetch(`/admin/personas${qs ? `?${qs}` : ''}`)
       return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'memory service unreachable' })
+    }
+  })
+
+  // One persona, by id. The detail view needs a direct answer: paging the
+  // list until the id turns up reports "no memory held" for anyone past the
+  // first page, and "we hold nothing" is the one answer a deletion request
+  // must never get wrong. Answers the same {partnerId,userId,persona} row
+  // shape the list returns, so callers can treat the two identically.
+  app.get<{ Params: UserParams }>('/v1/memory/:partnerId/:userId', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    const { partnerId, userId } = req.params
+    try {
+      const res = await memoryFetch(
+        `/v1/persona/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
+      )
+      const body = await res.json()
+      if (!res.ok) return reply.code(res.status).send(body)
+      // The memory service answers a *default* persona for keys it has never
+      // stored, and a default is stamped updatedAt 0. Report that absence as
+      // a 404 rather than a persona-shaped 200 that reads as real emptiness.
+      const persona = body as { updatedAt?: number } | null
+      if (!persona?.updatedAt) {
+        return reply.code(404).send({ error: 'no memory held for this user' })
+      }
+      void record(op, 'memory.view', `${partnerId}/${userId}`)
+      return { partnerId, userId, persona }
     } catch {
       return reply.code(502).send({ error: 'memory service unreachable' })
     }

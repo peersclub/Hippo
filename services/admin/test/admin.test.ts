@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import {
   InMemoryAuditStore,
   InMemoryOperatorStore,
@@ -307,6 +308,7 @@ describe('users + memory proxy', () => {
 
     for (const [method, url, payload] of [
       ['GET', '/v1/memory', undefined],
+      ['GET', '/v1/memory/koinbx-dev/u1', undefined],
       ['PUT', '/v1/memory/koinbx-dev/u1', { experienceLevel: 'pro' }],
       ['POST', '/v1/memory/koinbx-dev/u1/clear', undefined],
       ['DELETE', '/v1/memory/koinbx-dev/u1', undefined],
@@ -341,6 +343,285 @@ describe('users + memory proxy', () => {
     expect(res.statusCode).toBe(400)
     expect(called).toBe(false)
     await app.close()
+  })
+})
+
+// ── single-persona lookup ──────────────────────────────────────────────────
+// The panel's user-detail view answers "what memory do we hold on this
+// person" — the question a deletion request turns up with. It used to answer
+// it by fetching page one of /v1/memory and scanning, so anyone past row 50
+// came back as "no memory held", with the Clear/Purge buttons hidden.
+
+type FakePersona = {
+  optIn: boolean
+  experienceLevel: string | null
+  followedAssets: string[]
+  openThreads: unknown[]
+  learnOptOut: boolean
+  updatedAt: number
+}
+
+/** What services/memory answers for a key it has never stored — note the
+ * updatedAt 0 sentinel, which is what tells absence from a real empty row. */
+const DEFAULT_PERSONA: FakePersona = {
+  optIn: false,
+  experienceLevel: null,
+  followedAssets: [],
+  openThreads: [],
+  learnOptOut: false,
+  updatedAt: 0,
+}
+
+/**
+ * Stand-in for services/memory across the two routes the admin proxy touches,
+ * faithful in the parts this bug lives in: /admin/personas orders by
+ * updatedAt DESC and caps at 50 rows, and /v1/persona/:p/:u answers a default
+ * persona (never a 404) for keys it has never stored.
+ */
+function fakeMemory(personas: Map<string, FakePersona>) {
+  const calls: { path: string; token: string | null }[] = []
+  const fetchImpl = (async (input: unknown, init?: RequestInit) => {
+    const url = new URL(String(input))
+    calls.push({
+      path: url.pathname + url.search,
+      token: new Headers(init?.headers).get('x-hippo-internal-token'),
+    })
+
+    const single = /^\/v1\/persona\/([^/]+)\/([^/]+)$/.exec(url.pathname)
+    if (single) {
+      const [, partner = '', user = ''] = single
+      const key = `${decodeURIComponent(partner)}:${decodeURIComponent(user)}`
+      return new Response(JSON.stringify(personas.get(key) ?? DEFAULT_PERSONA), { status: 200 })
+    }
+
+    if (url.pathname === '/admin/personas') {
+      const partnerId = url.searchParams.get('partnerId')
+      const offset = Number(url.searchParams.get('offset') ?? 0) || 0
+      const limit = Math.min(Number(url.searchParams.get('limit') ?? 50) || 50, 200)
+      const all = [...personas]
+        .map(([key, persona]) => ({
+          partnerId: key.slice(0, key.indexOf(':')),
+          userId: key.slice(key.indexOf(':') + 1),
+          persona,
+        }))
+        .filter((row) => !partnerId || row.partnerId === partnerId)
+        .sort((a, b) => b.persona.updatedAt - a.persona.updatedAt)
+      return new Response(
+        JSON.stringify({ rows: all.slice(offset, offset + limit), total: all.length }),
+        { status: 200 },
+      )
+    }
+
+    return new Response('{"error":"not found"}', { status: 404 })
+  }) as typeof fetch
+  return { fetchImpl, calls }
+}
+
+/** 60 personas for one partner, newest first — u1 at the top, u60 at the
+ * bottom, so u55 sits well past the list's 50-row first page. */
+function sixtyPersonas(partnerId = 'koinbx-dev') {
+  const personas = new Map<string, FakePersona>()
+  for (let i = 1; i <= 60; i++) {
+    personas.set(`${partnerId}:u${i}`, {
+      ...DEFAULT_PERSONA,
+      optIn: true,
+      experienceLevel: 'pro',
+      followedAssets: [`SYM${i}`],
+      updatedAt: 1_800_000_000_000 - i,
+    })
+  }
+  return personas
+}
+
+describe('single-persona lookup (GET /v1/memory/:partnerId/:userId)', () => {
+  it('answers the 55th of 60 personas — the one page one cannot see', async () => {
+    const personas = sixtyPersonas()
+    const { fetchImpl, calls } = fakeMemory(personas)
+    const { app } = await testAdmin({ fetchImpl, memoryUrl: 'http://mem', internalToken: 'itok' })
+    const cookie = await login(app)
+
+    // The scan the panel used to do: u55 is simply not in the first page.
+    const page = await app.inject({
+      method: 'GET',
+      url: '/v1/memory?partnerId=koinbx-dev',
+      headers: { cookie },
+    })
+    const rows = page.json().rows as { userId: string }[]
+    expect(rows).toHaveLength(50)
+    expect(page.json().total).toBe(60)
+    expect(rows.some((r) => r.userId === 'u55')).toBe(false)
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/memory/koinbx-dev/u55',
+      headers: { cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({
+      partnerId: 'koinbx-dev',
+      userId: 'u55',
+      persona: personas.get('koinbx-dev:u55'),
+    })
+
+    // Fetched by id, not paged for — and with the internal token attached,
+    // same discipline as its neighbours.
+    const lookup = calls.at(-1)
+    expect(lookup?.path).toBe('/v1/persona/koinbx-dev/u55')
+    expect(lookup?.token).toBe('itok')
+    await app.close()
+  })
+
+  it('is operator-gated: 401 unauthenticated, and memory is never touched', async () => {
+    const { fetchImpl, calls } = fakeMemory(sixtyPersonas())
+    const { app } = await testAdmin({ fetchImpl, memoryUrl: 'http://mem' })
+    const res = await app.inject({ method: 'GET', url: '/v1/memory/koinbx-dev/u55' })
+    expect(res.statusCode).toBe(401)
+    expect(res.json().error).toBe('not signed in')
+    expect(calls).toEqual([])
+    await app.close()
+  })
+
+  it('404s honestly for a key memory has never stored, including cross-partner', async () => {
+    const { fetchImpl } = fakeMemory(sixtyPersonas())
+    const { app } = await testAdmin({ fetchImpl, memoryUrl: 'http://mem' })
+    const cookie = await login(app)
+
+    // The memory service answers a default persona here, not a 404. Passing
+    // that through as a 200 would read as "we hold an empty record" — the
+    // wrong answer to give someone asking us to delete their data.
+    for (const url of ['/v1/memory/koinbx-dev/ghost', '/v1/memory/other-venue/u55']) {
+      const res = await app.inject({ method: 'GET', url, headers: { cookie } })
+      expect(res.statusCode, url).toBe(404)
+      expect(res.json().error, url).toBe('no memory held for this user')
+    }
+    await app.close()
+  })
+})
+
+// ── the docblock is a contract, not a comment ──────────────────────────────
+// service.ts opens with a route list. It advertised a single-persona GET that
+// was never registered, and that gap is what pushed the panel into scanning
+// page one. Parse the list and hold the router to it.
+
+const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
+
+/**
+ * Expand one documented path token into the concrete paths it stands for:
+ *   "/v1/intent-signals[/export]"      → both, with and without the suffix
+ *   "/v1/partners/:id/suspend|activate" → one path per final-segment option
+ */
+function expandPath(token: string): string[] {
+  const optional = /^(.*)\[(\/[^\]]+)\]$/.exec(token)
+  if (optional) {
+    const [, base = '', suffix = ''] = optional
+    return [base, base + suffix]
+  }
+  const cut = token.lastIndexOf('/')
+  const last = token.slice(cut + 1)
+  if (!last.includes('|')) return [token]
+  return last.split('|').map((alt) => token.slice(0, cut + 1) + alt)
+}
+
+/**
+ * Pull the route list out of a source file's leading docblock.
+ *
+ * The notation the docblock may use, and nothing else:
+ *   METHOD[/METHOD…] <path> [| <path>…]   e.g. "GET/POST /v1/plans"
+ *   final-segment alternation             e.g. "/v1/x/:id/suspend|activate"
+ *   optional trailing segment             e.g. "/v1/intent-signals[/export]"
+ *   a trailing "(…)" is prose and is stripped
+ *
+ * A line whose FIRST token is not an HTTP method is prose and is skipped
+ * whole. Past that first method token every remaining token must be a path,
+ * a `|`, or another method — anything else is reported as `unparseable`, not
+ * quietly dropped. That strictness is the point: the docblock's old
+ * "DELETE .../purge" shorthand named a path that did not exist, and a lenient
+ * parser would have skipped past it exactly the way a reader's eye did.
+ */
+function documentedRoutes(source: string): {
+  routes: { method: string; url: string }[]
+  unparseable: string[]
+} {
+  const docblock = source.slice(0, source.indexOf('*/'))
+  const routes: { method: string; url: string }[] = []
+  const unparseable: string[] = []
+  const isMethods = (token: string) => token.split('/').every((m) => HTTP_METHODS.has(m))
+
+  for (const raw of docblock.split('\n')) {
+    const line = raw
+      .replace(/^\s*\/?\*+\s?/, '')
+      .replace(/\s*\(.*$/, '')
+      .trim()
+    const tokens = line.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0 || !isMethods(tokens[0] ?? '')) continue // prose
+
+    let methods: string[] = []
+    for (const token of tokens) {
+      if (token === '|') continue
+      if (isMethods(token)) {
+        methods = token.split('/')
+        continue
+      }
+      if (!token.startsWith('/')) {
+        unparseable.push(`${token}  (in: ${line})`)
+        continue
+      }
+      for (const url of expandPath(token)) {
+        for (const method of methods) routes.push({ method, url })
+      }
+    }
+  }
+  return { routes, unparseable }
+}
+
+describe('header docblock ↔ router', () => {
+  it('registers a route for every path the service docblock advertises', async () => {
+    const source = await readFile(new URL('../src/service.ts', import.meta.url), 'utf8')
+    const { routes, unparseable } = documentedRoutes(source)
+
+    // Guard the guard: a parser that quietly matches nothing proves nothing,
+    // and shorthand it cannot resolve must fail loudly rather than vanish.
+    expect(unparseable).toEqual([])
+    expect(routes.length).toBeGreaterThanOrEqual(25)
+    expect(routes).toContainEqual({ method: 'GET', url: '/v1/memory/:partnerId/:userId' })
+    expect(routes).toContainEqual({ method: 'DELETE', url: '/v1/memory/:partnerId/:userId' })
+    expect(routes).toContainEqual({ method: 'POST', url: '/v1/partners/:id/activate' })
+    expect(routes).toContainEqual({ method: 'GET', url: '/v1/intent-signals/export' })
+    expect(routes.every((r) => r.url.startsWith('/'))).toBe(true)
+
+    const { app } = await testAdmin()
+    await app.ready()
+    const missing = routes.filter((route) => !app.hasRoute(route))
+    expect(missing).toEqual([])
+    await app.close()
+  })
+
+  it('the parser itself: reads the notation, and refuses shorthand it cannot resolve', () => {
+    const { routes, unparseable } = documentedRoutes(`/**
+ * Header.
+ *
+ *   POST /a/login | /a/logout       GET /a/me
+ *   GET/POST /v1/things             PATCH /v1/things/:id
+ *   POST /v1/things/:id/open|close
+ *   GET /v1/signals[/export] (prose in parens is stripped)
+ *   DELETE .../purge
+ *
+ * Trailing prose mentioning GET and /paths must not become routes.
+ */`)
+    expect(routes).toEqual([
+      { method: 'POST', url: '/a/login' },
+      { method: 'POST', url: '/a/logout' },
+      { method: 'GET', url: '/a/me' },
+      { method: 'GET', url: '/v1/things' },
+      { method: 'POST', url: '/v1/things' },
+      { method: 'PATCH', url: '/v1/things/:id' },
+      { method: 'POST', url: '/v1/things/:id/open' },
+      { method: 'POST', url: '/v1/things/:id/close' },
+      { method: 'GET', url: '/v1/signals' },
+      { method: 'GET', url: '/v1/signals/export' },
+    ])
+    expect(unparseable).toHaveLength(1)
+    expect(unparseable[0]).toContain('.../purge')
   })
 })
 
@@ -1054,7 +1335,8 @@ describe('memory-config (super-admin scope documents)', () => {
     // proxied to the memory scope route with the internal token
     const call = seen.find((s) => s.url.endsWith('/v1/scope/global') && s.init?.method === 'PUT')
     expect(call).toBeTruthy()
-    expect((call?.init?.headers as Record<string, string>)['x-hippo-internal-token']).toBe('itok')
+    const headers = (call?.init?.headers ?? {}) as Record<string, string>
+    expect(headers['x-hippo-internal-token']).toBe('itok')
     // audited with the scope level
     const rows = await audit.list({})
     expect(
