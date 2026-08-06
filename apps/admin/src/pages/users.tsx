@@ -281,11 +281,18 @@ export function UserDetailPage({ partnerId, userId }: { partnerId: string; userI
       if (!(err instanceof ApiError && err.status === 404)) throw err
       setNotFoundUser(true)
     }
-    const page = await get<{ rows: PersonaRow[] }>(
-      `/v1/memory?partnerId=${encodeURIComponent(partnerId)}`,
-    )
-    const row = page.rows.find((r) => r.userId === userId)
-    setPersona(row?.persona ?? null)
+    // Ask for this one persona by id. Scanning the first page of /v1/memory
+    // used to answer "No memory held" for any user past row 50 — and hid the
+    // Clear/Purge buttons a deletion request needs.
+    try {
+      const row = await get<PersonaRow>(
+        `/v1/memory/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
+      )
+      setPersona(row.persona)
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 404)) throw err
+      setPersona(null)
+    }
   }, [partnerId, userId])
 
   async function setLevel(level: string) {
