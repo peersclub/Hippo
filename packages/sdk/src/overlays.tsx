@@ -261,28 +261,31 @@ export function OnboardingOverlay({
       >
         {step === 0 && (
           <>
-            <div class="obeyebrow">WELCOME TO</div>
-            <h2>The Future of Trading</h2>
-            <p>Hippo — your conversational trading agent, built for {venue}.</p>
+            <div class="obeyebrow">{t(locale.value, 'ob_welcome_to')}</div>
+            <h2>{t(locale.value, 'ob_future_title')}</h2>
+            <p>{t(locale.value, 'ob_tagline', { venue })}</p>
             <button type="button" class="obcta" onClick={() => store.next()}>
-              Show me more
+              {t(locale.value, 'ob_show_more')}
             </button>
           </>
         )}
         {step === 1 && (
           <>
             <span class="obmark">H</span>
-            <h2>Ask your market anything.</h2>
+            <h2>{t(locale.value, 'ob_ask_anything')}</h2>
             <Typewriter queries={HERO_QUERIES} />
             <button type="button" class="obcta" onClick={() => store.next()}>
-              Next
+              {t(locale.value, 'ob_next')}
             </button>
           </>
         )}
         {step === 2 && (
           <>
-            <h2>Your data, in plain words</h2>
+            <h2>{t(locale.value, 'ob_data_plain_words')}</h2>
             <div class="obrows">
+              {/* Row titles/bodies are counsel-owned consent copy, authored in
+                  one place and passed in — not catalog keys. See the note in
+                  i18n.ts. */}
               {rows.map((r) => (
                 <div class="obrow" key={r.id}>
                   <span class="obicon">{r.icon}</span>
@@ -306,7 +309,7 @@ export function OnboardingOverlay({
               ))}
             </div>
             <button type="button" class="obcta" onClick={() => store.next()}>
-              Next
+              {t(locale.value, 'ob_next')}
             </button>
           </>
         )}
@@ -476,10 +479,10 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
         <div class="shrbrand">
           <span class="shrmark">H</span>
           <b>Hippo</b>
-          <span class="on">on {venueName.value}</span>
+          <span class="on">{t(L, 'share_on', { venue: venueName.value })}</span>
           {/* Same gate as the in-thread brief card: LIVE is the server's
               flag, so a stale brief never exports as live. */}
-          {view.live && <span class="shrlive">● LIVE</span>}
+          {view.live && <span class="shrlive">● {t(L, 'badge_live')}</span>}
         </div>
         <h3>{view.headline}</h3>
         {/* The WHOLE brief travels — a caveat in paragraph 2 is part of the
