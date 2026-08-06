@@ -279,6 +279,23 @@ export const capabilitiesFixture: VenueCapabilities = {
   futures_perp: { maxLeverage: 20, marginModes: ['isolated', 'cross'], protectiveExits: true },
 }
 
+/**
+ * Every capability actually SENT to the seam, paired with the capabilities
+ * the venue stub advertised when it was sent. prepareTicket is a closure
+ * inside createOrchestrator and can't be spied on directly, so the seam call
+ * it makes is the faithful proxy: one entry per prepare, tagged with the plan
+ * capability (the legacy /v1/prepare wire is spot by construction).
+ *
+ * test/setup-capability-parity.ts drains this after EVERY test in the suite
+ * and fails any test that prepared a capability its venue doesn't advertise —
+ * so new order paths are covered by construction, not by remembering to add
+ * a case here.
+ */
+export const preparedCapabilityAudit: Array<{
+  capability: 'spot' | 'futures_perp' | 'options'
+  caps: VenueCapabilities
+}> = []
+
 /** Call-recording seam client with fixture responses. */
 export function stubSeam(
   caps: VenueCapabilities = capabilitiesFixture,
@@ -300,10 +317,16 @@ export function stubSeam(
     listOrdersCalls,
     async prepare(req) {
       prepares.push(req)
+      preparedCapabilityAudit.push({ capability: 'spot', caps })
       return { ...ticketFixture, side: req.side, instrument: req.instrument }
     },
     async prepareOrder(plan) {
       prepares.push(plan)
+      preparedCapabilityAudit.push({
+        capability:
+          (plan as { capability?: 'spot' | 'futures_perp' | 'options' }).capability ?? 'spot',
+        caps,
+      })
       const side = (plan as { direction?: string }).direction === 'short' ? 'sell' : 'buy'
       return {
         ...ticketFixture,

@@ -356,6 +356,20 @@ function pairOfPositionRow(display: string): string {
   return token.toUpperCase().replaceAll('-', '/').replaceAll('_', '/')
 }
 
+/** The leverage a venue POSITION display string advertises ("BTC-USDT 5x
+ * LONG" → 5). The trader's OPEN position is the only honest source of
+ * leverage for a close/reduce — the parser has no way to know it and
+ * defaults. null when the row carries none (spot rows, and venue adapters
+ * that don't advertise it), in which case the caller must NOT invent one and
+ * the capability backstop in prepareTicket bounds whatever it was given. */
+function leverageOfPositionRow(display: string): number | null {
+  const m = /(?:^|\s)(\d+(?:\.\d+)?)\s*x(?:\s|$)/i.exec(display)
+  const raw = m?.[1]
+  if (raw === undefined) return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 1 ? n : null
+}
+
 /** Resolved fractional size → order-size string, rounded to the venue's
  * 8-decimal display convention with trailing zeros trimmed (the sim venue's
  * maximumFractionDigits:8; real venues re-validate at prepare). Pure. */
@@ -818,6 +832,50 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   }
 
+  /**
+   * THE capability gate. Every order path funnels through prepareTicket —
+   * draft submit, close/reduce, fractional close, conversational amend — so
+   * the venue-truth check lives HERE, not in any one caller. Previously it
+   * sat in submitDraft, which covered the draft path only: a close carrying
+   * the parser's default leverage reached the seam unbounded and rendered a
+   * ticket quoting a leverage the venue would never accept.
+   *
+   * Fetched-vs-unreachable is the whole distinction: a caps object we
+   * actually READ is venue truth and is enforced; a seam we could not reach
+   * yields null and we forward, letting the seam's own (authoritative)
+   * validation decide rather than blocking the trader on our ignorance.
+   *
+   * Returns null when the order is cleared to proceed, or the rejection
+   * reason to emit.
+   */
+  async function capabilityRejection(
+    session: Session,
+    order: OrderIntent,
+    perpPlan: boolean,
+  ): Promise<string | null> {
+    let caps: VenueCapabilities | null = null
+    try {
+      caps = await seam.capabilities()
+    } catch (err) {
+      log.warn({ err }, 'seam capabilities unavailable at prepare — deferring to seam validation')
+    }
+    if (!caps) return null
+    const venue = session.partner.venueName
+    if (!perpPlan) {
+      return caps.spot === undefined ? `${venue} doesn't support spot orders.` : null
+    }
+    const perp = caps.futures_perp
+    if (!perp) return `${venue} doesn't support perpetual futures.`
+    const lev = order.leverage
+    if (lev !== undefined && (lev < 1 || lev > perp.maxLeverage)) {
+      return `Leverage ${lev}× is outside this venue's 1–${perp.maxLeverage}× range.`
+    }
+    if (order.marginMode && !perp.marginModes.includes(order.marginMode)) {
+      return `Margin mode "${order.marginMode}" isn't available here — use ${perp.marginModes.join(' or ')}.`
+    }
+    return null
+  }
+
   async function prepareTicket(
     session: Session,
     order: OrderIntent,
@@ -831,8 +889,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       ...(order.stopLossPrice !== undefined ? { stopLossPrice: order.stopLossPrice } : {}),
       ...(order.takeProfitPrice !== undefined ? { takeProfitPrice: order.takeProfitPrice } : {}),
     }
+    // Which seam plan this order will take — computed ONCE so the capability
+    // gate below checks exactly the capability that gets sent downstream.
+    const perpPlan = Boolean(
+      order.capability === 'futures_perp' && order.direction && order.leverage,
+    )
+    const rejection = await capabilityRejection(session, order, perpPlan)
+    if (rejection !== null) {
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason: `${rejection} Nothing was sent to the venue.`,
+        fix: { label: 'Try again', action: text },
+      })
+      return
+    }
     try {
-      if (order.capability === 'futures_perp' && order.direction && order.leverage) {
+      if (perpPlan && order.direction && order.leverage) {
         // Futures perp → the seam's capability plan path.
         ticket = await seam.prepareOrder({
           capability: 'futures_perp',
@@ -993,7 +1066,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       })
       return null
     }
-    return { ...order, instrument, size }
+    // MONEY: leverage on a close comes from the POSITION being closed, never
+    // from the parser. The intelligence fast-path has no way to know it and
+    // defaults (intent.py: `"leverage": 10`), so a close on a 5× position
+    // would otherwise render "CLOSE LONG 10×" with liquidation and margin
+    // derived from a number the trader never chose. Live perp rows advertise
+    // it ("BTC-USDT 5x LONG"); rows that don't (spot rows, sim venue) leave
+    // the value alone and prepareTicket's capability gate bounds it.
+    const liveLeverage =
+      order.capability === 'futures_perp' && position
+        ? leverageOfPositionRow(position.instrument)
+        : null
+    return {
+      ...order,
+      instrument,
+      size,
+      ...(liveLeverage !== null ? { leverage: liveLeverage } : {}),
+    }
   }
 
   // ── conversational amend ("move my limit to 61k") ────────────────────────
@@ -1176,9 +1265,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     order: OrderIntent | undefined,
     text: string,
   ): Promise<void> {
+    // capsFetched is the load-bearing distinction: `{spot:{}}` below is a
+    // FALLBACK we invented because the seam was unreachable, not venue truth.
+    // Fetched caps are enforced (an unsupported capability is declined);
+    // the fallback stays lenient exactly as before — degrading a turn on our
+    // own ignorance would be worse than letting the seam reject downstream.
     let caps: VenueCapabilities = { spot: {} }
+    let capsFetched = false
     try {
       caps = await seam.capabilities()
+      capsFetched = true
     } catch (err) {
       log.warn({ err }, 'seam capabilities unavailable — draft falls back to spot, no perp bounds')
     }
@@ -1189,7 +1285,30 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const hintMatch = /\b(long|short)\b/i.exec(text)?.[1]?.toLowerCase()
     const hint = hintMatch === 'long' || hintMatch === 'short' ? hintMatch : undefined
     const wantsPerp = order?.capability === 'futures_perp' || (!order && hint !== undefined)
+    // DEFECT (fixed): "long 0.5 BTC 20x" on a spot-only venue used to render
+    // "Set up your BUY BTC order" — no leverage, no mention that perps aren't
+    // supported, an unleveraged position the trader never asked for. A perp
+    // ask on a venue we KNOW has no perps is declined, never downgraded.
+    if (capsFetched && wantsPerp && !perp) {
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason: `${session.partner.venueName} doesn't support perpetual futures, so I won't quietly turn a leveraged ${hint ?? order?.direction ?? 'long'} into an unleveraged spot buy. Ask for a spot order if that's what you want. Nothing was sent to the venue.`,
+      })
+      return
+    }
     const capability: 'spot' | 'futures_perp' = wantsPerp && perp ? 'futures_perp' : 'spot'
+    // Same truth in the other direction: a perp-only venue must not accept a
+    // spot draft that only fails at confirm, where the real reason is lost
+    // behind a generic hand-off failure. Decline up front.
+    if (capsFetched && capability === 'spot' && caps.spot === undefined) {
+      emit(session, {
+        type: 'rejection_ticket',
+        title: 'Order not prepared',
+        reason: `${session.partner.venueName} doesn't support spot orders. Nothing was sent to the venue.`,
+      })
+      return
+    }
 
     const direction =
       capability === 'futures_perp'
