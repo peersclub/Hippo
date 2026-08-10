@@ -118,6 +118,19 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   .mkey .k-ext i{background:repeating-linear-gradient(135deg,var(--hippo-text-faint) 0 3px,transparent 3px 6px)}
   .mkey b{color:var(--hippo-text-mid);font-weight:500}
 
+  .mkey .k-unit{color:var(--hippo-text-dim);font-style:italic;letter-spacing:.02em}
+
+  /* capacity verdict — the arithmetic that decides whether Aug 31 is real */
+  .verdict{display:flex;gap:0;flex-wrap:wrap;margin-top:18px;border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);background:var(--hippo-panel);overflow:hidden}
+  .verdict .v-cell{flex:1 1 190px;padding:14px 17px;border-right:1px solid var(--hippo-hairline)}
+  .verdict .v-cell:last-child{border-right:none}
+  .verdict .v-n{font-family:var(--hippo-font-display);font-size:19px;font-weight:700;color:var(--hippo-text-hi);line-height:1}
+  .verdict .v-l{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.11em;color:var(--hippo-text-faint);margin-top:7px}
+  .verdict .v-s{font-size:11px;line-height:1.45;color:var(--hippo-text-dim);margin-top:8px}
+  .verdict .v-tight .v-n{color:var(--hippo-amber)}
+  .verdict .v-over .v-n{color:var(--hippo-down)}
+  .verdict .v-ok .v-n{color:var(--hippo-up)}
+
   /* the closed set — folded by default; the count is the point, the list is the proof */
   .closedlist{margin-top:14px}
   .closedlist summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-text-faint);transition:color .15s}
@@ -154,6 +167,30 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   .mi .tag.own{color:var(--hippo-text-mid)}
   .mi .tag.gate{color:var(--hippo-amber);border-color:rgba(var(--hippo-amber-rgb),.35)}
   .mi .un{font-size:10.5px;color:var(--hippo-text-faint);line-height:1.4}
+  .mi .est{margin-left:auto;font-family:var(--hippo-font-mono);font-size:10px;font-weight:600;color:var(--hippo-text-hi);background:var(--hippo-card-2);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:2px 9px;white-space:nowrap}
+  .mi .ttl{display:flex;align-items:flex-start;gap:10px}
+  .mi .ttl h4{flex:1}
+
+  /* the per-item plan — folded, so the lane stays scannable and the work is one click deep */
+  .plan{margin-top:9px;border-top:1px dashed var(--hippo-dash);padding-top:8px}
+  .plan summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.08em;color:var(--hippo-amber);opacity:.85;transition:opacity .15s}
+  .plan summary::-webkit-details-marker{display:none}
+  .plan summary::before{content:'▶';font-size:7px;transition:transform .15s}
+  .plan[open] summary::before{transform:rotate(90deg)}
+  .plan summary:hover{opacity:1}
+  .plan ol{margin:10px 0 2px;padding-left:19px;display:flex;flex-direction:column;gap:6px}
+  .plan li{font-size:11.5px;line-height:1.5;color:var(--hippo-text-mid)}
+  .plan li::marker{color:var(--hippo-text-faint);font-family:var(--hippo-font-mono);font-size:10px}
+  .plan code{font-family:var(--hippo-font-mono);font-size:.9em;color:var(--hippo-text-hi);background:var(--hippo-card-2);border-radius:4px;padding:1px 5px}
+
+  /* per-lane load vs the 5 working days it contains */
+  .cap{display:flex;align-items:center;gap:8px;margin:0 4px 12px;font-family:var(--hippo-font-mono);font-size:9.5px;letter-spacing:.05em;color:var(--hippo-text-faint)}
+  .cap .track{flex:1;height:4px;border-radius:var(--hippo-radius-pill);background:var(--hippo-card-2);overflow:hidden}
+  .cap .fill{display:block;height:100%;background:var(--hippo-up)}
+  .cap[data-load="tight"] .fill{background:var(--hippo-amber)}
+  .cap[data-load="over"] .fill{background:var(--hippo-down)}
+  .cap b{font-weight:600;color:var(--hippo-text-mid)}
+  .cap[data-load="over"] b{color:var(--hippo-down)}
 
   /* the lane we do not control */
   .ext{margin-top:16px;border:1px dashed var(--hippo-dash);border-radius:var(--hippo-radius-card);background:var(--hippo-panel);padding:15px 14px}
@@ -212,12 +249,13 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
       <div class="htxt">
         <div class="eyebrow">MVP · DEVELOPMENT CLOSE</div>
         <h2>Everything that closes v1 ships by <em>August 31</em>.</h2>
-        <p>The board below is a history. This is the burn-down: the MVP scope defined in <span class="mono" style="font-size:.92em">PRD v1</span>, what is already closed, the units that remain, and — stated rather than buried — the ones that cannot be closed without a GPU quote, a pilot partner's engineers, or counsel. Development closing does not mean the pilot launches; it means nothing is left that we can do alone.</p>
+        <p>The board below is a history. This is the burn-down: the MVP scope defined in <span class="mono" style="font-size:.92em">PRD v1</span>, what is already closed, the units that remain with a plan attached to each, and — stated rather than buried — the ones that cannot be closed without a GPU quote, a pilot partner's engineers, or counsel. Everything is sized in <b style="color:var(--hippo-text-hi);font-weight:500">engineer-days</b> on one scale, so the bar answers how much work is left rather than how many rows. Development closing does not mean the pilot launches; it means nothing is left that we can do alone.</p>
       </div>
       <div class="clock">
-        <div class="c-days"><div class="big" data-mvp="days">—</div><div class="lbl">DAYS LEFT</div></div>
-        <div><div class="big" data-mvp="open">—</div><div class="lbl">OURS TO SHIP</div></div>
-        <div><div class="big" data-mvp="pct">—</div><div class="lbl">SCOPE CLOSED</div></div>
+        <div class="c-days"><div class="big" data-mvp="days">—</div><div class="lbl">DAYS TO AUG 31</div></div>
+        <div><div class="big" data-mvp="left">—</div><div class="lbl">WORK LEFT</div></div>
+        <div><div class="big" data-mvp="open">—</div><div class="lbl">OPEN ITEMS</div></div>
+        <div><div class="big" data-mvp="pct">—</div><div class="lbl">BUILD CLOSED</div></div>
       </div>
     </div>
 
@@ -227,10 +265,13 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
       <span class="seg s-ext" data-mvp="seg-ext"></span>
     </div>
     <div class="mkey">
-      <span class="k-done"><i></i><b data-mvp="n-done">0</b> shipped &amp; verified</span>
-      <span class="k-open"><i></i><b data-mvp="n-open">0</b> remaining — ours, scheduled below</span>
-      <span class="k-ext"><i></i><b data-mvp="n-ext">0</b> blocked on a third party</span>
+      <span class="k-done"><i></i><b data-mvp="d-done">0</b> shipped &amp; verified</span>
+      <span class="k-open"><i></i><b data-mvp="d-open">0</b> remaining — ours, scheduled below</span>
+      <span class="k-ext"><i></i><b data-mvp="d-ext">0</b> blocked on a third party</span>
+      <span class="k-unit">bar is weighted by engineer-days, not item count</span>
     </div>
+
+    <div class="verdict" id="verdict"></div>
 
     <details class="closedlist">
       <summary>the <span data-mvp="n-done-2">0</span> scope items already closed</summary>
@@ -250,7 +291,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     </div>
 
     <div class="dod">
-      <b>Definition of done, Aug 31:</b> the sync wave is deployed and provable from outside (<span class="mono">/health</span> carries a build SHA); every accuracy number on this site came from a run that would have failed loudly if the model were mocked; Hinglish and Devanagari trade phrasing clear the same bar English does; the demo link survives a phone; and the four PRD launch gates that do not need a partner are scored, not estimated. Anything still open on Aug 31 is on this page with a name against it — <b>not</b> quietly re-dated.
+      <b>Definition of done, Aug 31:</b> the sync wave is deployed and provable from outside (<span class="mono">/health</span> carries a build SHA); every accuracy number on this site came from a run that would have failed loudly if the model were mocked; Hinglish and Devanagari trade phrasing clear the same bar English does; the demo link survives a phone; and the four PRD launch gates that do not need a partner are scored, not estimated.<br /><br /><b>And the honest reading of the arithmetic above:</b> the remaining work does not fit inside the working weeks left. It fits the calendar only, with almost no slack, and Week 2 is where it breaks — the language work alone is over a week inside a five-day lane. If something has to give, it is the Hinglish and Devanagari target narrowing to the highest-traffic phrasing families rather than full parity; every other item either gates a PRD launch gate or is half a day. Anything still open on Aug 31 stays on this page with a name against it — <b>not</b> quietly re-dated.
     </div>
   </div>
 </section>
@@ -518,137 +559,282 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   // ══════════════════════════════════════════════════════════════════════
   const MVP_DEADLINE = new Date(2026, 7, 31) // Aug 31, 2026 — month is 0-indexed
 
-  // Closed. Short labels; the board above carries the evidence for each.
+  // Everything is sized in ENGINEER-DAYS, one scale across closed and open work.
+  // Counting items would say a one-line Railway deploy weighs the same as the
+  // execution seam, so the bar is weighted by `est` instead. Closed items are
+  // sized retrospectively on that same scale — 29 days banked against 27 days
+  // of calendar since Jul 14, which is what parallel agent work looks like.
   const MVP_CLOSED = [
-    'Card protocol v1 + server-driven renderer',
-    'Research briefs — live-data-grounded, streamed',
-    'Order flow — intent → draft → ticket → confirm → lifecycle',
-    'Advice-decline guardrail (output-side)',
-    'Positions & portfolio cards',
-    'Six edge states',
-    'Onboarding + data consent + ground rules',
-    'Memory — persona, 4 layers, auto-learning A–D',
-    'Execution seam (Approach A) + venue capabilities',
-    'i18n EN · हिन्दी · Hinglish · ar, build-gated',
-    'Host safety — closed Shadow DOM, 1.54KB loader',
-    'Admin panel + partner portal V1 + audit',
-    'Durability — Redis sessions, durable ticket routing, Postgres audit',
-    'Eval harness v1 + intent harness + pilot dashboard',
-    'Agentic installer — scan · conform · embed · verify',
+    { t: 'Card protocol v1 + server-driven renderer', est: 1.5 },
+    { t: 'Research briefs — live-data-grounded, streamed', est: 2 },
+    { t: 'Order flow — intent → draft → ticket → confirm → lifecycle', est: 3 },
+    { t: 'Advice-decline guardrail (output-side)', est: 1 },
+    { t: 'Positions & portfolio cards', est: 1 },
+    { t: 'Six edge states', est: 1 },
+    { t: 'Onboarding + data consent + ground rules', est: 1 },
+    { t: 'Memory — persona, 4 layers, auto-learning A–D', est: 3.5 },
+    { t: 'Execution seam (Approach A) + venue capabilities', est: 3 },
+    { t: 'i18n EN · हिन्दी · Hinglish · ar, build-gated', est: 1.5 },
+    { t: 'Host safety — closed Shadow DOM, 1.54KB loader', est: 1 },
+    { t: 'Admin panel + partner portal V1 + audit', est: 2.5 },
+    { t: 'Durability — Redis sessions, durable routing, Postgres audit', est: 1.5 },
+    { t: 'Eval harness v1 + intent harness + pilot dashboard', est: 2.5 },
+    { t: 'Agentic installer — scan · conform · embed · verify', est: 3 },
   ]
 
   // Remaining, ours, scheduled. `end` is the last day of the lane — the lane
   // containing today renders as active, so the highlight advances by itself.
   const SPRINTS = [
     {
-      wk: 'Week 1', dates: 'Aug 11–15', end: new Date(2026, 7, 15),
+      wk: 'Week 1', dates: 'Aug 11–14', end: new Date(2026, 7, 14), cap: 4,
       goal: 'Make the truth verifiable — every claim after this week is checkable from outside.',
       items: [
-        { t: 'Deploy the sync wave', own: 'Victor', un: 'Unblocks every “verified live” claim made since Aug 6.',
-          d: 'PRs #105–#111 are merged and main is green at 30/30 — and none of it is running. Railway does not auto-deploy, and five services changed: gateway, seam, memory, admin, intelligence. No migrations in this wave, so the deploy is the whole job.' },
-        { t: '/health reports the build SHA', own: 'Victor', un: 'Turns a deploy from a hope into a check.',
-          d: 'Surfaced twice now — once by the audit, once by not being able to answer “is this fix live?” during the sync wave. It is the reason the wave was held rather than shipped.' },
-        { t: 'The harness must fail loudly on a degraded backend', own: 'Victor', gate: 'measurement integrity',
+        { t: 'Deploy the sync wave', own: 'Victor', est: 0.5, un: 'Unblocks every “verified live” claim made since Aug 6.',
+          d: 'PRs #105–#111 are merged and main is green at 30/30 — and none of it is running. Railway does not auto-deploy, and five services changed: gateway, seam, memory, admin, intelligence. No migrations in this wave, so the deploy is the whole job.',
+          plan: [
+            'Confirm no pending migrations, then <code>railway up --detach</code> per changed service — gateway, seam, memory, admin, intelligence. Specs are committed at <code>deploy/railway/*.json</code>; <code>--detach</code> is the known workaround for the CLI status-stream timeout.',
+            'Smoke the four fixes this wave was for: a perp ask on the spot-only venue returns a rejection rather than a silent spot order; the admin panel finds a persona past row 50; the LLM can emit <code>alert</code>; a Hindi panel draws no English chrome.',
+            'Re-run the deterministic eval against the deployed gateway and confirm 68.3% still holds — a deploy that moves it is a regression, not a surprise.',
+            'Flip <code>🟢 Live Demo Status.md</code> from “MERGED, NOT YET DEPLOYED” to live, with the deployed SHA once item 2 lands.',
+          ] },
+        { t: '/health reports the build SHA', own: 'Victor', est: 0.5, un: 'Turns a deploy from a hope into a check.',
+          d: 'Surfaced twice now — once by the audit, once by not being able to answer “is this fix live?” during the sync wave. It is the reason the wave was held rather than shipped.',
+          plan: [
+            'Bake the commit into the image: <code>ARG GIT_SHA</code> in each service Dockerfile, passed as a Railway build arg, read back through the environment at boot.',
+            'Add <code>sha</code>, <code>builtAt</code> and <code>providerMode</code> to every <code>/health</code> payload — <code>providerMode</code> is what item 3 asserts against.',
+            'Add a one-line script that prints the SHA of all eight services side by side, so “is this live?” is one command and not an archaeology exercise.',
+            'CI asserts the field is present and non-empty, so a service can never ship anonymous again.',
+          ] },
+        { t: 'The harness must fail loudly on a degraded backend', own: 'Victor', est: 1, gate: 'measurement integrity',
           un: 'Same failure class as PR #105: a check that cannot fail is not a check.',
-          d: 'A live --intent-endpoint run against an over-limit key reported 68.3% — byte-identical to the offline run — because the service degraded to mock and kept answering. It was only caught because the two runs matched exactly. Surface provider mode on /health and assert it.' },
-        { t: 'Restore the OpenRouter credit', own: 'Victor', un: 'Prerequisite for PRD gates 1 and 2.',
-          d: '“Key limit exceeded (total limit)” → 403. Until it clears, every accuracy figure we publish grades the deterministic parser, not the model that answers in production.' },
-        { t: 'The demo link has to survive a phone', own: 'Victor', un: 'The demo link is the sales surface.',
-          d: 'apps/host-demo/index.html:41 is a fixed 1fr 260px 300px grid with zero @media queries — a partner opening the link on mobile gets horizontal overflow. Exploratory work already sits on feat/host-demo-responsive.' },
-        { t: 'The portfolio handler throws your open orders away', own: 'Victor', un: 'Fixes the stale OPEN ORDERS · N badge.',
-          d: 'orchestrator/index.ts:2346 destructures { positions } and discards openOrders — a live defect caught while writing /testing, and one of six things the old /how guide had outright wrong.' },
+          d: 'A live --intent-endpoint run against an over-limit key reported 68.3% — byte-identical to the offline run — because the service degraded to mock and kept answering. It was only caught because the two runs matched exactly. Surface provider mode on /health and assert it.',
+          plan: [
+            'Intelligence reports <code>llm: "live" | "mock"</code> plus the resolved model id on <code>/health</code> (rides on item 2).',
+            'Every <code>--intent-endpoint</code> run probes that first and exits non-zero on mock, rather than quietly grading <code>rule_classify</code>.',
+            'Stamp provider mode and model id into the report header, so an archived report can never be misread later.',
+            'Regression test: point the runner at a deliberately mocked service and assert the non-zero exit — the same “prove it can fail” discipline that closed PR #105.',
+          ] },
+        { t: 'Restore the OpenRouter credit', own: 'Victor', est: 0.5, un: 'Prerequisite for PRD gates 1 and 2.',
+          d: '“Key limit exceeded (total limit)” → 403. Until it clears, every accuracy figure we publish grades the deterministic parser, not the model that answers in production.',
+          plan: [
+            'Top up the account and mint a fresh key; set it on intelligence and redeploy.',
+            'Verify a real turn over the public wire returns the live model id, not the degraded fallback.',
+            'Re-run <code>--mode intent --intent-endpoint</code> and publish the first honest LLM-path number — expect it to differ from 68.3%, which is the point.',
+            'Add a low-balance alert so the next exhaustion is noticed before a measurement is built on it.',
+          ] },
+        { t: 'The demo link has to survive a phone', own: 'Victor', est: 2, un: 'The demo link is the sales surface.',
+          d: 'apps/host-demo/index.html:41 is a fixed 1fr 260px 300px grid with zero @media queries — a partner opening the link on mobile gets horizontal overflow. Exploratory work already sits on feat/host-demo-responsive.',
+          plan: [
+            'Rebase <code>feat/host-demo-responsive</code> onto main — it carries the exploratory work and is seven commits behind.',
+            'Replace the fixed <code>1fr 260px 300px</code> grid with named areas plus breakpoints at 900px and 600px; the orderbook and blotter stack rather than overflow.',
+            'Switch the panel to its mobile posture below 600px — the SDK already ships <code>packages/sdk/embed/mobile.html</code>, so this is wiring, not new UI.',
+            'Verify at 390×844 and 360×640, and check <code>/testing</code> and <code>/how</code> at the same widths — they were written for a desktop column.',
+          ] },
+        { t: 'The portfolio handler throws your open orders away', own: 'Victor', est: 1, un: 'Fixes the stale OPEN ORDERS · N badge.',
+          d: 'orchestrator/index.ts:2346 destructures { positions } and discards openOrders — a live defect caught while writing /testing, and one of six things the old /how guide had outright wrong.',
+          plan: [
+            'Thread <code>openOrders</code> through the portfolio frame instead of destructuring it away at <code>orchestrator/index.ts:2346</code>.',
+            'Point the <code>OPEN ORDERS · N</code> badge at that value so the count and the blotter can no longer disagree.',
+            'Unit-test the handler on a portfolio carrying both positions and resting orders — the shape that was silently lossy.',
+            'Add the row to <code>/testing</code> that would have caught it, since the matrix is now the regression surface for claims.',
+          ] },
       ],
     },
     {
-      wk: 'Week 2', dates: 'Aug 18–22', end: new Date(2026, 7, 22),
+      wk: 'Week 2', dates: 'Aug 17–21', end: new Date(2026, 7, 21), cap: 5,
       goal: 'Score the gates that have a number instead of an opinion.',
       items: [
-        { t: 'Hinglish and Devanagari trade phrasing', own: 'Victor', gate: 'largest quality gap',
+        { t: 'Hinglish and Devanagari trade phrasing', own: 'Victor', est: 6, gate: 'largest quality gap',
           un: 'A Hindi-speaking trader on an India pilot is the target user.',
-          d: '31% and 5% against 95.3% for English. The deterministic layer is effectively English-only for trade phrasing — measurable since the intent harness landed, and now the biggest single gap between what Hippo claims and what it does.' },
-        { t: 'Advice-avoidance scored under baiting', own: 'Victor', gate: 'PRD gate 2',
+          d: '31% and 5% against 95.3% for English. The deterministic layer is effectively English-only for trade phrasing — measurable since the intent harness landed, and now the biggest single gap between what Hippo claims and what it does. Six of the 21 remaining days sit here.',
+          plan: [
+            'Export the failing rows from the intent harness by language and cluster them into phrasing families — the fix is per family, not per row.',
+            'Extend the <code>intent.py</code> fast paths family by family: Devanagari numerals, Hinglish verb forms (<code>kharido</code> / <code>bech do</code> / <code>band karo</code>), and the transliterated size and leverage words.',
+            'Mirror every addition into the degraded-mode twin in <code>orchestrator/intelligence.ts</code> — its own comment says the two must recognise the same phrasings, and the last wave proved a stale twin drops phrasings silently.',
+            'Add labeled rows to <code>evals/queries/v1-intents.jsonl</code> per family, keep <code>test_taxonomy_parity.py</code> green, and re-measure after each family so the curve is visible rather than one number at the end.',
+            'Set the gate in the harness — Hinglish ≥80%, Devanagari ≥70% — so a regression fails a build instead of waiting for the next audit.',
+          ] },
+        { t: 'Advice-avoidance scored under baiting', own: 'Victor', est: 1.5, gate: 'PRD gate 2',
           un: 'The trust position, the cache economics and the regulatory line are the same line.',
-          d: 'A consistency score on the adversarial set — a gate, not a nice-to-have. The 60 advice-bait rows have existed in the eval set since v1; the score has never been published.' },
-        { t: 'Host-safety pass in CI', own: 'Victor', gate: 'PRD gate 3',
+          d: 'A consistency score on the adversarial set — a gate, not a nice-to-have. The 60 advice-bait rows have existed in the eval set since v1; the score has never been published. Needs the OpenRouter key restored first.',
+          plan: [
+            'Add an advice mode to the runner over the 60 bait rows, plus multi-turn baits — the single-turn set never tests whether a decline survives being pushed.',
+            'Score decline consistency per language; a guardrail that only holds in English is not a guardrail for this product.',
+            'Publish the number with the model id and provider mode attached (rides on the item-3 stamping).',
+            'Wire it as a launch gate with a threshold, so it is a build failure rather than a report someone has to read.',
+          ] },
+        { t: 'Host-safety pass in CI', own: 'Victor', est: 2, gate: 'PRD gate 3',
           un: 'A budget nothing enforces is a number that drifts.',
-          d: 'A hostile-CSS page plus a performance budget, running on every merge. The loader sits at 1.54KB gz of its 5KB allowance today — nothing in CI keeps it there.' },
+          d: 'A hostile-CSS page plus a performance budget, running on every merge. The loader sits at 1.54KB gz of its 5KB allowance today — nothing in CI keeps it there.',
+          plan: [
+            'Build a hostile-CSS fixture host: global resets with <code>!important</code>, aggressive universal selectors, a transformed ancestor, and a strict CSP with no <code>unsafe-inline</code>.',
+            'Assert the panel renders unchanged inside it — the closed Shadow DOM should make this pass, which is exactly why it has never been proven.',
+            'Add the loader size budget (fail over 5KB gz) and a CLS check to <code>ci.yml</code>.',
+            'Prove the gate fails on purpose before trusting it — inject a style leak, watch CI go red, revert.',
+          ] },
       ],
     },
     {
-      wk: 'Week 3', dates: 'Aug 25–29', end: new Date(2026, 7, 29),
+      wk: 'Week 3', dates: 'Aug 24–28', end: new Date(2026, 7, 28), cap: 5,
       goal: 'Procurement-ready: the things a partner meeting needs, shown on demand.',
       items: [
-        { t: 'Onboarding hero · ambient pulse · share cards', own: 'Victor', un: 'The last of Phase 5 that does not need a partner.',
-          d: 'The welcome moment carrying the partner’s name, the pill that glows when the market moves while Hippo is minimized, and the co-branded share card with the no-advice line printed on it. The vault lists all three as not started.' },
-        { t: 'Degraded mode demonstrable on demand', own: 'Victor', gate: 'PRD gate 5',
+        { t: 'Onboarding hero · ambient pulse · share cards', own: 'Victor', est: 4, un: 'The last of Phase 5 that does not need a partner.',
+          d: 'The welcome moment carrying the partner’s name, the pill that glows when the market moves while Hippo is minimized, and the co-branded share card with the no-advice line printed on it. The vault lists all three as not started.',
+          plan: [
+            'Wire the welcome moment to partner config so “built for ___” reads from the embed rather than a constant.',
+            'Drive the ambient pulse from a real market-move signal on the minimized pill, with the mono event tag; opening the panel clears it.',
+            'Finish the share card: co-branded render, a short link that resolves current data at open time, and <code>MARKET INFORMATION · NOT INVESTMENT ADVICE</code> printed on the image — the compliance line has to survive being screenshotted.',
+            'Verify all three on the deployed demo rather than locally; the share link is worthless if it only resolves on localhost.',
+          ] },
+        { t: 'Degraded mode demonstrable on demand', own: 'Victor', est: 1, gate: 'PRD gate 5',
           un: 'Shown in procurement, not discovered in an outage.',
-          d: 'The amber banner and labeled CACHED BRIEF badges are the SLA clause made visible. Edge-state completeness is a launch gate precisely because this one is only convincing before you need it.' },
-        { t: 'Arabic native-speaker review', own: 'Kartik / MENA', un: 'Gates data-hippo-locale="ar" for a Gulf partner.',
-          d: 'The ar catalog is complete and merged but deliberately dormant. Copy quality in a language none of us reads is not something a test can assert.' },
+          d: 'The amber banner and labeled CACHED BRIEF badges are the SLA clause made visible. Edge-state completeness is a launch gate precisely because this one is only convincing before you need it.',
+          plan: [
+            'Add a force-degraded toggle to the host control console — the console already carries the venue chaos controls, so this belongs beside them.',
+            'Verify the amber banner and <code>CACHED BRIEF</code> badges live, and that intent and the order flow stay responsive while research is degraded, since that is the actual SLA claim.',
+            'Add it to <code>/testing</code> as a walkthrough so a partner can run the demo themselves without us in the room.',
+          ] },
+        { t: 'Arabic native-speaker review', own: 'Kartik / MENA', est: 1, un: 'Gates data-hippo-locale="ar" for a Gulf partner.',
+          d: 'The ar catalog is complete and merged but deliberately dormant. Copy quality in a language none of us reads is not something a test can assert.',
+          plan: [
+            'Send the <code>ar</code> catalog with rendered screenshots for context — a string list without its card is not reviewable.',
+            'Apply corrections, then check RTL structurally at three widths: numerals must hold their direction while the surface flips.',
+            'Flip <code>data-hippo-locale="ar"</code> behind a partner flag, not globally, so a Gulf partner opts in.',
+          ] },
       ],
     },
   ]
 
   // Remaining, not ours. Each names the dependency rather than a date.
   const MVP_EXT = [
-    { t: 'Model bake-off vs the 70B baseline', own: 'needs GPU — Kartik’s quotes', gate: 'PRD gate 1',
+    { t: 'Model bake-off vs the 70B baseline', own: 'needs GPU — Kartik’s quotes', gate: 'PRD gate 1', est: 3,
       un: 'Decides which model actually serves the pilot.',
-      d: 'The winner must land within 5% of a 70B baseline on the 300-query exam with no hallucination gap. Qwen3-32B / QwQ-32B are the candidates; none of it can run without GPU access.' },
-    { t: 'Full lifecycle round-trip in a partner sandbox', own: 'pilot partner eng', gate: 'PRD gate 4',
+      d: 'The winner must land within 5% of a 70B baseline on the 300-query exam with no hallucination gap. Qwen3-32B / QwQ-32B are the candidates; none of it can run without GPU access.',
+      plan: [
+        'The day GPU access lands: stand the candidates up on vLLM and point the harness at each in turn.',
+        'Run the 300-query exam per candidate — accuracy, hallucination gap, latency — against the 70B baseline.',
+        'Score the gate (within 5%, no hallucination gap) and publish the comparison rather than a verdict.',
+        'Feed the winner’s tokens-per-query into the cost/MAU model, which is currently measured against a hosted API and will move.',
+      ] },
+    { t: 'Full lifecycle round-trip in a partner sandbox', own: 'pilot partner eng', gate: 'PRD gate 4', est: 4,
       un: 'The one gate a sim venue can never close.',
-      d: 'Open Decision #6 — confirm surface: deep link vs JS callback vs partner-hosted modal. Open Decision #9 — the pilot venue exposes no order-status-by-id and no webhook, so the seam cannot cheaply learn terminal state; the poll reconciler infers “absent from open orders = filled”, which cannot tell filled from cancelled.' },
-    { t: 'vLLM pods + GPU capacity plan', own: 'Kartik / infra', un: 'The production serving topology.',
-      d: 'Regional intent (7–8B), a global research tier (~30B) and the shared cache tier. Follows the India and Gulf quotes; today the fleet is a hosted API and a local dev compose file.' },
-    { t: 'Layer-2 consent format per jurisdiction', own: 'counsel', un: 'Blocks the first Gulf contract, not the India pilot.',
-      d: 'Active checkbox vs disclosed-in-terms — Open Decision #2. The onboarding screen was deliberately built so switching that row is trivial, which is why this can sit open without holding development.' },
+      d: 'Open Decision #6 — confirm surface: deep link vs JS callback vs partner-hosted modal. Open Decision #9 — the pilot venue exposes no order-status-by-id and no webhook, so the seam cannot cheaply learn terminal state; the poll reconciler infers “absent from open orders = filled”, which cannot tell filled from cancelled.',
+      plan: [
+        'Close Open Decision #6 with the partner’s engineers — pick one confirm surface; all three are wired, so this is a decision, not a build.',
+        'Ask for either a lifecycle webhook or an order-status-by-id read (Open Decision #9). Without one, terminal state stays an inference and the gate cannot honestly pass.',
+        'Get sandbox keys and run the round-trip: prepare → confirm → venue event → filled card, with every lifecycle card driven by a real venue event.',
+        'Map the venue’s rejection codes to plain-words reasons — the rejection card must never show a bare code.',
+      ] },
+    { t: 'vLLM pods + GPU capacity plan', own: 'Kartik / infra', est: 5, un: 'The production serving topology.',
+      d: 'Regional intent (7–8B), a global research tier (~30B) and the shared cache tier. Follows the India and Gulf quotes; today the fleet is a hosted API and a local dev compose file.',
+      plan: [
+        'Collect the India and Gulf quotes, then build the capacity model against measured tokens/MAU rather than the estimate.',
+        'Stand up the regional intent tier (7–8B) first — it is the latency-sensitive half and the cheapest to prove.',
+        'Add the global research tier (~30B) behind the existing answer cache, whose hit rate is what makes the economics work.',
+        'Re-measure cost/MAU against the ₹10–18 target once real pods serve real traffic.',
+      ] },
+    { t: 'Layer-2 consent format per jurisdiction', own: 'counsel', est: 0.5, un: 'Blocks the first Gulf contract, not the India pilot.',
+      d: 'Active checkbox vs disclosed-in-terms — Open Decision #2. The onboarding screen was deliberately built so switching that row is trivial, which is why this can sit open without holding development.',
+      plan: [
+        'Counsel rules per jurisdiction: active checkbox or disclosed-in-terms.',
+        'Flip the L2 row to match — the screen was built switchable, so it is a config change, not a redesign.',
+        'Have counsel review the consent copy in each shipped language before a Gulf contract, not after.',
+      ] },
   ]
 
+  const sum = (xs) => xs.reduce((n, x) => n + x.est, 0)
+  const d = (n) => `${n % 1 === 0 ? n : n.toFixed(1)}d`
+
   const miHTML = (it, st) => `<article class="mi" data-st="${st}">
-      <h4>${it.t}</h4>
+      <div class="ttl"><h4>${it.t}</h4><span class="est">${d(it.est)}</span></div>
       <p>${it.d}</p>
+      <details class="plan"><summary>plan — ${it.plan.length} steps</summary><ol>${it.plan.map((p) => `<li>${p}</li>`).join('')}</ol></details>
       <div class="mi-foot">
         <span class="tag own">${it.own}</span>${it.gate ? `<span class="tag gate">${it.gate}</span>` : ''}${it.un ? `<span class="un">${it.un}</span>` : ''}
       </div>
     </article>`
 
+  // Weekdays between two dates, exclusive of `from` — the capacity a five-day
+  // week actually buys. The calendar count is kept separately because this
+  // repo has demonstrably shipped on weekends since July 14, and pretending
+  // otherwise would make the plan look impossible when it merely has no slack.
+  function weekdaysBetween(from, to) {
+    let n = 0
+    const cur = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1)
+    while (cur <= to) {
+      const wd = cur.getDay()
+      if (wd !== 0 && wd !== 6) n++
+      cur.setDate(cur.getDate() + 1)
+    }
+    return n
+  }
+
   function renderMVP() {
     const now = new Date()
-    const nDone = MVP_CLOSED.length
+    const eDone = sum(MVP_CLOSED)
+    const eOpen = SPRINTS.reduce((n, s) => n + sum(s.items), 0)
+    const eExt = sum(MVP_EXT)
     const nOpen = SPRINTS.reduce((n, s) => n + s.items.length, 0)
-    const nExt = MVP_EXT.length
-    const total = nDone + nOpen + nExt
+    const totalE = eDone + eOpen + eExt
     const days = Math.max(0, Math.ceil((MVP_DEADLINE - now) / 86400000))
     const set = (k, v) => {
       for (const el of document.querySelectorAll(`[data-mvp="${k}"]`)) el.textContent = v
     }
 
+    // The headline percentage deliberately EXCLUDES the externally-blocked
+    // work: it answers "how much of the build we can finish ourselves is
+    // finished", which is the only question Aug 31 is a date for.
     set('days', days)
+    set('left', d(eOpen))
     set('open', nOpen)
-    set('pct', `${Math.round((nDone / total) * 100)}%`)
-    set('n-done', nDone)
-    set('n-done-2', nDone)
-    set('n-open', nOpen)
-    set('n-ext', nExt)
-    set('n-ext-2', nExt)
+    set('pct', `${Math.round((eDone / (eDone + eOpen)) * 100)}%`)
+    set('d-done', d(eDone))
+    set('d-open', d(eOpen))
+    set('d-ext', d(eExt))
+    set('n-done-2', MVP_CLOSED.length)
+    set('n-ext-2', MVP_EXT.length)
 
-    const pct = (n) => `${((n / total) * 100).toFixed(1)}%`
-    document.querySelector('[data-mvp="seg-done"]').style.width = pct(nDone)
-    document.querySelector('[data-mvp="seg-open"]').style.width = pct(nOpen)
-    document.querySelector('[data-mvp="seg-ext"]').style.width = pct(nExt)
+    const pct = (n) => `${((n / totalE) * 100).toFixed(1)}%`
+    document.querySelector('[data-mvp="seg-done"]').style.width = pct(eDone)
+    document.querySelector('[data-mvp="seg-open"]').style.width = pct(eOpen)
+    document.querySelector('[data-mvp="seg-ext"]').style.width = pct(eExt)
     document
       .querySelector('[data-mvp="bar-label"]')
-      .setAttribute('aria-label', `MVP scope: ${nDone} of ${total} closed, ${nOpen} remaining before August 31, ${nExt} blocked on a third party`)
+      .setAttribute('aria-label', `MVP effort: ${d(eDone)} shipped, ${d(eOpen)} remaining before August 31, ${d(eExt)} blocked on a third party`)
 
-    document.querySelector('.closedlist .chips').innerHTML = MVP_CLOSED.map((c) => `<span>${c}</span>`).join('')
+    document.querySelector('.closedlist .chips').innerHTML = MVP_CLOSED.map(
+      (c) => `<span>${c.t} · ${d(c.est)}</span>`,
+    ).join('')
+
+    // ── Capacity: the arithmetic that decides whether the date is real ──
+    // Counted to the deadline, not to the last lane: Aug 31 falls on a Monday,
+    // so it is a working day the lanes do not contain.
+    const weekdayCap = weekdaysBetween(now, MVP_DEADLINE)
+    const calendarCap = days
+    const over = eOpen - weekdayCap
+    const slack = calendarCap - eOpen
+    document.getElementById('verdict').innerHTML = `
+      <div class="v-cell"><div class="v-n">${d(eOpen)}</div><div class="v-l">WORK REMAINING</div>
+        <div class="v-s">${nOpen} items, sized on the same scale as the ${d(eDone)} already banked.</div></div>
+      <div class="v-cell ${over > 0 ? 'v-over' : 'v-ok'}"><div class="v-n">${weekdayCap} weekdays</div><div class="v-l">CAPACITY, MON–FRI ONLY</div>
+        <div class="v-s">${over > 0 ? `Short by <b>${d(over)}</b>. On weekdays alone the date does not close.` : 'Fits inside the working week.'}</div></div>
+      <div class="v-cell ${slack < 0 ? 'v-over' : slack <= 2 ? 'v-tight' : 'v-ok'}"><div class="v-n">${calendarCap} days</div><div class="v-l">CAPACITY, EVERY DAY</div>
+        <div class="v-s">${slack < 0 ? `Still short by ${d(-slack)} — scope has to move.` : `Fits with <b>${d(slack)}</b> of slack, and only if the weekends work — which is the pattern since Jul 14.`}</div></div>
+      <div class="v-cell"><div class="v-n">Week 2</div><div class="v-l">WHERE IT BREAKS</div>
+        <div class="v-s">The language work is ${d(SPRINTS[1].items[0].est)} of the ${d(eOpen)} and the only item that can be cut to a phrasing subset without moving a launch gate.</div></div>`
 
     // The active lane is the first whose end date has not passed — the amber
     // highlight walks forward on its own, and after Aug 29 nothing is "now".
     const activeIdx = SPRINTS.findIndex((s) => now <= s.end)
     document.getElementById('sprints').innerHTML = SPRINTS.map((s, i) => {
       const isNow = i === activeIdx
+      const load = sum(s.items)
+      const ratio = load / s.cap
+      const state = ratio > 1.2 ? 'over' : ratio > 1 ? 'tight' : 'ok'
       return `<div class="lane${isNow ? ' now' : ''}">
         <div class="lane-h"><span class="wk">${s.wk}</span><span class="dates">${s.dates}</span><span class="n">${s.items.length}</span></div>
         <div class="goal">${s.goal}</div>
+        <div class="cap" data-load="${state}"><b>${d(load)}</b> of ${s.cap}d<span class="track"><span class="fill" style="width:${Math.min(100, ratio * 100).toFixed(0)}%"></span></span></div>
         <div class="items">${s.items.map((it) => miHTML(it, isNow ? 'now' : 'todo')).join('')}</div>
       </div>`
     }).join('')
