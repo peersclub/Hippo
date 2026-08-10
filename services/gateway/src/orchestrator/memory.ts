@@ -46,7 +46,12 @@ export type LearnedFact = {
   createdAt: number
   updatedAt: number
 }
-export type LearnedFactInput = { type: string; value: string; confidence: number; source?: 'auto' | 'admin' }
+export type LearnedFactInput = {
+  type: string
+  value: string
+  confidence: number
+  source?: 'auto' | 'admin'
+}
 export type LearnedFactIds = { partnerId?: string; userId?: string; sessionId?: string }
 
 export interface MemoryClient {
