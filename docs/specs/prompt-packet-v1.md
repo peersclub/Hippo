@@ -1,9 +1,14 @@
 # Prompt Packet — v1 spec
 
-**Status:** Draft for implementation · 2026-08-10
+**Status:** Draft for implementation · **Revision 2** · 2026-08-10
 **Audience:** Suresh (packet-builder implementation) · Victor (schema authority) · Sudha (threading design owner)
 **Grounded in:** `main @ 2649b37` + branch `claude/hippo-codebase-review-zitelh`
 **Locked before this doc, not re-litigated:** five input fields + one output field · JSON · two-call flow (Scout → Scholar) · Scout runs twice (ingress + egress) · threading = compress-forward.
+
+> **Revision 2 — what changed.** Two of the ten open questions in §4 are now closed, both by Sudha.
+> **(1) Personal memory stays in the Scholar call** — it is *quantized into a closed vocabulary* rather than moved to Scout egress. Rev 1 recommended moving it out; that recommendation is superseded. §3.5 carries the new design and §3.4a the arithmetic behind it.
+> **(2) The 1M ceiling is not real and is not needed.** Shortlisted Scholars are 256k-class; the usable budget is ~16k, latency-bound. Context length comes off the exam scorecard as a pass/fail floor (§3.2).
+> The filename still says `v1` because `packet_version` is still `1` — the wire contract has not broken. This is a document revision, not a protocol bump.
 
 ---
 
@@ -29,17 +34,17 @@ All token counts below are **measured** with `tiktoken/cl100k_base`, not estimat
 
 ## 1 · Headline findings — read these before Part 2
 
-### 1.1 The 1M ceiling is not the binding constraint. It is not close.
+### 1.1 The context window is not the binding constraint. It is not close.
 
 Measured, as the system actually assembles a research turn today:
 
-| Call | Input tokens | % of 1M ceiling |
-|---|---:|---:|
-| Call 1 — Scout ingress (`POST /v1/intent`) | **2,158** | 0.216% |
-| Call 2 — Scholar (`POST /v1/respond/stream`) | **883** | 0.088% |
-| Call 2, absolute worst case (memory clamped to `MAX_COMPOSED`) | 13,727 | 1.373% |
+| Call | Input tokens | % of 1M (as originally stated) | % of 256k (actual) |
+|---|---:|---:|---:|
+| Call 1 — Scout ingress (`POST /v1/intent`) | **2,158** | 0.216% | 0.843% |
+| Call 2 — Scholar (`POST /v1/respond/stream`) | **883** | 0.088% | 0.345% |
+| Call 2, absolute worst case (memory clamped to `MAX_COMPOSED`) | 13,727 | 1.373% | 5.362% |
 
-**99.91% of the stated ceiling is unused.** A threading mechanism designed to "fit within 1M" is solving a problem the system does not have. Two other ceilings bind first — §3.2.
+**Over 99% of the window is unused on either figure.** A threading mechanism designed to "fit within 1M" is solving a problem the system does not have — and Rev 2 confirmed the 1M premise was wrong anyway (§3.2). Two other ceilings bind first, and only one of them binds hard.
 
 ### 1.2 The constraint that actually binds is answer-cache key cardinality.
 
@@ -54,11 +59,13 @@ Measured, as the system actually assembles a research turn today:
 | + USER facts, steady state (90%) | 901 | **9.9%** | 901 / 1,000 |
 | + SESSION facts (per session) | 1,000 | **0.0%** | 1,000 / 1,000 |
 
-The per-Trader layers of that block measure **62 tokens** — 0.0062% of the 1M ceiling. Those 62 tokens are the difference between 1 Scholar generation and ~900.
+The per-Trader layers of that block measure **62 tokens** — 0.024% of a 256k window. Those 62 tokens are the difference between 1 Scholar generation and ~900.
 
 Victor's own note flags the direction (`Cache for Sudha.md` §4: *"turning memoryLab on … fragments the cache"*). This is the magnitude. The 49% effective cache rate in cost model v4 is **not survivable** with per-Trader content in the Scholar cache key at steady state — the arithmetic lands near 10%.
 
 > This is the whole design problem. Not tokens. Cardinality.
+
+**Resolved in Rev 2 (§3.4a / §3.5):** personal memory stays in the Scholar call, expressed as a small closed vocabulary instead of free prose. Twelve namespaces instead of nine hundred, at a cost of six tokens, for a 98.8% hit rate. The trader still gets a personalised answer; the rate card survives.
 
 ### 1.3 "External Data" does not exist yet.
 
@@ -94,7 +101,9 @@ There is **no news, web, on-chain, liquidation or research retrieval anywhere in
 
 **`capabilities` is currently never sent to any model.** PR #106 fixed a bug where a perp ask on a spot-only venue was silently rewritten to a spot plan; the fix was gateway-side gating. Putting capabilities in the packet is the structural version of that fix — the Scholar stops being able to describe a trade the venue cannot do. Recommended: include. Costs 51 tokens at tier 1 (i.e. amortized across the whole Host).
 
-#### ② `trader_persona` — about the individual Trader. Tier 3. **Never reaches the Scholar.**
+#### ② `trader_persona` — about the individual Trader. Tier 3 raw; **tier 2 once quantized.**
+
+**Rev 2 rule:** the raw fields below never reach the Scholar. Their *quantized projection* does — see `carry_forward.personalization` (§2.3) and §3.4a. The builder reads this field, projects it onto the closed vocabulary, and sends only the projection. Free prose (`curated_note`) has no projection and stays out.
 
 | Sub-field | Source | Inline/ref | Req | Measured size |
 |---|---|---|---|---|
@@ -355,7 +364,7 @@ The Zod frame is the authority; the prompt text is a projection of it. Today the
                        "description": "false for any packet carrying a field of tier > 2." },
         "key_material": {
           "type": "object",
-          "description": "EXHAUSTIVE list of what may enter the answer-cache key. A builder that adds a tier-3 value here has broken the rate card.",
+          "description": "EXHAUSTIVE list of what may enter the answer-cache key. Every property must be a value of BOUNDED cardinality. A builder that adds a free-text or per-trader value here has broken the rate card. additionalProperties:false is the enforcement — do not relax it.",
           "required": ["canonical_question", "asset", "language", "window_bucket"],
           "properties": {
             "canonical_question": { "type": "string", "x-source": "cache.py:canonicalize()" },
@@ -364,8 +373,8 @@ The Zod frame is the authority; the prompt text is a projection of it. Today the
             "window_bucket":      { "type": "integer", "x-source": "cache.py:window_bucket() — 300s" },
             "host_id":            { "type": ["string", "null"],
                                     "description": "Present iff host_context.venue_doc is non-empty. Tier 1 = per-Host cache namespace, which is affordable." },
-            "experience_level":   { "enum": ["new", "intermediate", "pro", null],
-                                    "description": "CONCEPT answers only, exactly as _cache_scope does today. 3 values = 3 namespaces, affordable. Market briefs stay fleet-wide." }
+            "personalization":    { "type": ["object", "null"],
+                                    "description": "REV 2 — MUST be byte-identical to carry_forward.personalization. This is what makes a personalised answer safely cacheable: two traders with the same projection legitimately share an answer, and one with a different projection can never be served it. Replaces the Rev 1 'experience_level' property, which this generalises." }
           },
           "additionalProperties": false
         },
@@ -424,8 +433,21 @@ The Zod frame is the authority; the prompt text is a projection of it. Today the
         },
         "answer_shape":  { "type": ["string", "null"], "maxLength": 120,
                            "description": "Ingress-decided rendering hint, e.g. 'compare two assets'. NOT content." },
-        "depth":         { "enum": ["new", "intermediate", "pro", null],
-                           "description": "The ONLY tier-3-derived value permitted to cross into the Scholar, and only for CONCEPT answers — mirroring _cache_scope today (3 namespaces, not N). For market briefs this MUST be null." },
+        "personalization": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "x-max-tokens": 6,
+          "description": "REV 2 — the quantized projection of trader_persona. The ONLY tier-3-derived content permitted into the Scholar call. Every property MUST be a closed enum: the cache key hashes CONTENT, so a free-text value here costs one namespace per trader and breaks the rate card. Combined cardinality is the PRODUCT of the enum sizes — 3 x 2 x 2 = 12 as specified. Adding a property multiplies; adding an enum member adds. Budget: keep the product under 50. See §3.4a.",
+          "properties": {
+            "depth":      { "enum": ["new", "intermediate", "pro", null],
+                            "x-source": "users_memory.experience_level, or learned_facts type='experience_level'",
+                            "description": "3 values. Already precedented: _cache_scope scopes CONCEPT answers on exactly this today." },
+            "style":      { "enum": ["concise", "detailed", null],
+                            "x-source": "learned_facts type='answer_style'" },
+            "instrument": { "enum": ["spot", "perps", null],
+                            "x-source": "learned_facts type='instrument_pref'" }
+          }
+        },
         "declined":      { "type": "boolean",
                            "description": "Ingress advice-check result. true short-circuits the Scholar entirely." }
       }
@@ -494,7 +516,7 @@ The Zod frame is the authority; the prompt text is a projection of it. Today the
     "confidence": 0.94,
     "resolved_entities": { "symbol": "BTC/USDT", "timeframe": "12h", "referent": "it -> BTC/USDT" },
     "answer_shape": "single-asset move explanation",
-    "depth": null,
+    "personalization": { "depth": "intermediate", "style": "concise", "instrument": "perps" },
     "declined": false
   },
 
@@ -506,14 +528,16 @@ The Zod frame is the authority; the prompt text is a projection of it. Today the
       "language": "en",
       "window_bucket": 5954512,
       "host_id": "assetworks-demo",
-      "experience_level": null
+      "personalization": { "depth": "intermediate", "style": "concise", "instrument": "perps" }
     },
     "ttl_s": 120
   }
 }
 ```
 
-Note what is **absent**: `trader_persona`, `host_data`, `query.history`. Their absence is what keeps `cache.cacheable: true`. The trader's memory has not been discarded — it is applied on the way out, at Scout egress.
+Note what is **absent**: `trader_persona` (the raw record), `host_data`, `query.history`. Their absence is what keeps `cache.cacheable: true`.
+
+The trader's memory has **not** been discarded — it is present, as the three-enum `personalization` projection, in both `carry_forward` and `cache.key_material`. This trader gets a concise, perps-flavoured, intermediate-depth answer, and so does every other trader who projects onto the same three values. That sharing is the point: it is what makes personalisation and a fleet-wide cache compatible rather than opposed.
 
 ---
 
@@ -543,13 +567,19 @@ Note what is **absent**: `trader_persona`, `host_data`, `query.history`. Their a
 
 | Ceiling | Value | Call-2 usage today | Binding? |
 |---|---:|---:|---|
-| **Context window** | 1,000,000 tok | 883 tok (0.088%) | **No** — 3 orders of magnitude of slack |
+| **Context window** | **256,000 tok** (Rev 2 — see below) | 883 tok (0.345%) | **No** — 2½ orders of magnitude of slack |
 | **First-token latency** (PRD §5: <2s p95 on a miss) | ~16,000 tok of prefill | 883 tok (5.5%) | **Second** |
-| **Cache-key cardinality** (the rate card) | ~1 namespace per (Host, asset, lang, window) | 1 → up to 1,000 | **Yes — this is the one** |
+| **Cache-key cardinality** (the rate card) | 12 namespaces per (Host, asset, lang, window) | 12 → up to 1,000 | **Yes — this is the one** |
+
+**Rev 2 — the 1M ceiling is not real, and is not needed.** The shortlisted Scholars are 256k-class, not 1M *(confirmed by Sudha; still verify per exact checkpoint before pinning)*. It does not matter: the usable budget is ~16,000 tokens set by first-token latency, so **256k is already 16× more window than the latency ceiling permits on a cache miss.** A 32k window would carry the most aggressive enrichment plan in §3.6 with 2× headroom.
+
+**Consequence for the exam:** context length discriminates between zero candidates and should come off the scorecard as a differentiator. Replace it with a pass/fail floor — **"≥32k native"** — and reallocate that weight to a dimension that actually separates the field. Multilingual is the obvious candidate: Devanagari intent accuracy is 5.0%, the largest measured gap in the product.
+
+*One exception worth keeping in the back pocket:* if briefs for hot symbols are ever pre-generated **offline**, outside the latency path, a larger window becomes usable. Even then 256k is far past sufficient.
 
 The latency figure assumes ~8,000 tok/s prefill for a 27–30B dense model on a single H100 at batch 1. **[assumption — unverified]** That number is exactly what the rented-H100 exam should measure; it moves the second ceiling by a factor of several either way. It does not change the conclusion, because the third ceiling binds two orders of magnitude earlier.
 
-**Also [unverified]: whether a 1M ceiling is achievable at all with the shortlisted Scholars.** Qwen3-class checkpoints are commonly 32k native / ~131k with YaRN; Granite 4.x is commonly 128k. None of the three shortlisted Scholars (Qwen3.6-27B dense, Granite-4.1-30b, Qwen3.6-35B-A3B) is known to me to ship a 1M native window. Verify per exact checkpoint before any design assumes it — same discipline the licence column already forced.
+**Still to pin, though it no longer changes any decision:** the exact native window of each shortlisted checkpoint (Qwen3.6-27B dense, Granite-4.1-30b, Qwen3.6-35B-A3B). All three are believed 256k-class. Since the requirement is now a ≥32k floor, this is a checkbox rather than a design input — but pin it per model+size anyway, exactly as the licence column taught. **[partially unverified]**
 
 ### 3.3 The mechanism: partition by cardinality tier, not by size
 
@@ -560,16 +590,50 @@ Assign every packet field a tier = *how many distinct values it takes across the
 | **0** | nothing | 1 | `output_schema`, guardrail, few-shots | ✅ | ✅ (free) |
 | **1** | Host | ~10² | `host_context.*` | ✅ | ✅ (affordable) |
 | **2** | symbol × 5-min window | ~10³/day/symbol | `external_data.*` | ✅ | ✅ (this IS the key) |
-| **3** | Trader | ~10⁵–10⁶ | `trader_persona.*`, `host_data.*` | ❌ | ❌ **never** |
+| **3** | Trader | ~10⁵–10⁶ | `trader_persona.*` raw, `host_data.*` | ❌ | ❌ **never** |
 | **4** | session / turn | ~10⁷ | `query.history`, session facts | ❌ | ❌ **never** |
 
-**The rule, in one line:** *a field may enter the Scholar call if and only if its tier ≤ 2. Everything above tier 2 is applied by Scout on the way out.*
+**The rule, in one line:** *a field may enter the Scholar call if and only if its tier ≤ 2 — either natively, or by projection onto a closed vocabulary that puts it there.*
 
 This is not a new architecture. It is the architecture already decided (handoff A8: "Scout runs twice per research query; the Egress Doorway is a Scout function"), given the rule that makes it economically necessary.
 
-Two tier-2-or-below exceptions are already in the code and should be preserved verbatim:
-- `experience_level` scopes **concept** answers only (3 namespaces, not N). Market briefs stay fleet-wide. `research.py:_cache_scope`.
+Two projections are already in the code and should be preserved:
+- `experience_level` scopes **concept** answers only (3 namespaces, not N). `research.py:_cache_scope`. Rev 2 generalises exactly this pattern to `personalization`.
 - `host_id` enters the key iff `venue_doc` is non-empty — a per-Host namespace, which is affordable.
+
+### 3.4a Rev 2 — quantization, and why relevance-filtering does not substitute for it
+
+The intuition this replaces: *"keep personal memory in the Scholar call, but filter it to what the question needs — minimum context, maximum quality."* The instinct is sound. The variable is wrong.
+
+**Filtering optimises size. The cache key hashes content.** `research.py:_memory_key` is `sha1(memory_context)[:12]` — length is not an input.
+
+| Approach | Tokens | Namespaces | Hit rate | Generations /1,000 |
+|---|---:|---:|---:|---:|
+| Full block, unfiltered | 62 | 901 | 9.9% | 901 |
+| Relevance-filtered to ~30 tok | 30 | 901 | 9.9% | 901 |
+| Relevance-filtered to ~10 tok | 10 | 901 | **9.9%** | 901 |
+
+Cutting 84% of the tokens changes the economics by nothing. `"prefers concise perps"` and `"prefers detailed spot"` are distinct strings, so distinct digests, so distinct entries — at any length.
+
+**Quantization optimises the right variable.** Replace free prose with a fixed tuple of closed enums; cardinality becomes the product of the enum sizes and stops scaling with trader count:
+
+| Carried | Tokens | Namespaces | Hit rate | Generations /1,000 |
+|---|---:|---:|---:|---:|
+| `depth` {new, intermediate, pro} | 2 | 3 | 99.7% | 3 |
+| + `style` {concise, detailed} | 4 | 6 | 99.4% | 6 |
+| **+ `instrument` {spot, perps}** | **6** | **12** | **98.8%** | **12** |
+| + leverage band {low, mid, high} | 8 | 36 | 96.4% | 36 |
+| + 5 followed-asset buckets | 10 | 180 | 82.0% | 180 |
+
+**Specified: the first three. 6 tokens, 12 namespaces, 98.8%** — comfortably above the 49% the cost model assumes, with room to add a fourth axis later if the exam shows it earns its keep.
+
+Three design notes:
+
+1. **Followed assets are deliberately excluded.** The asset is already an independent component of the cache key (`key_material.asset`), so carrying "follows BTC" adds no information and multiplies namespaces. It is the worst token in the candidate set.
+2. **`curated_note` has no projection and stays out.** Free operator prose about one trader is irreducibly tier 3. If it must influence the answer, it does so at Scout egress. This is the only real loss versus Rev 1.
+3. **Growth discipline.** Namespaces multiply, they do not add. A fourth three-valued axis takes 12 → 36; a fifth takes it to 108. Keep the product under 50 and the hit rate stays above 95%. The schema's `x-max-tokens: 6` is the tripwire.
+
+**Relevance-filtering still earns its place — for the other two ceilings.** It cuts prefill (latency) and removes distractors (quality). Do both: quantize for economics, filter for quality. They are complementary, not alternatives.
 
 ### 3.4 The three options, evaluated against the measured numbers
 
@@ -588,9 +652,9 @@ Correct and necessary, but for `host_data`, not for the Scout→Scholar seam. Th
 **Adopt A as the Scout→Scholar mechanism, C for `host_data`, and freeze B as an invariant.** Concretely:
 
 1. `carry_forward` (§2.3) is the compress-forward channel. Fixed slots, closed enums, **512-token hard cap**, truncated slot-wise lowest-priority-first. No free text outside named slots.
-2. **`cache.key_material` is a closed list with `additionalProperties: false`.** This is the single most important line in the schema. A builder that adds a tier-3 value there has silently broken the rate card, and — as PR #105 proved — a thing with nothing gating it drifts. Ship it with a test that asserts the key material contains no tier-3 field, in the same family as `intent-parity.test.ts`.
-3. Per-Trader personalization moves to **Scout egress**, which already runs on every turn including cache hits.
-4. `depth` is the sole tier-3-derived value allowed across, concept-answers-only, exactly mirroring `_cache_scope` today.
+2. **`cache.key_material` is a closed list with `additionalProperties: false`.** This is the single most important line in the schema. A builder that adds an unbounded-cardinality value there has silently broken the rate card, and — as PR #105 proved — a thing with nothing gating it drifts. Ship it with a test that asserts every key-material property is either a bounded enum or an already-keyed component, in the same family as `intent-parity.test.ts`.
+3. **Per-Trader personalization stays in the Scholar call as `carry_forward.personalization`** — a three-enum projection, 6 tokens, 12 namespaces (§3.4a). *This supersedes Rev 1, which moved it to Scout egress.* The projection must be byte-identical in `carry_forward` and `cache.key_material`; a mismatch would serve one trader's personalised answer to another, which is the privacy property `_memory_key` exists to guarantee.
+4. Scout egress keeps everything that has **no** bounded projection: `curated_note`, `host_data` digests, and anything free-text.
 
 **Budget under the three ceilings:**
 
@@ -598,16 +662,16 @@ Correct and necessary, but for `host_data`, not for the Scout→Scholar seam. Th
 |---|---:|---:|---:|
 | System prompt | 1,826 | 363 + 58 | ~488 |
 | Packet, tier ≤2 | — | 820 | — |
-| Packet, tier ≥3 | 236 (history + query) | **0** | ~230 |
-| `carry_forward` | — | ~60 | ~190 (Scholar's brief) |
-| **Total input** | **~2,160** | **~1,300** | **~910** |
-| % of 1M ceiling | 0.22% | **0.13%** | 0.09% |
-| % of ~16k latency ceiling | 13.5% | **8.1%** | 5.7% |
-| Cache namespaces | n/a | **1 per (Host, asset, lang, window)** | n/a |
+| Packet, tier 3 raw | 236 (history + query) | **0** | ~230 |
+| `carry_forward` incl. `personalization` | — | ~66 | ~190 (Scholar's brief) |
+| **Total input** | **~2,160** | **~1,306** | **~910** |
+| % of 256k window | 0.84% | **0.51%** | 0.36% |
+| % of ~16k latency ceiling | 13.5% | **8.2%** | 5.7% |
+| Cache namespaces | n/a | **12 per (Host, asset, lang, window)** | n/a |
 
-### 3.6 The inversion — what to do with 999,000 unused tokens
+### 3.6 The inversion — what to spend the ~15,000 usable tokens on
 
-Since the ceiling does not bind, the useful question is not "how do we fit under 1M" but "what is worth spending headroom on." The tier model answers it, because **cost per Trader = tokens ÷ number of Traders sharing that cache namespace**:
+Since the context window does not bind, the useful question is not "how do we fit" but "what is worth spending the latency budget on." Roughly 15,000 tokens sit unused beneath the first-token ceiling on a cache miss. The tier model decides where they should go, because **cost per Trader = tokens ÷ number of Traders sharing that cache namespace**:
 
 | Spend 50,000 tokens on… | Tier | Shared by | Marginal cost per Trader |
 |---|---|---|---:|
@@ -628,9 +692,9 @@ Latency still bounds any single call to roughly 16k tokens on a cache miss **[as
 
 Ordered by consequence.
 
-1. **Does per-Trader memory keep fragmenting the Scholar cache key, or move to Scout egress?** Everything in this spec follows from the answer. Measured: ~10% hit rate at steady state if it stays vs ~99% if it moves, against a 49% assumption in cost model v4. **Victor** (owner of `_cache_scope`) **+ Sudha** (owner of the rate card).
-2. **Is the 1M ceiling real for the shortlisted Scholars?** Verify native context length per exact checkpoint (Qwen3.6-27B dense, Granite-4.1-30b, Qwen3.6-35B-A3B) before any design assumes it. The licence column already taught this lesson: verify per model+size, never assume from family. **[unverified]**
-3. **What is real prefill throughput for a 27–30B on the exam H100?** Sets the second ceiling (~16k tok assumed here). The exam is already being built and should measure it. **Sudha.**
+1. ~~**Does per-Trader memory keep fragmenting the Scholar cache key, or move to Scout egress?**~~ **RESOLVED (Rev 2, Sudha):** it stays in the Scholar call, quantized to a three-enum projection — 6 tokens, 12 namespaces, 98.8% hit rate (§3.4a). *Victor to confirm the design rather than decide it;* the specific check is that `personalization` is byte-identical in `carry_forward` and `cache.key_material`, which is what preserves the memory-A-never-served-to-memory-B property `_memory_key` was built for.
+2. ~~**Is the 1M ceiling real for the shortlisted Scholars?**~~ **RESOLVED (Rev 2, Sudha):** no — 256k-class, and 256k is itself 16× more than the ~16k latency ceiling permits. Context length leaves the exam scorecard as a **pass/fail floor at ≥32k** (§3.2). Still verify the exact checkpoint before pinning, per the licence-column discipline. **[partially unverified]**
+3. **What is real prefill throughput for a 27–30B on the exam H100?** Now the **most consequential open number in the spec** — with the context window ruled out, it alone sets the usable budget (~16k tok assumed here). The exam is already being built and should measure it. **Sudha.**
 4. **Does `capabilities` enter the packet?** 51 tokens at tier 1 makes "this venue cannot do that trade" structural rather than a gateway patch (PR #106). **Victor.**
 5. **Does `host_data` ever go inline?** This spec says never — reference + ≤400-char digest only. Confirms the portfolio/blotter stay deterministic cards. **Victor.**
 6. **Who owns `output_schema` ↔ Zod parity?** The Zod frame and `BRIEF_FORMAT_INSTRUCTIONS` are hand-maintained in two places. Recommend a parity test. **Suresh.**
