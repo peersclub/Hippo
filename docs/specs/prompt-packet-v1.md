@@ -42,9 +42,11 @@ Measured, as the system actually assembles a research turn today:
 |---|---:|---:|---:|
 | Call 1 — Scout ingress (`POST /v1/intent`) | **2,158** | 0.216% | 0.843% |
 | Call 2 — Scholar (`POST /v1/respond/stream`) | **883** | 0.088% | 0.345% |
-| Call 2, absolute worst case (memory clamped to `MAX_COMPOSED`) | 13,727 | 1.373% | 5.362% |
+| Call 2, absolute worst case (memory clamped to `MAX_COMPOSED`) | ~14,600 | 1.46% | 5.71% |
 
 **Over 99% of the window is unused on either figure.** A threading mechanism designed to "fit within 1M" is solving a problem the system does not have — and Rev 2 confirmed the 1M premise was wrong anyway (§3.2). Two other ceilings bind first, and only one of them binds hard.
+
+*The worst-case row is filler-dependent* — it measures 64,000 characters of representative operator prose, and lands between roughly 13,000 and 14,700 tokens depending on the vocabulary used. Regenerate it with `docs/specs/prompt-packet-measurements.py`. Note what it says against the ceiling that actually binds: **a fully-populated memory block consumes ~91% of the first-token latency budget on a cache miss** — which is the second, independent reason not to put unbounded prose in the Scholar call.
 
 ### 1.2 The constraint that actually binds is answer-cache key cardinality.
 
