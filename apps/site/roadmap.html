@@ -86,7 +86,92 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   .legend{font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-text-faint);text-align:center;margin:-40px 0 60px}
   .legend b{color:var(--hippo-text-mid);font-weight:500}
 
-  @media (max-width:920px){.board{grid-template-columns:1fr}}
+  /* ═══ MVP close-out: the burn-down above the board ═══
+     The board says what exists. This says what is left and by when — one
+     deadline (Aug 31), the work that closes it, and the work that cannot be
+     closed by us. Counts render from the MVP array, never typed twice. */
+  .mvp{padding:52px 0 8px}
+  .mvp-head{display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap}
+  .mvp-head .htxt{flex:1 1 430px}
+  .mvp-head h2{font-family:var(--hippo-font-display);font-size:clamp(23px,2.7vw,31px);font-weight:700;letter-spacing:-.015em;line-height:1.15;margin:11px 0 9px;color:var(--hippo-text-hi)}
+  .mvp-head h2 em{font-style:normal;color:var(--hippo-amber)}
+  .mvp-head p{font-size:13px;line-height:1.62;color:var(--hippo-text-mid);max-width:66ch;margin:0}
+
+  .clock{flex:0 0 auto;display:flex;align-items:stretch;gap:0;border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);background:var(--hippo-panel);overflow:hidden}
+  .clock > div{padding:14px 20px;border-right:1px solid var(--hippo-hairline);text-align:center;min-width:104px}
+  .clock > div:last-child{border-right:none}
+  .clock .big{font-family:var(--hippo-font-display);font-size:29px;font-weight:700;line-height:1;color:var(--hippo-text-hi)}
+  .clock .c-days .big{color:var(--hippo-amber)}
+  .clock .lbl{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.12em;color:var(--hippo-text-faint);margin-top:7px}
+
+  /* stacked progress bar */
+  .mbar{display:flex;height:15px;margin:26px 0 0;border-radius:var(--hippo-radius-pill);overflow:hidden;background:var(--hippo-card-2);border:1px solid var(--hippo-hairline)}
+  .mbar .seg{transition:width .5s ease}
+  .mbar .s-done{background:var(--hippo-up)}
+  .mbar .s-open{background:var(--hippo-amber)}
+  .mbar .s-ext{background:repeating-linear-gradient(135deg,var(--hippo-text-faint) 0 4px,transparent 4px 8px);opacity:.7}
+  .mkey{display:flex;gap:20px;flex-wrap:wrap;margin-top:11px;font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.05em;color:var(--hippo-text-faint)}
+  .mkey span{display:inline-flex;align-items:center;gap:7px}
+  .mkey i{width:9px;height:9px;border-radius:2px;flex-shrink:0;font-style:normal}
+  .mkey .k-done i{background:var(--hippo-up)}
+  .mkey .k-open i{background:var(--hippo-amber)}
+  .mkey .k-ext i{background:repeating-linear-gradient(135deg,var(--hippo-text-faint) 0 3px,transparent 3px 6px)}
+  .mkey b{color:var(--hippo-text-mid);font-weight:500}
+
+  /* the closed set — folded by default; the count is the point, the list is the proof */
+  .closedlist{margin-top:14px}
+  .closedlist summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-family:var(--hippo-font-mono);font-size:10px;letter-spacing:.06em;color:var(--hippo-text-faint);transition:color .15s}
+  .closedlist summary::-webkit-details-marker{display:none}
+  .closedlist summary::before{content:'▶';font-size:8px;transition:transform .15s}
+  .closedlist[open] summary::before{transform:rotate(90deg)}
+  .closedlist summary:hover{color:var(--hippo-text-mid)}
+  .closedlist summary span{color:var(--hippo-up)}
+  .closedlist .chips{display:flex;flex-wrap:wrap;gap:7px;padding:13px 0 2px}
+  .closedlist .chips span{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--hippo-text-mid);background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:5px 12px}
+  .closedlist .chips span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--hippo-up);flex-shrink:0}
+
+  /* sprint lanes */
+  .sprints{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:30px}
+  .lane{background:var(--hippo-panel);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-card);padding:15px 14px}
+  .lane.now{border-color:rgba(var(--hippo-amber-rgb),.45);background:linear-gradient(180deg,rgba(var(--hippo-amber-rgb),.06),var(--hippo-panel))}
+  .lane-h{display:flex;align-items:baseline;gap:9px;padding:2px 4px 12px;border-bottom:1px solid var(--hippo-hairline);margin-bottom:13px}
+  .lane-h .wk{font-family:var(--hippo-font-mono);font-size:10.5px;letter-spacing:.12em;color:var(--hippo-text-hi);text-transform:uppercase}
+  .lane.now .lane-h .wk{color:var(--hippo-amber)}
+  .lane-h .dates{font-family:var(--hippo-font-mono);font-size:9.5px;color:var(--hippo-text-faint)}
+  .lane-h .n{margin-left:auto;font-family:var(--hippo-font-mono);font-size:10.5px;color:var(--hippo-text-faint);background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-pill);padding:1px 9px}
+  .goal{font-size:11.5px;line-height:1.5;color:var(--hippo-text-dim);margin:-4px 4px 13px;font-style:italic}
+  .items{display:flex;flex-direction:column;gap:9px}
+
+  /* one unit of remaining work */
+  .mi{position:relative;background:var(--hippo-card);border:1px solid var(--hippo-hairline);border-radius:var(--hippo-radius-cell);padding:11px 13px 10px 15px;overflow:hidden}
+  .mi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--hippo-text-faint)}
+  .mi[data-st="now"]::before{background:var(--hippo-amber);animation:pulse var(--hippo-motion-pulse)}
+  .mi[data-st="blocked"]::before{background:var(--hippo-down)}
+  .mi h4{font-family:var(--hippo-font-display);font-size:13px;font-weight:600;line-height:1.3;margin:0 0 5px;color:var(--hippo-text-hi)}
+  .mi p{font-size:11.5px;line-height:1.5;color:var(--hippo-text-mid);margin:0}
+  .mi .mi-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;padding-top:8px;border-top:1px dashed var(--hippo-dash)}
+  .mi .tag{font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.06em;color:var(--hippo-text-dim);background:var(--hippo-card-2);border:1px solid var(--hippo-hairline);border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .mi .tag.own{color:var(--hippo-text-mid)}
+  .mi .tag.gate{color:var(--hippo-amber);border-color:rgba(var(--hippo-amber-rgb),.35)}
+  .mi .un{font-size:10.5px;color:var(--hippo-text-faint);line-height:1.4}
+
+  /* the lane we do not control */
+  .ext{margin-top:16px;border:1px dashed var(--hippo-dash);border-radius:var(--hippo-radius-card);background:var(--hippo-panel);padding:15px 14px}
+  .ext .lane-h{border-bottom-color:var(--hippo-dash)}
+  .ext .lane-h .wk{color:var(--hippo-down)}
+  .ext .items{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+
+  .dod{margin:22px 0 0;padding:15px 17px;border:1px solid var(--hippo-hairline);border-left:3px solid var(--hippo-up);border-radius:var(--hippo-radius-cell);background:var(--hippo-panel);font-size:12.5px;line-height:1.6;color:var(--hippo-text-mid)}
+  .dod b{color:var(--hippo-text-hi);font-weight:600}
+  .dod .mono{font-family:var(--hippo-font-mono);font-size:.92em}
+
+  @media (max-width:920px){
+    .board{grid-template-columns:1fr}
+    .sprints{grid-template-columns:1fr}
+    .ext .items{grid-template-columns:1fr}
+    .clock{width:100%}
+    .clock > div{flex:1}
+  }
 </style>
 </head>
 <body>
@@ -117,8 +202,58 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     <div class="s-prog"><div class="big" data-stat="progress">0</div><div class="lbl">IN PROGRESS</div></div>
     <div class="s-plan"><div class="big" data-stat="planned">0</div><div class="lbl">PLANNED</div></div>
   </div>
-  <div class="asof" id="asof">AS OF JULY 22, 2026 · main @ e8d8caa</div>
+  <div class="asof" id="asof">AS OF AUGUST 10, 2026 · main @ 53471ae</div>
 </div>
+
+<!-- ═══ MVP close-out ═══ -->
+<section class="block mvp" id="mvp">
+  <div class="wrap">
+    <div class="mvp-head">
+      <div class="htxt">
+        <div class="eyebrow">MVP · DEVELOPMENT CLOSE</div>
+        <h2>Everything that closes v1 ships by <em>August 31</em>.</h2>
+        <p>The board below is a history. This is the burn-down: the MVP scope defined in <span class="mono" style="font-size:.92em">PRD v1</span>, what is already closed, the units that remain, and — stated rather than buried — the ones that cannot be closed without a GPU quote, a pilot partner's engineers, or counsel. Development closing does not mean the pilot launches; it means nothing is left that we can do alone.</p>
+      </div>
+      <div class="clock">
+        <div class="c-days"><div class="big" data-mvp="days">—</div><div class="lbl">DAYS LEFT</div></div>
+        <div><div class="big" data-mvp="open">—</div><div class="lbl">OURS TO SHIP</div></div>
+        <div><div class="big" data-mvp="pct">—</div><div class="lbl">SCOPE CLOSED</div></div>
+      </div>
+    </div>
+
+    <div class="mbar" role="img" data-mvp="bar-label">
+      <span class="seg s-done" data-mvp="seg-done"></span>
+      <span class="seg s-open" data-mvp="seg-open"></span>
+      <span class="seg s-ext" data-mvp="seg-ext"></span>
+    </div>
+    <div class="mkey">
+      <span class="k-done"><i></i><b data-mvp="n-done">0</b> shipped &amp; verified</span>
+      <span class="k-open"><i></i><b data-mvp="n-open">0</b> remaining — ours, scheduled below</span>
+      <span class="k-ext"><i></i><b data-mvp="n-ext">0</b> blocked on a third party</span>
+    </div>
+
+    <details class="closedlist">
+      <summary>the <span data-mvp="n-done-2">0</span> scope items already closed</summary>
+      <div class="chips"></div>
+    </details>
+
+    <div class="sprints" id="sprints"></div>
+
+    <div class="ext" id="ext">
+      <div class="lane-h">
+        <span class="wk">Not ours to close</span>
+        <span class="dates">no date until the dependency moves</span>
+        <span class="n" data-mvp="n-ext-2">0</span>
+      </div>
+      <div class="goal">These four are the honest reason "MVP done" and "pilot live" are different sentences. Each names who unblocks it.</div>
+      <div class="items"></div>
+    </div>
+
+    <div class="dod">
+      <b>Definition of done, Aug 31:</b> the sync wave is deployed and provable from outside (<span class="mono">/health</span> carries a build SHA); every accuracy number on this site came from a run that would have failed loudly if the model were mocked; Hinglish and Devanagari trade phrasing clear the same bar English does; the demo link survives a phone; and the four PRD launch gates that do not need a partner are scored, not estimated. Anything still open on Aug 31 is on this page with a name against it — <b>not</b> quietly re-dated.
+    </div>
+  </div>
+</section>
 
 <!-- ═══ Board ═══ -->
 <section class="block" style="padding-top:36px">
@@ -374,6 +509,154 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   })
 
   render()
+
+  // ══════════════════════════════════════════════════════════════════════
+  // MVP close-out — one deadline, one source of truth.
+  // Every number in that section (the clock, the bar, the lane counts, the
+  // percentage) is derived from the three arrays below. Nothing is typed
+  // twice, so moving an item between lanes cannot leave a stale total behind.
+  // ══════════════════════════════════════════════════════════════════════
+  const MVP_DEADLINE = new Date(2026, 7, 31) // Aug 31, 2026 — month is 0-indexed
+
+  // Closed. Short labels; the board above carries the evidence for each.
+  const MVP_CLOSED = [
+    'Card protocol v1 + server-driven renderer',
+    'Research briefs — live-data-grounded, streamed',
+    'Order flow — intent → draft → ticket → confirm → lifecycle',
+    'Advice-decline guardrail (output-side)',
+    'Positions & portfolio cards',
+    'Six edge states',
+    'Onboarding + data consent + ground rules',
+    'Memory — persona, 4 layers, auto-learning A–D',
+    'Execution seam (Approach A) + venue capabilities',
+    'i18n EN · हिन्दी · Hinglish · ar, build-gated',
+    'Host safety — closed Shadow DOM, 1.54KB loader',
+    'Admin panel + partner portal V1 + audit',
+    'Durability — Redis sessions, durable ticket routing, Postgres audit',
+    'Eval harness v1 + intent harness + pilot dashboard',
+    'Agentic installer — scan · conform · embed · verify',
+  ]
+
+  // Remaining, ours, scheduled. `end` is the last day of the lane — the lane
+  // containing today renders as active, so the highlight advances by itself.
+  const SPRINTS = [
+    {
+      wk: 'Week 1', dates: 'Aug 11–15', end: new Date(2026, 7, 15),
+      goal: 'Make the truth verifiable — every claim after this week is checkable from outside.',
+      items: [
+        { t: 'Deploy the sync wave', own: 'Victor', un: 'Unblocks every “verified live” claim made since Aug 6.',
+          d: 'PRs #105–#111 are merged and main is green at 30/30 — and none of it is running. Railway does not auto-deploy, and five services changed: gateway, seam, memory, admin, intelligence. No migrations in this wave, so the deploy is the whole job.' },
+        { t: '/health reports the build SHA', own: 'Victor', un: 'Turns a deploy from a hope into a check.',
+          d: 'Surfaced twice now — once by the audit, once by not being able to answer “is this fix live?” during the sync wave. It is the reason the wave was held rather than shipped.' },
+        { t: 'The harness must fail loudly on a degraded backend', own: 'Victor', gate: 'measurement integrity',
+          un: 'Same failure class as PR #105: a check that cannot fail is not a check.',
+          d: 'A live --intent-endpoint run against an over-limit key reported 68.3% — byte-identical to the offline run — because the service degraded to mock and kept answering. It was only caught because the two runs matched exactly. Surface provider mode on /health and assert it.' },
+        { t: 'Restore the OpenRouter credit', own: 'Victor', un: 'Prerequisite for PRD gates 1 and 2.',
+          d: '“Key limit exceeded (total limit)” → 403. Until it clears, every accuracy figure we publish grades the deterministic parser, not the model that answers in production.' },
+        { t: 'The demo link has to survive a phone', own: 'Victor', un: 'The demo link is the sales surface.',
+          d: 'apps/host-demo/index.html:41 is a fixed 1fr 260px 300px grid with zero @media queries — a partner opening the link on mobile gets horizontal overflow. Exploratory work already sits on feat/host-demo-responsive.' },
+        { t: 'The portfolio handler throws your open orders away', own: 'Victor', un: 'Fixes the stale OPEN ORDERS · N badge.',
+          d: 'orchestrator/index.ts:2346 destructures { positions } and discards openOrders — a live defect caught while writing /testing, and one of six things the old /how guide had outright wrong.' },
+      ],
+    },
+    {
+      wk: 'Week 2', dates: 'Aug 18–22', end: new Date(2026, 7, 22),
+      goal: 'Score the gates that have a number instead of an opinion.',
+      items: [
+        { t: 'Hinglish and Devanagari trade phrasing', own: 'Victor', gate: 'largest quality gap',
+          un: 'A Hindi-speaking trader on an India pilot is the target user.',
+          d: '31% and 5% against 95.3% for English. The deterministic layer is effectively English-only for trade phrasing — measurable since the intent harness landed, and now the biggest single gap between what Hippo claims and what it does.' },
+        { t: 'Advice-avoidance scored under baiting', own: 'Victor', gate: 'PRD gate 2',
+          un: 'The trust position, the cache economics and the regulatory line are the same line.',
+          d: 'A consistency score on the adversarial set — a gate, not a nice-to-have. The 60 advice-bait rows have existed in the eval set since v1; the score has never been published.' },
+        { t: 'Host-safety pass in CI', own: 'Victor', gate: 'PRD gate 3',
+          un: 'A budget nothing enforces is a number that drifts.',
+          d: 'A hostile-CSS page plus a performance budget, running on every merge. The loader sits at 1.54KB gz of its 5KB allowance today — nothing in CI keeps it there.' },
+      ],
+    },
+    {
+      wk: 'Week 3', dates: 'Aug 25–29', end: new Date(2026, 7, 29),
+      goal: 'Procurement-ready: the things a partner meeting needs, shown on demand.',
+      items: [
+        { t: 'Onboarding hero · ambient pulse · share cards', own: 'Victor', un: 'The last of Phase 5 that does not need a partner.',
+          d: 'The welcome moment carrying the partner’s name, the pill that glows when the market moves while Hippo is minimized, and the co-branded share card with the no-advice line printed on it. The vault lists all three as not started.' },
+        { t: 'Degraded mode demonstrable on demand', own: 'Victor', gate: 'PRD gate 5',
+          un: 'Shown in procurement, not discovered in an outage.',
+          d: 'The amber banner and labeled CACHED BRIEF badges are the SLA clause made visible. Edge-state completeness is a launch gate precisely because this one is only convincing before you need it.' },
+        { t: 'Arabic native-speaker review', own: 'Kartik / MENA', un: 'Gates data-hippo-locale="ar" for a Gulf partner.',
+          d: 'The ar catalog is complete and merged but deliberately dormant. Copy quality in a language none of us reads is not something a test can assert.' },
+      ],
+    },
+  ]
+
+  // Remaining, not ours. Each names the dependency rather than a date.
+  const MVP_EXT = [
+    { t: 'Model bake-off vs the 70B baseline', own: 'needs GPU — Kartik’s quotes', gate: 'PRD gate 1',
+      un: 'Decides which model actually serves the pilot.',
+      d: 'The winner must land within 5% of a 70B baseline on the 300-query exam with no hallucination gap. Qwen3-32B / QwQ-32B are the candidates; none of it can run without GPU access.' },
+    { t: 'Full lifecycle round-trip in a partner sandbox', own: 'pilot partner eng', gate: 'PRD gate 4',
+      un: 'The one gate a sim venue can never close.',
+      d: 'Open Decision #6 — confirm surface: deep link vs JS callback vs partner-hosted modal. Open Decision #9 — the pilot venue exposes no order-status-by-id and no webhook, so the seam cannot cheaply learn terminal state; the poll reconciler infers “absent from open orders = filled”, which cannot tell filled from cancelled.' },
+    { t: 'vLLM pods + GPU capacity plan', own: 'Kartik / infra', un: 'The production serving topology.',
+      d: 'Regional intent (7–8B), a global research tier (~30B) and the shared cache tier. Follows the India and Gulf quotes; today the fleet is a hosted API and a local dev compose file.' },
+    { t: 'Layer-2 consent format per jurisdiction', own: 'counsel', un: 'Blocks the first Gulf contract, not the India pilot.',
+      d: 'Active checkbox vs disclosed-in-terms — Open Decision #2. The onboarding screen was deliberately built so switching that row is trivial, which is why this can sit open without holding development.' },
+  ]
+
+  const miHTML = (it, st) => `<article class="mi" data-st="${st}">
+      <h4>${it.t}</h4>
+      <p>${it.d}</p>
+      <div class="mi-foot">
+        <span class="tag own">${it.own}</span>${it.gate ? `<span class="tag gate">${it.gate}</span>` : ''}${it.un ? `<span class="un">${it.un}</span>` : ''}
+      </div>
+    </article>`
+
+  function renderMVP() {
+    const now = new Date()
+    const nDone = MVP_CLOSED.length
+    const nOpen = SPRINTS.reduce((n, s) => n + s.items.length, 0)
+    const nExt = MVP_EXT.length
+    const total = nDone + nOpen + nExt
+    const days = Math.max(0, Math.ceil((MVP_DEADLINE - now) / 86400000))
+    const set = (k, v) => {
+      for (const el of document.querySelectorAll(`[data-mvp="${k}"]`)) el.textContent = v
+    }
+
+    set('days', days)
+    set('open', nOpen)
+    set('pct', `${Math.round((nDone / total) * 100)}%`)
+    set('n-done', nDone)
+    set('n-done-2', nDone)
+    set('n-open', nOpen)
+    set('n-ext', nExt)
+    set('n-ext-2', nExt)
+
+    const pct = (n) => `${((n / total) * 100).toFixed(1)}%`
+    document.querySelector('[data-mvp="seg-done"]').style.width = pct(nDone)
+    document.querySelector('[data-mvp="seg-open"]').style.width = pct(nOpen)
+    document.querySelector('[data-mvp="seg-ext"]').style.width = pct(nExt)
+    document
+      .querySelector('[data-mvp="bar-label"]')
+      .setAttribute('aria-label', `MVP scope: ${nDone} of ${total} closed, ${nOpen} remaining before August 31, ${nExt} blocked on a third party`)
+
+    document.querySelector('.closedlist .chips').innerHTML = MVP_CLOSED.map((c) => `<span>${c}</span>`).join('')
+
+    // The active lane is the first whose end date has not passed — the amber
+    // highlight walks forward on its own, and after Aug 29 nothing is "now".
+    const activeIdx = SPRINTS.findIndex((s) => now <= s.end)
+    document.getElementById('sprints').innerHTML = SPRINTS.map((s, i) => {
+      const isNow = i === activeIdx
+      return `<div class="lane${isNow ? ' now' : ''}">
+        <div class="lane-h"><span class="wk">${s.wk}</span><span class="dates">${s.dates}</span><span class="n">${s.items.length}</span></div>
+        <div class="goal">${s.goal}</div>
+        <div class="items">${s.items.map((it) => miHTML(it, isNow ? 'now' : 'todo')).join('')}</div>
+      </div>`
+    }).join('')
+
+    document.querySelector('#ext .items').innerHTML = MVP_EXT.map((it) => miHTML(it, 'blocked')).join('')
+  }
+
+  renderMVP()
 </script>
 </body>
 </html>

@@ -1,6 +1,17 @@
 # 🦛 Hippo Roadmap — Done vs Pending
 
-**As of:** August 6, 2026 · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `2649b37`) · Detail per phase: [[00 Build Plan Overview]] · Live links + creds: [[🟢 Live Demo Status]]
+**As of:** August 10, 2026 · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `53471ae`) · Detail per phase: [[00 Build Plan Overview]] · Live links + creds: [[🟢 Live Demo Status]]
+
+> [!abstract] MVP close-out — development closes August 31, 2026
+> Published on the public board as the burn-down above the kanban: <https://hippo-site.vercel.app/roadmap#mvp>. **31 MVP scope items: 15 closed · 12 ours to ship · 4 blocked on a third party.** "Development closed" is not "pilot live" — it means nothing is left that we can do alone. Keep this block and the site section in sync; the site derives every count from its own array, so moving an item there is the edit that matters.
+>
+> **Week 1 (Aug 11–15) — make the truth verifiable.** (1) **Deploy the sync wave** — [#105](https://github.com/peersclub/Hippo/pull/105)–[#111](https://github.com/peersclub/Hippo/pull/111) merged, green 30/30, and not running; five services changed, no migrations. (2) **`/health` reports the build SHA** — the reason the wave was held rather than shipped. (3) **Harness must fail loudly on a degraded backend** — an over-limit key produced 68.3%, byte-identical to the offline run, because the service degraded to mock; surface provider mode on `/health` and assert it. (4) **Restore the OpenRouter credit** — `Key limit exceeded (total limit)` → 403 blocks every LLM-path measurement. (5) **host-demo on a phone** — `apps/host-demo/index.html:41` is a fixed `1fr 260px 300px` grid with zero `@media` queries; work parked on `feat/host-demo-responsive`. (6) **`orchestrator/index.ts:2346` discards `openOrders`** — root cause of the stale `OPEN ORDERS · N` badge.
+>
+> **Week 2 (Aug 18–22) — score the gates that have a number.** (7) **Hinglish 31% / Devanagari 5% vs English 95.3%** — the deterministic layer is effectively English-only for trade phrasing, and a Hindi-speaking trader on an India pilot is the target user. (8) **Advice-avoidance under baiting** (PRD gate 2) — the 60 advice-bait rows exist; the score has never been published. (9) **Host-safety pass in CI** (PRD gate 3) — hostile-CSS page + performance budget; the loader sits at 1.54KB gz of 5KB with nothing enforcing it.
+>
+> **Week 3 (Aug 25–29) — procurement-ready.** (10) **Onboarding hero · ambient pulse · share cards** — the last of Phase 5 that needs no partner. (11) **Degraded mode demonstrable on demand** (PRD gate 5) — shown in procurement, not discovered in an outage. (12) **Arabic native-speaker review** (Kartik/MENA) — gates flipping `data-hippo-locale="ar"`.
+>
+> **Not ours to close — no date until the dependency moves.** Model bake-off vs the 70B baseline (PRD gate 1, needs GPU — Kartik's quotes) · full lifecycle round-trip in a partner sandbox (PRD gate 4, [[Open Decisions]] #6 + #9) · vLLM pods + GPU capacity plan · Layer-2 consent format per jurisdiction ([[Open Decisions]] #2, counsel). **Anything still open on Aug 31 stays on the page with a name against it rather than being quietly re-dated.**
 
 > [!check] Cross-service sync wave — the drift audit, and the reason the drift existed (2026-08-06, PRs [#105](https://github.com/peersclub/Hippo/pull/105)–[#111](https://github.com/peersclub/Hippo/pull/111))
 > The question was "are all the services in sync — the admin panel, the settings, the SDK?" An eight-axis audit with adversarial verification said no: **15 confirmed divergences**, seven of them where one surface asserted something a second surface never checked. All seven money-relevant units are merged; **main is green, 30/30 turbo tasks**.
