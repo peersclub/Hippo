@@ -8,5 +8,10 @@ COPY services/intelligence/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY services/intelligence/ ./
 ENV PYTHONUNBUFFERED=1
+# Build provenance for /health (--build-arg GIT_SHA=<commit>, BUILT_AT=<ISO ts>;
+# Railway passes these as build args). Defaults stay an honest "unknown".
+ARG GIT_SHA=unknown
+ARG BUILT_AT=unknown
+ENV GIT_SHA=$GIT_SHA BUILT_AT=$BUILT_AT
 EXPOSE 8791
 CMD ["sh", "-c", "uvicorn main:app --host :: --port ${PORT:-8791}"]

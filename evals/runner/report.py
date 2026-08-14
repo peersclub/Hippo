@@ -214,6 +214,7 @@ def write_intent_report(
     backend: str,
     queries_path: str,
     fail_under: float | None,
+    provider: dict | None = None,
 ) -> tuple[Path, dict]:
     """Write intent-results.jsonl + intent-summary.{json,md}; return (dir, summary).
 
@@ -231,13 +232,14 @@ def write_intent_report(
     summary = aggregate_intent(results)
     (report_dir / "intent-summary.json").write_text(
         json.dumps({"backend": backend, "queries": queries_path, "timestamp": timestamp,
-                    "fail_under": fail_under, "summary": summary},
+                    "fail_under": fail_under, "provider": provider, "summary": summary},
                    ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     (report_dir / "intent-summary.md").write_text(
         render_intent_summary_md(summary, backend=backend, queries_path=queries_path,
-                                 timestamp=timestamp, fail_under=fail_under),
+                                 timestamp=timestamp, fail_under=fail_under,
+                                 provider=provider),
         encoding="utf-8",
     )
     return report_dir, summary

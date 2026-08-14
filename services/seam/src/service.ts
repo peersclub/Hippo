@@ -46,6 +46,11 @@ const MAX_AUDIT_ENTRIES = 5_000
 const SIDES = new Set(['buy', 'sell'])
 const TYPES = new Set(['market', 'limit'])
 
+// Build provenance: stamped by the Docker build (Railway build args); an
+// unstamped build reports "unknown", never a guessed value.
+const GIT_SHA = process.env.GIT_SHA || 'unknown'
+const BUILT_AT = process.env.BUILT_AT || 'unknown'
+
 /**
  * Options for the seam service. The whole trading surface is
  * compliance-critical and must never be network-open, so both knobs default to
@@ -531,7 +536,13 @@ export function buildService(
     return page.rows.reverse()
   })
 
-  app.get('/health', async () => ({ ok: true, service: 'seam', audited: auditedTotal }))
+  app.get('/health', async () => ({
+    ok: true,
+    service: 'seam',
+    audited: auditedTotal,
+    sha: GIT_SHA,
+    builtAt: BUILT_AT,
+  }))
 
   return app
 }

@@ -35,6 +35,11 @@ import {
 const LEVELS: ReadonlySet<string> = new Set(['new', 'intermediate', 'pro'])
 const FACT_SOURCES: ReadonlySet<string> = new Set(['auto', 'admin'])
 
+// Build provenance: stamped by the Docker build (Railway build args); an
+// unstamped build reports "unknown", never a guessed value.
+const GIT_SHA = process.env.GIT_SHA || 'unknown'
+const BUILT_AT = process.env.BUILT_AT || 'unknown'
+
 /** Hand-validate an incoming learned-facts array (same zero-schema-deps rule
  * as parseUpdate). Malformed entries are dropped, not fatal — the caller is
  * the trusted gateway, but a bad fact should never 500 a fire-and-forget
@@ -303,6 +308,8 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
   app.get('/health', async () => ({
     ok: true,
     service: 'memory',
+    sha: GIT_SHA,
+    builtAt: BUILT_AT,
     personas: await store.size(),
     maxBody: MAX_BODY,
     // The composed snapshot is an audit record, not a prompt layer, so it has

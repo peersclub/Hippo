@@ -666,3 +666,16 @@ describe('discovery surface (hippo scan target)', () => {
     expect(res.body).toContain('/openapi.json')
   })
 })
+
+describe('build provenance', () => {
+  it('/health reports sha + builtAt ("unknown" when the image is unstamped)', async () => {
+    const { app } = makeApp()
+    const body = (await app.inject({ method: 'GET', url: '/health' })).json()
+    expect(body).toMatchObject({
+      ok: true,
+      service: 'host-venue',
+      sha: expect.any(String),
+      builtAt: expect.any(String),
+    })
+  })
+})

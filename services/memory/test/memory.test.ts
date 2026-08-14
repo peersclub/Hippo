@@ -253,11 +253,18 @@ describe('persona routes trust boundary (PII)', () => {
     await app.close()
   })
 
-  it('leaves /health unguarded', async () => {
+  it('leaves /health unguarded and reports build provenance', async () => {
     const app = buildService({ internalToken: TOKEN })
     const res = await app.inject({ method: 'GET', url: '/health' })
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toMatchObject({ ok: true, service: 'memory' })
+    // sha/builtAt prove from outside which build is running ("unknown" when
+    // the image was not stamped — never a fabricated value).
+    expect(res.json()).toMatchObject({
+      ok: true,
+      service: 'memory',
+      sha: expect.any(String),
+      builtAt: expect.any(String),
+    })
     await app.close()
   })
 })

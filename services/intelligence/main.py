@@ -38,6 +38,11 @@ logging.basicConfig(
 
 log = logging.getLogger("intelligence")
 
+# Build provenance: stamped by the Docker build (Railway build args); an
+# unstamped build reports "unknown", never a guessed value.
+GIT_SHA = os.environ.get("GIT_SHA") or "unknown"
+BUILT_AT = os.environ.get("BUILT_AT") or "unknown"
+
 router = ProviderRouter()
 
 
@@ -295,9 +300,19 @@ async def respond_stream(req: RespondRequest) -> StreamingResponse:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    # llm/providerMode surface router.mode ("llm" | "mock") as "live" | "mock":
+    # the eval harness refuses to grade anything but "live", and the fleet
+    # script shows providerMode next to sha. router.model already resolves to
+    # "mock" while degraded, so a reader can't mistake mock output for a model.
+    provider_mode = "live" if router.mode == "llm" else "mock"
     return {
         "ok": True,
+        "service": "intelligence",
+        "sha": GIT_SHA,
+        "builtAt": BUILT_AT,
         "mode": router.mode,
+        "llm": provider_mode,
+        "providerMode": provider_mode,
         "model": router.model,
         "cache": answer_cache.stats(),
     }

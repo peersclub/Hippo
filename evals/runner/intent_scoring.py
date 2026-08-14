@@ -321,6 +321,7 @@ def render_intent_summary_md(
     queries_path: str,
     timestamp: str,
     fail_under: float | None,
+    provider: dict | None = None,
 ) -> str:
     acc = summary["accuracy"]
     lines = [
@@ -328,6 +329,15 @@ def render_intent_summary_md(
         "",
         f"- **Run:** {timestamp} (UTC)",
         f"- **Backend:** {backend}",
+    ]
+    if provider:
+        # What the target's /health swore it was at probe time — the reader
+        # must never have to guess whether a live model or the mock was graded.
+        lines.append(
+            f"- **Target /health:** providerMode={provider.get('providerMode')} "
+            f"· model=`{provider.get('model')}` · sha=`{provider.get('sha')}`"
+        )
+    lines += [
         f"- **Queries:** {summary['n']} from `{queries_path}`",
         f"- **Overall intent accuracy:** **{_pct(acc)}** "
         f"({summary['overall']['correct']}/{summary['n']})",

@@ -641,3 +641,17 @@ describe('seam confirm callbackUrl SSRF allowlist', () => {
     await app.close()
   })
 })
+
+describe('build provenance', () => {
+  it('/health reports sha + builtAt ("unknown" when the image is unstamped)', async () => {
+    const app = guarded()
+    const body = (await app.inject({ method: 'GET', url: '/health' })).json()
+    expect(body).toMatchObject({
+      ok: true,
+      service: 'seam',
+      sha: expect.any(String),
+      builtAt: expect.any(String),
+    })
+    await app.close()
+  })
+})

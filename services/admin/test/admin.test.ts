@@ -1399,3 +1399,17 @@ describe('per-IP rate limit', () => {
     await app.close()
   })
 })
+
+describe('build provenance', () => {
+  it('/health reports sha + builtAt ("unknown" when the image is unstamped)', async () => {
+    const { app } = await testAdmin()
+    const body = (await app.inject({ method: 'GET', url: '/health' })).json()
+    expect(body).toMatchObject({
+      ok: true,
+      service: 'admin',
+      sha: expect.any(String),
+      builtAt: expect.any(String),
+    })
+    await app.close()
+  })
+})

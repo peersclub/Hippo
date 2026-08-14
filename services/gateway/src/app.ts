@@ -55,6 +55,11 @@ import { registerFileUploadRoute } from './upload/route.js'
 
 const PORT = Number(process.env.PORT ?? 8788)
 
+// Build provenance: stamped by the Docker build (Railway build args); an
+// unstamped build reports "unknown", never a guessed value.
+const GIT_SHA = process.env.GIT_SHA || 'unknown'
+const BUILT_AT = process.env.BUILT_AT || 'unknown'
+
 export type GatewayOptions = {
   intel?: import('./orchestrator/intelligence.js').IntelligenceClient
   market?: import('./orchestrator/market.js').MarketClient
@@ -418,7 +423,12 @@ export async function buildApp(opts: GatewayOptions = {}) {
     return { ok: true, routed }
   })
 
-  app.get('/health', async () => ({ ok: true, service: 'gateway' }))
+  app.get('/health', async () => ({
+    ok: true,
+    service: 'gateway',
+    sha: GIT_SHA,
+    builtAt: BUILT_AT,
+  }))
 
   // In-memory counters for dev; OTel + telemetry_events replace this in pods.
   // Guarded like every /internal surface — MAU-by-partner and load numbers
