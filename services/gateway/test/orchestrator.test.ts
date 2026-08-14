@@ -548,6 +548,28 @@ describe('orchestrator: other routes', () => {
     await app.close()
   })
 
+  it('portfolio carrying BOTH positions and resting open orders drops neither', async () => {
+    // Regression: the handler used to destructure { positions } and discard
+    // openOrders, so the OPEN ORDERS badge could disagree with the blotter.
+    const { app, sessions } = await testApp({
+      intel: stubIntel({
+        intent: () => ({ intent: 'portfolio', confidence: 0.9, language: 'en' }),
+      }),
+    })
+    const session = await createSession(app, sessions)
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'my positions' })
+    await waitForJournal(session, (t) => t.includes('positions') && t.includes('orders_snapshot'))
+    const positions = frameOfType<{ rows: unknown[] }>(session, 'positions')
+    expect(positions.rows).toEqual(portfolioFixture.positions)
+    const snapshot = frameOfType<{ open: unknown[]; positionsCount: number }>(
+      session,
+      'orders_snapshot',
+    )
+    expect(snapshot.open).toEqual(portfolioFixture.openOrders)
+    expect(snapshot.positionsCount).toBe(portfolioFixture.positions.length)
+    await app.close()
+  })
+
   it('portfolio with the seam down → honest unavailability, never a fabricated table', async () => {
     const { app, sessions } = await testApp({
       intel: stubIntel({
