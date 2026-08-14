@@ -63,9 +63,24 @@ From a clean checkout of `origin/main`:
 
 ```sh
 railway link -p 3d1bfe4a-2dbe-47d2-8ca6-8dde97c9f2dd -e production -s <service>
+railway variables --service <service> \
+  --set "GIT_SHA=$(git rev-parse HEAD)" \
+  --set "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"   # /health provenance — see below
 railway up --service <service> --ci --detach
 railway logs -d <deployment-id> --lines 3   # until the boot line appears
 ```
+
+**`GIT_SHA` / `BUILT_AT` are not optional decoration.** Every service reads
+them from the environment at boot and reports them on `/health` (`sha`,
+`builtAt`); intelligence additionally reports `llm: live|mock` + the resolved
+model id, which the eval harness asserts before grading an endpoint. Skip the
+`railway variables` step and the deploy honestly reports `sha: "unknown"` —
+nothing fabricates a value. The variables are plain runtime env, so setting
+them per deploy (as above) is the whole mechanism; the `ARG`/`ENV` lines in
+`deploy/docker/*.Dockerfile` exist for platforms that only pass build args.
+After the wave lands, `scripts/fleet-versions.sh` prints the deployed
+`sha`/`builtAt` of every public service side by side — "is this live?" is one
+command.
 
 - `--detach` matters: the CLI's status stream can time out in some
   environments while the upload actually succeeded — every "failed" retry
