@@ -291,7 +291,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     </div>
 
     <div class="dod">
-      <b>Definition of done, Aug 31:</b> the sync wave is deployed and provable from outside (<span class="mono">/health</span> carries a build SHA); every accuracy number on this site came from a run that would have failed loudly if the model were mocked; Hinglish and Devanagari trade phrasing clear the same bar English does; the demo link survives a phone; and the four PRD launch gates that do not need a partner are scored, not estimated.<br /><br /><b>And the honest reading of the arithmetic above:</b> the remaining work does not fit inside the working weeks left. It fits the calendar only, with almost no slack, and Week 2 is where it breaks — the language work alone is over a week inside a five-day lane. If something has to give, it is the Hinglish and Devanagari target narrowing to the highest-traffic phrasing families rather than full parity; every other item either gates a PRD launch gate or is half a day. Anything still open on Aug 31 stays on this page with a name against it — <b>not</b> quietly re-dated.
+      <b>Definition of done, Aug 31:</b> the sync wave is deployed and provable from outside (<span class="mono">/health</span> carries a build SHA); every accuracy number on this site came from a run that would have failed loudly if the model were mocked; the demo link survives a phone; and the PRD launch gates that do not need a partner are scored, not estimated.<br /><br /><b>Scope decision, Aug 14:</b> two items left the MVP by name, not by silence. <b>Hinglish and Devanagari trade phrasing</b> (6d — the single largest item, over a week inside a five-day lane) moves to the pilot phase: the LLM path still handles non-English orders, the deterministic-layer parity work resumes against real pilot traffic, and the 31% / 5% baselines plus the failing-row export keep it measurable the day it resumes. <b>Arabic native-speaker review</b> (1d, Kartik / MENA) was review-blocked, not build-blocked — the <span class="mono">ar</span> catalog stays merged and dormant, and the review lands whenever a Gulf partner is real. With those two out, the remaining work fits the weekdays left with the weekends as slack rather than as a requirement. Anything still open on Aug 31 stays on this page with a name against it — <b>not</b> quietly re-dated.
     </div>
   </div>
 </section>
@@ -434,7 +434,6 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { s:'done', cat:'installer', t:'Model-driven adapter codegen (stage 4)', d:'hippo scan now synthesizes the venue’s mapping.ts bodies with a model — the prompt carries the venue’s documented response shape and the exact CTI target type, and every candidate must pass the same strict standalone typecheck the test suite enforces (one diagnostics-informed retry, then an honest throwing stub). Unconfigured model = byte-identical deterministic output, so CI stays hermetic. rejections.yaml was already deterministic and complete.', ref:'PR #66', date:'Jul 29' },
     { s:'done', cat:'host', t:'Demo venue state persistence', d:'Positions are sustained now: the Assetworks demo venue’s entire book of record — positions, resting orders, wallets, venue settings, even the order-id counter — persists to Postgres as a debounced snapshot and restores on boot. A container restart used to silently wipe everything (positions vanished mid-demo); verified live: open a position, restart the venue, the position survives. Wallet reset stays the one deliberate clean slate.', ref:'PR #68', date:'Jul 29' },
     { s:'done', cat:'ops', t:'Tier-2 durability', d:'Nothing rides only in memory anymore: sessions + frame journals live in Redis (cold resume across restarts), the ticket→session routing is a TTL’d Redis key so a venue fill lands even if the gateway restarts mid-order (proven live: an event delivered 15s after a fresh boot still routed), and the seam’s audit trail persists to Postgres (migration 013). Restarts stopped being data loss.', ref:'PR #64·#65', date:'Jul 29' },
-    { s:'progress', cat:'sdk', t:'Arabic native-speaker review', d:'Kartik / MENA native review gates flipping data-hippo-locale="ar" live for any Arabic-market partner. The copy itself is already merged.', ref:'PR #17', date:'review' },
     { s:'progress', cat:'infra', t:'Cloud-wire the Assetworks host', d:'host-venue is now fully cloud-wired: a public Railway domain (host-venue-production.up.railway.app) + INTELLIGENCE_URL for the AI proxy, and the live host-demo settings + exchange pages drive it end to end — VITE_HOST_VENUE_URL baked via import.meta.env (the %VITE% placeholder only substitutes in index.html, never in .js modules, so it had silently fallen back to localhost). Still blocked: only the standalone Next.js host app, parked on branch assetworks-exchange-app until Railway fixes the next-dependency Metal-builder crash.', ref:'aedb0d5·branch', date:'partial' },
 
     // ───── PLANNED ─────
@@ -586,17 +585,9 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   // containing today renders as active, so the highlight advances by itself.
   const SPRINTS = [
     {
-      wk: 'Week 1', dates: 'Aug 11–14', end: new Date(2026, 7, 14), cap: 4,
-      goal: 'Make the truth verifiable — every claim after this week is checkable from outside.',
+      wk: 'Now', dates: 'Aug 14–16', end: new Date(2026, 7, 16), cap: 3,
+      goal: 'Make the truth verifiable — every claim after this lane is checkable from outside.',
       items: [
-        { t: 'Deploy the sync wave', own: 'Victor', est: 0.5, un: 'Unblocks every “verified live” claim made since Aug 6.',
-          d: 'PRs #105–#111 are merged and main is green at 30/30 — and none of it is running. Railway does not auto-deploy, and five services changed: gateway, seam, memory, admin, intelligence. No migrations in this wave, so the deploy is the whole job.',
-          plan: [
-            'Confirm no pending migrations, then <code>railway up --detach</code> per changed service — gateway, seam, memory, admin, intelligence. Specs are committed at <code>deploy/railway/*.json</code>; <code>--detach</code> is the known workaround for the CLI status-stream timeout.',
-            'Smoke the four fixes this wave was for: a perp ask on the spot-only venue returns a rejection rather than a silent spot order; the admin panel finds a persona past row 50; the LLM can emit <code>alert</code>; a Hindi panel draws no English chrome.',
-            'Re-run the deterministic eval against the deployed gateway and confirm 68.3% still holds — a deploy that moves it is a regression, not a surprise.',
-            'Flip <code>🟢 Live Demo Status.md</code> from “MERGED, NOT YET DEPLOYED” to live, with the deployed SHA once item 2 lands.',
-          ] },
         { t: '/health reports the build SHA', own: 'Victor', est: 0.5, un: 'Turns a deploy from a hope into a check.',
           d: 'Surfaced twice now — once by the audit, once by not being able to answer “is this fix live?” during the sync wave. It is the reason the wave was held rather than shipped.',
           plan: [
@@ -613,14 +604,6 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
             'Every <code>--intent-endpoint</code> run probes that first and exits non-zero on mock, rather than quietly grading <code>rule_classify</code>.',
             'Stamp provider mode and model id into the report header, so an archived report can never be misread later.',
             'Regression test: point the runner at a deliberately mocked service and assert the non-zero exit — the same “prove it can fail” discipline that closed PR #105.',
-          ] },
-        { t: 'Restore the OpenRouter credit', own: 'Victor', est: 0.5, un: 'Prerequisite for PRD gates 1 and 2.',
-          d: '“Key limit exceeded (total limit)” → 403. Until it clears, every accuracy figure we publish grades the deterministic parser, not the model that answers in production.',
-          plan: [
-            'Top up the account and mint a fresh key; set it on intelligence and redeploy.',
-            'Verify a real turn over the public wire returns the live model id, not the degraded fallback.',
-            'Re-run <code>--mode intent --intent-endpoint</code> and publish the first honest LLM-path number — expect it to differ from 68.3%, which is the point.',
-            'Add a low-balance alert so the next exhaustion is noticed before a measurement is built on it.',
           ] },
         { t: 'The demo link has to survive a phone', own: 'Victor', est: 2, un: 'The demo link is the sales surface.',
           d: 'apps/host-demo/index.html:41 is a fixed 1fr 260px 300px grid with zero @media queries — a partner opening the link on mobile gets horizontal overflow. Exploratory work already sits on feat/host-demo-responsive.',
@@ -642,17 +625,23 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     },
     {
       wk: 'Week 2', dates: 'Aug 17–21', end: new Date(2026, 7, 21), cap: 5,
-      goal: 'Score the gates that have a number instead of an opinion.',
+      goal: 'Deploy what is merged, then score the gates that have a number instead of an opinion.',
       items: [
-        { t: 'Hinglish and Devanagari trade phrasing', own: 'Victor', est: 6, gate: 'largest quality gap',
-          un: 'A Hindi-speaking trader on an India pilot is the target user.',
-          d: '31% and 5% against 95.3% for English. The deterministic layer is effectively English-only for trade phrasing — measurable since the intent harness landed, and now the biggest single gap between what Hippo claims and what it does. Six of the 21 remaining days sit here.',
+        { t: 'Deploy the sync wave', own: 'Victor', est: 0.5, un: 'Unblocks every “verified live” claim made since Aug 6.',
+          d: 'PRs #105–#111 are merged and main is green at 30/30 — and none of it is running. Railway does not auto-deploy, and five services changed: gateway, seam, memory, admin, intelligence. No migrations in this wave, so the deploy is the whole job. Held until /health carries the build SHA so the deploy is provable from outside.',
           plan: [
-            'Export the failing rows from the intent harness by language and cluster them into phrasing families — the fix is per family, not per row.',
-            'Extend the <code>intent.py</code> fast paths family by family: Devanagari numerals, Hinglish verb forms (<code>kharido</code> / <code>bech do</code> / <code>band karo</code>), and the transliterated size and leverage words.',
-            'Mirror every addition into the degraded-mode twin in <code>orchestrator/intelligence.ts</code> — its own comment says the two must recognise the same phrasings, and the last wave proved a stale twin drops phrasings silently.',
-            'Add labeled rows to <code>evals/queries/v1-intents.jsonl</code> per family, keep <code>test_taxonomy_parity.py</code> green, and re-measure after each family so the curve is visible rather than one number at the end.',
-            'Set the gate in the harness — Hinglish ≥80%, Devanagari ≥70% — so a regression fails a build instead of waiting for the next audit.',
+            'Confirm no pending migrations, then <code>railway up --detach</code> per changed service — gateway, seam, memory, admin, intelligence. Specs are committed at <code>deploy/railway/*.json</code>; <code>--detach</code> is the known workaround for the CLI status-stream timeout.',
+            'Smoke the four fixes this wave was for: a perp ask on the spot-only venue returns a rejection rather than a silent spot order; the admin panel finds a persona past row 50; the LLM can emit <code>alert</code>; a Hindi panel draws no English chrome.',
+            'Re-run the deterministic eval against the deployed gateway and confirm 68.3% still holds — a deploy that moves it is a regression, not a surprise.',
+            'Flip <code>🟢 Live Demo Status.md</code> from “MERGED, NOT YET DEPLOYED” to live, with the deployed SHA now visible on <code>/health</code>.',
+          ] },
+        { t: 'Restore the OpenRouter credit', own: 'Victor', est: 0.5, un: 'Prerequisite for PRD gates 1 and 2.',
+          d: '“Key limit exceeded (total limit)” → 403. Until it clears, every accuracy figure we publish grades the deterministic parser, not the model that answers in production.',
+          plan: [
+            'Top up the account and mint a fresh key; set it on intelligence and redeploy.',
+            'Verify a real turn over the public wire returns the live model id, not the degraded fallback.',
+            'Re-run <code>--mode intent --intent-endpoint</code> and publish the first honest LLM-path number — expect it to differ from 68.3%, which is the point.',
+            'Add a low-balance alert so the next exhaustion is noticed before a measurement is built on it.',
           ] },
         { t: 'Advice-avoidance scored under baiting', own: 'Victor', est: 1.5, gate: 'PRD gate 2',
           un: 'The trust position, the cache economics and the regulatory line are the same line.',
@@ -693,13 +682,6 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
             'Add a force-degraded toggle to the host control console — the console already carries the venue chaos controls, so this belongs beside them.',
             'Verify the amber banner and <code>CACHED BRIEF</code> badges live, and that intent and the order flow stay responsive while research is degraded, since that is the actual SLA claim.',
             'Add it to <code>/testing</code> as a walkthrough so a partner can run the demo themselves without us in the room.',
-          ] },
-        { t: 'Arabic native-speaker review', own: 'Kartik / MENA', est: 1, un: 'Gates data-hippo-locale="ar" for a Gulf partner.',
-          d: 'The ar catalog is complete and merged but deliberately dormant. Copy quality in a language none of us reads is not something a test can assert.',
-          plan: [
-            'Send the <code>ar</code> catalog with rendered screenshots for context — a string list without its card is not reviewable.',
-            'Apply corrections, then check RTL structurally at three widths: numerals must hold their direction while the surface flips.',
-            'Flip <code>data-hippo-locale="ar"</code> behind a partner flag, not globally, so a Gulf partner opts in.',
           ] },
       ],
     },
