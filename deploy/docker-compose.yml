@@ -143,6 +143,8 @@ services:
       <<: *service-env
       PORT: '8796'
       INTELLIGENCE_URL: http://intelligence:8791
+      # Forced-degraded proxy target (host settings → gateway /internal/degraded).
+      GATEWAY_URL: http://gateway:8788
     ports: ['8796:8796']
     depends_on:
       postgres: { condition: service_healthy }

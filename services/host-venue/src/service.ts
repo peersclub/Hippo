@@ -56,6 +56,15 @@ export type BuildOptions = {
   venueId?: string
   /** Coalescing window for debounced snapshot saves (ms). */
   persistDebounceMs?: number
+  /** Gateway base URL for the forced-degraded proxy (GATEWAY_URL env). */
+  gatewayUrl?: string
+  /** Token presented to the gateway's /internal/degraded (INTERNAL_API_TOKEN
+   * env) — held server-side only; the browser never sees it. */
+  gatewayInternalToken?: string
+  /** The partnerId the demo embed's sessions run under — the partner the
+   * forced-degraded toggle targets (HIPPO_DEMO_PARTNER_ID env). Local dev
+   * mints anonymous sessions on the seeded dev partner, hence the default. */
+  demoPartnerId?: string
 }
 
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v))
@@ -480,6 +489,51 @@ export function buildService(opts: BuildOptions) {
     return aiProxy(reply, '/admin/persona', 'POST', {
       level: (req.body as { level?: unknown })?.level ?? null,
     })
+  })
+
+  // Forced-degraded control — the "force degraded AI" toggle on the host
+  // settings page (SLA demo, PRD gate 5). Same-origin proxy to the gateway's
+  // operator-guarded /internal/degraded: the venue presents INTERNAL_API_TOKEN
+  // server-side, so the browser never holds an operator credential — exactly
+  // the trust shape of the AI proxy above. Scoped to the DEMO partner id; the
+  // gateway ignores everything else, so a production partner can never be
+  // flipped from here.
+  // Fail-closed like the gateway side: with no INTERNAL_API_TOKEN configured
+  // the gateway refuses the call and this proxy surfaces that error honestly.
+  const gatewayUrl = opts.gatewayUrl ?? process.env.GATEWAY_URL ?? 'http://localhost:8788'
+  const gatewayInternalToken = opts.gatewayInternalToken ?? process.env.INTERNAL_API_TOKEN ?? ''
+  const demoPartnerId = opts.demoPartnerId ?? process.env.HIPPO_DEMO_PARTNER_ID ?? 'koinbx-dev'
+  async function gatewayDegraded(reply: FastifyReply, method: 'GET' | 'POST', forced?: boolean) {
+    try {
+      const res = await fetch(`${gatewayUrl}/internal/degraded`, {
+        method,
+        headers: {
+          'x-hippo-internal-token': gatewayInternalToken,
+          ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(method === 'POST'
+          ? { body: JSON.stringify({ partnerId: demoPartnerId, forced }) }
+          : {}),
+        signal: AbortSignal.timeout(3_000),
+      })
+      const body = (await res.json()) as { forced?: unknown; error?: unknown }
+      if (!res.ok)
+        return reply
+          .code(502)
+          .send({ error: typeof body.error === 'string' ? body.error : `gateway ${res.status}` })
+      const forcedNow =
+        method === 'GET'
+          ? Array.isArray(body.forced) && body.forced.includes(demoPartnerId)
+          : body.forced === true
+      return { partnerId: demoPartnerId, forced: forcedNow }
+    } catch (err) {
+      return reply.code(502).send({ error: `gateway unreachable: ${String(err)}` })
+    }
+  }
+  app.get('/admin/gateway/degraded', async (_req, reply) => gatewayDegraded(reply, 'GET'))
+  app.post('/admin/gateway/degraded', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    return gatewayDegraded(reply, 'POST', (req.body as { forced?: unknown })?.forced === true)
   })
 
   // SSE stream powering the live blotter/positions/balances in the host UI.
