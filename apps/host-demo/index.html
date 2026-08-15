@@ -38,6 +38,7 @@
   .lastpx{font-family:var(--mono);font-size:18px;font-weight:600}
   .chg{font-family:var(--mono);font-size:12px;font-weight:600;padding:2px 7px;border-radius:6px}
   .gear{border:1px solid var(--border);background:var(--bg);border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px}
+  /* biome-ignore lint/correctness/noInvalidGridAreas: biome 2.5.3 false positive — rows have equal cell counts */
   main{display:grid;grid-template-columns:1fr 260px 300px;grid-template-rows:1fr 210px;grid-template-areas:"chart book tape" "blotter blotter ticket";gap:12px;padding:12px;flex:1;min-height:0}
   .card{background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;overflow:hidden}
   .card h5{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);padding:11px 14px 7px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
@@ -129,7 +130,9 @@
      rules above (this page is demoed live on a projector). */
   @media (max-width:900px){
     /* The 100vh desk clips when panels stack; the page scrolls vertically instead. */
+    /* biome-ignore lint/suspicious/noDuplicateProperties: 100vh is the fallback for Safari <15.4; dvh overrides where supported */
     body{height:auto;min-height:100vh;min-height:100dvh}
+    /* biome-ignore lint/correctness/noInvalidGridAreas: biome 2.5.3 false positive — rows have equal cell counts */
     main{flex:none;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:none;grid-template-areas:"chart chart" "book tape" "ticket ticket" "blotter blotter"}
     /* Stacked cards no longer inherit a height from the viewport row — each
        needs its own, or flex:1 children collapse to 0. */
@@ -142,6 +145,7 @@
     header{height:auto;min-height:56px;flex-wrap:wrap;padding:8px 14px;row-gap:8px}
   }
   @media (max-width:600px){
+    /* biome-ignore lint/correctness/noInvalidGridAreas: biome 2.5.3 false positive — rows have equal cell counts */
     main{grid-template-columns:minmax(0,1fr);grid-template-areas:"chart" "book" "tape" "ticket" "blotter";gap:10px;padding:10px}
     nav{display:none}
     /* Ticker is wider than a phone; it takes its own header row and wraps. */
