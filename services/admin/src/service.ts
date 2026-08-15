@@ -65,6 +65,11 @@ import {
 } from './opauth.js'
 import { createRateLimiter, type RateLimitOptions } from './rate-limit.js'
 
+// Build provenance: stamped by the Docker build (Railway build args); an
+// unstamped build reports "unknown", never a guessed value.
+const GIT_SHA = process.env.GIT_SHA || 'unknown'
+const BUILT_AT = process.env.BUILT_AT || 'unknown'
+
 export type AdminServiceOptions = {
   partners: PartnerStore
   plans: PlanStore
@@ -1132,7 +1137,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     })
   })
 
-  app.get('/health', async () => ({ ok: true, service: 'admin' }))
+  app.get('/health', async () => ({ ok: true, service: 'admin', sha: GIT_SHA, builtAt: BUILT_AT }))
 
   return app
 }

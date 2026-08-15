@@ -46,6 +46,14 @@ jobs:
         working-directory: services/intelligence
         run: .venv/bin/python -m pytest tests/ -q
 
+      # Eval-harness suite (stdlib unittest). Includes the degraded-backend
+      # gate regression (test_intent_health_gate.py): --intent-endpoint runs
+      # must die loudly when the target's /health says llm != "live". The
+      # per-service "/health includes sha" assertions ride the vitest suites
+      # (pnpm test below) and the intelligence pytest step above.
+      - name: Test (evals, unittest)
+        run: python3 -m unittest discover -s evals/tests
+
       # The SDK build runs scripts/size-gate.mjs as its final step;
       # it exits 1 if loader.js exceeds 5KB gz, failing this job.
       - name: Build

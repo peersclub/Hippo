@@ -110,6 +110,28 @@ class OfflineRuleClassifier:
         return result, time.monotonic() - start
 
 
+def fetch_target_health(endpoint: str, *, timeout: float = 10.0) -> dict:
+    """GET the target service's /health; raise ProviderError when unreachable.
+
+    Exists because a credit-exhausted key once let a run silently grade the
+    MOCK fallback (68.3%, byte-identical to the offline run). The runner must
+    know what it is grading before it grades anything.
+    """
+    base = endpoint.rstrip("/").removesuffix("/v1/intent")
+    url = f"{base}/health"
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+        parsed = json.loads(raw)
+    except (urllib.error.URLError, TimeoutError, ConnectionError,
+            json.JSONDecodeError) as exc:
+        raise ProviderError(f"{url}: health probe failed: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ProviderError(f"{url}: expected a JSON object, got {raw[:200]}")
+    return parsed
+
+
 class HTTPIntentClassifier:
     """Grades the live service: POST {endpoint}/v1/intent."""
 

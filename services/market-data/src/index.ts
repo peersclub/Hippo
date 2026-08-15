@@ -5,6 +5,7 @@
  * See Build Plan/10 BE Architecture — market-data service.
  */
 import Fastify from 'fastify'
+import { healthPayload } from './health.js'
 import { getSnapshot } from './service.js'
 
 const PORT = Number(process.env.PORT ?? 8790)
@@ -32,11 +33,7 @@ app.get('/v1/snapshot', async (req, reply) => {
   }
 })
 
-app.get('/health', async () => ({
-  ok: true,
-  service: 'market-data',
-  mode: FIXTURES ? 'fixtures' : 'live',
-}))
+app.get('/health', async () => healthPayload(FIXTURES))
 
 await app.listen({ port: PORT, host: '::' })
 console.log(`market-data on :${PORT} — ${FIXTURES ? 'fixture' : 'live (CCXT binance)'} mode`)

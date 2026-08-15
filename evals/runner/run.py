@@ -28,7 +28,11 @@ if __package__ in (None, ""):  # direct script execution
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from evals.runner import prompts
-from evals.runner.intent_backends import HTTPIntentClassifier, OfflineRuleClassifier
+from evals.runner.intent_backends import (
+    HTTPIntentClassifier,
+    OfflineRuleClassifier,
+    fetch_target_health,
+)
 from evals.runner.intent_scoring import format_worst_confusions, score_intent_query
 from evals.runner.providers import (
     HTTPChatProvider,
@@ -134,6 +138,40 @@ def run_one(
     }
 
 
+def check_target_health(endpoint: str, timeout: float) -> dict | None:
+    """Probe {endpoint}/health before grading; refuse a degraded backend.
+
+    Returns the provider stamp for the report header, or None (after printing
+    a loud refusal) when the target is not serving live LLM answers. A run
+    against the mock fallback produces scores byte-identical to the offline
+    run — grading it and printing a percentage would be a lie about the model.
+    """
+    try:
+        health = fetch_target_health(endpoint, timeout=min(timeout, 10.0))
+    except ProviderError as exc:
+        print(f"error: cannot verify the target backend — {exc}", file=sys.stderr)
+        return None
+    llm = health.get("llm")
+    provider = {
+        "providerMode": health.get("providerMode") or llm or "unknown",
+        "model": health.get("model") or "unknown",
+        "sha": health.get("sha") or "unknown",
+    }
+    if llm != "live":
+        print(
+            "\n" + "=" * 72 + "\n"
+            "REFUSING TO GRADE: the target backend is NOT serving live LLM "
+            f"answers.\n  /health reports llm={llm!r} model={provider['model']!r} "
+            f"sha={provider['sha']!r}\n"
+            "  Scores from this state grade the deterministic mock fallback, "
+            "not a model.\n  Fix the provider (key/credits/endpoint) and rerun."
+            "\n" + "=" * 72,
+            file=sys.stderr,
+        )
+        return None
+    return provider
+
+
 def run_intent_mode(args: argparse.Namespace, queries: list[dict], queries_path: str) -> int:
     """Classify every query, score against expected_intent, write the scorecard."""
     unlabeled = [q["id"] for q in queries if not q.get("expected_intent")]
@@ -141,6 +179,12 @@ def run_intent_mode(args: argparse.Namespace, queries: list[dict], queries_path:
         print(f"error: {len(unlabeled)} row(s) have no expected_intent "
               f"(first: {unlabeled[0]}) — label the set before grading it", file=sys.stderr)
         return 2
+
+    provider: dict | None = None
+    if args.intent_endpoint:
+        provider = check_target_health(args.intent_endpoint, args.timeout)
+        if provider is None:
+            return 2
 
     try:
         if args.intent_endpoint:
@@ -172,9 +216,13 @@ def run_intent_mode(args: argparse.Namespace, queries: list[dict], queries_path:
     report_dir, summary = write_intent_report(
         Path(args.out), results, backend=backend.name,
         queries_path=queries_path, fail_under=args.fail_under,
+        provider=provider,
     )
     accuracy = summary["accuracy"] or 0.0
     print(f"\nReport: {report_dir}/intent-summary.md")
+    if provider:
+        print(f"  target: providerMode={provider['providerMode']} "
+              f"model={provider['model']} sha={provider['sha']}")
     print(f"  overall intent accuracy: {accuracy:.1%} "
           f"({summary['overall']['correct']}/{summary['n']})")
     for lang, agg in summary["per_lang"].items():

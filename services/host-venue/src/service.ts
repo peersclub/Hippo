@@ -28,6 +28,11 @@ import {
   TRADE_TYPE,
 } from './types.js'
 
+// Build provenance: stamped by the Docker build (Railway build args); an
+// unstamped build reports "unknown", never a guessed value.
+const GIT_SHA = process.env.GIT_SHA || 'unknown'
+const BUILT_AT = process.env.BUILT_AT || 'unknown'
+
 export type BuildOptions = {
   store: VenueStore
   /** apiKey → { secret, userId }. The parasite's key resolves to the SAME
@@ -496,7 +501,13 @@ export function buildService(opts: BuildOptions) {
     })
   })
 
-  app.get('/health', async () => ({ ok: true, service: 'host-venue', venue: 'assetworks' }))
+  app.get('/health', async () => ({
+    ok: true,
+    service: 'host-venue',
+    venue: 'assetworks',
+    sha: GIT_SHA,
+    builtAt: BUILT_AT,
+  }))
 
   return app
 }

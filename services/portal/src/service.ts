@@ -46,6 +46,11 @@ import {
 import { LoginThrottle, originAllowed } from './guard.js'
 import { createRateLimiter, type RateLimitOptions } from './rate-limit.js'
 
+// Build provenance: stamped by the Docker build (Railway build args); an
+// unstamped build reports "unknown", never a guessed value.
+const GIT_SHA = process.env.GIT_SHA || 'unknown'
+const BUILT_AT = process.env.BUILT_AT || 'unknown'
+
 export type PortalServiceOptions = {
   partners: PartnerStore
   plans: PlanStore
@@ -358,7 +363,7 @@ export function buildPortalService(opts: PortalServiceOptions): FastifyInstance 
     },
   )
 
-  app.get('/health', async () => ({ ok: true, service: 'portal' }))
+  app.get('/health', async () => ({ ok: true, service: 'portal', sha: GIT_SHA, builtAt: BUILT_AT }))
 
   return app
 }
