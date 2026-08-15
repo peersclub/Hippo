@@ -114,6 +114,7 @@
         <div class="fld"><div><div class="k">Added latency (ms)</div><div class="d">Delay on signed trade responses — surfaces “working” states.</div></div><div class="ctl"><input type="number" step="100" id="c-latencyMs" /></div></div>
         <div class="fld"><div><div class="k">Reject rate</div><div class="d">Probability a placement is rejected (0–1) — exercises rejection cards.</div></div><div class="ctl"><input type="number" step="0.05" min="0" max="1" id="c-rejectRate" /></div></div>
         <div class="fld"><div><div class="k">Maintenance mode</div><div class="d">Reject <b>all</b> orders (venue-down simulation).</div></div><div class="ctl"><input type="checkbox" id="c-maintenance" /></div></div>
+        <div class="fld"><div><div class="k">Force degraded AI mode</div><div class="d">The SLA clause, on demand: the <b>gateway</b> treats the AI service as down for the demo partner — amber <b>HIGH MARKET LOAD</b> banner + labeled market-data-only briefs, while orders, prices and portfolio stay fully live. The AI service itself is untouched; flip off and the next question is live again. Drives the gateway via <code>/admin/gateway/degraded</code>, not <code>/admin/config</code>.</div></div><div class="ctl"><input type="checkbox" id="g-degraded" /></div></div>
       </div>
     </div>
 
