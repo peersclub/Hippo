@@ -178,6 +178,31 @@ describe('forced degraded mode: /internal/degraded', () => {
     await app.close()
   })
 
+  it('a REFRESH tap while forced takes the degraded fallback, not a live model call', async () => {
+    const counting = countingIntel()
+    const { app, sessions } = await testApp({ intel: counting.intel })
+    const session = await createSession(app, sessions)
+
+    // Live brief first (flag off), so there is a card to refresh.
+    await sendTurn(app, session.id, { kind: 'user_text', text: 'why is btc down?' })
+    await waitForJournal(session, (t) => t.includes('research_brief'))
+    const liveBrief = frameOfType<{ id: string }>(session, 'research_brief')
+    const callsBeforeForce = counting.calls()
+
+    await setForced(app, PARTNER_ID, true)
+    await sendTurn(app, session.id, { kind: 'chip_tap', text: `refresh:${liveBrief.id}` })
+    await waitForJournal(session, (t) => t.filter((x) => x === 'research_brief').length >= 2)
+    const refreshed = session.journal
+      .after(0)
+      .map((e) => e.frame as unknown as { type: string; sources?: string[]; replaces?: string })
+      .filter((f) => f.type === 'research_brief')[1]
+    // In-place replacement, but the degraded market-only brief — labeled.
+    expect(refreshed?.replaces).toBe(liveBrief.id)
+    expect(refreshed?.sources).toEqual(['PRICE FEED'])
+    expect(counting.calls()).toBe(callsBeforeForce)
+    await app.close()
+  })
+
   it('is partner-scoped: forcing another partner leaves this one live', async () => {
     const counting = countingIntel()
     const { app, sessions } = await testApp({ intel: counting.intel })

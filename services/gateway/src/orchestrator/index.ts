@@ -840,6 +840,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       })
       return
     }
+    // Operator-forced degraded (SLA demo): a REFRESH tap must not sneak a
+    // live model call past the flag — take the same in-place market-only
+    // fallback a real outage's failed respond() below would take.
+    if (forcedDegraded?.(session.partner.partnerId)) {
+      enterDegraded(session, null, true)
+      await emitMarketOnlyBrief(session, origin.text, frameId)
+      return
+    }
     try {
       const res = await intel.respond({
         text: origin.text,
