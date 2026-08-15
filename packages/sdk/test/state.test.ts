@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   banners,
+  clearPulse,
   identityStatus,
   identityUsername,
   learnedFacts,
@@ -8,6 +9,8 @@ import {
   livePrice,
   localUploads,
   orders,
+  posture,
+  pulseTag,
   pushFrame,
   thread,
 } from '../src/state.js'
@@ -628,5 +631,56 @@ describe('interpretation card persistence', () => {
     const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
     // interpretation survives between the echo and the answer — not ephemeral.
     expect(types).toEqual(['user_echo', 'interpretation', 'research_brief'])
+  })
+})
+
+describe('pulse routing — pill glow + mono tag, one state, clears on open', () => {
+  const pulse = (id: string, tag: string) => ({
+    ...base,
+    id,
+    type: 'pulse' as const,
+    tag,
+  })
+
+  it('while minimized to the pill: a server pulse lands in pulseTag, never the thread', () => {
+    thread.value = []
+    posture.value = 'pill'
+    pulseTag.value = null
+    pushFrame({ kind: 'frame', frame: pulse('p1', 'BTC +4.2% 1H') })
+    // The tag is the SERVER's, drawn verbatim — no client market math.
+    expect(pulseTag.value).toBe('BTC +4.2% 1H')
+    expect(thread.value).toHaveLength(0)
+  })
+
+  it('one state, no counts: a newer pulse replaces the tag, never stacks', () => {
+    posture.value = 'pill'
+    pulseTag.value = null
+    pushFrame({ kind: 'frame', frame: pulse('p1', 'BTC +4.2% 1H') })
+    pushFrame({ kind: 'frame', frame: pulse('p2', 'BTC +6.0% 1H') })
+    expect(pulseTag.value).toBe('BTC +6.0% 1H')
+  })
+
+  it('with the panel open there is no pill to glow — the pulse is dropped', () => {
+    posture.value = 'dock'
+    pulseTag.value = null
+    pushFrame({ kind: 'frame', frame: pulse('p1', 'BTC +4.2% 1H') })
+    expect(pulseTag.value).toBeNull()
+    posture.value = 'pill'
+  })
+
+  it('clearPulse() empties the tag — the open path (panel.tsx) calls this', () => {
+    posture.value = 'pill'
+    pushFrame({ kind: 'frame', frame: pulse('p1', 'BTC +4.2% 1H') })
+    clearPulse()
+    expect(pulseTag.value).toBeNull()
+  })
+
+  it('a pulse never clears a pending thinking/skeleton card (early return)', () => {
+    thread.value = []
+    posture.value = 'pill'
+    pushFrame({ kind: 'frame', frame: { ...base, id: 'th', type: 'thinking', lines: ['…'] } })
+    pushFrame({ kind: 'frame', frame: pulse('p1', 'BTC +4.2% 1H') })
+    const types = thread.value.map((x) => (x.kind === 'frame' ? x.frame.type : 'unknown'))
+    expect(types).toEqual(['thinking'])
   })
 })
