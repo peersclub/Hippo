@@ -592,6 +592,9 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { t: 'Host-safety gate in CI — hostile CSS + loader budget', est: 2 },
     { t: 'Degraded mode demonstrable on demand', est: 1 },
     { t: 'Onboarding hero · ambient pulse · share cards', est: 4 },
+    { t: 'Fleet deploy — all 8 services, sha-provable /health', est: 0.5 },
+    { t: 'OpenRouter credit restored — live model verified', est: 0.5 },
+    { t: 'Live verify — share cards + forced degraded on the public wire', est: 1 },
   ]
 
   // Remaining, ours, scheduled. `end` is the last day of the lane — the lane
@@ -599,47 +602,16 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   const SPRINTS = [
     {
       wk: 'Week 2', dates: 'Aug 17–21', end: new Date(2026, 7, 21), cap: 5,
-      goal: 'Deploy what is merged, then score the gates that have a number instead of an opinion.',
+      goal: 'One item left: score the last gate that has a number instead of an opinion.',
       items: [
-        { t: 'Deploy both merged waves', own: 'Victor', est: 0.5, un: 'Unblocks every “verified live” claim made since Aug 6.',
-          d: 'The sync wave (PRs #105–#111) and the verifiability wave (PRs #115–#117) are merged and green — and none of it is running. Railway does not auto-deploy. No migrations in either wave, so the deploy is the whole job — and /health now carries the build SHA, so for the first time the deploy is provable from outside.',
-          plan: [
-            'Set the provenance vars per service — <code>railway variables --set "GIT_SHA=$(git rev-parse HEAD)" --set "BUILT_AT=..."</code> (recipe in <code>deploy/README.md</code>) — then <code>railway up --detach</code> per changed service.',
-            'Prove it: <code>scripts/fleet-versions.sh</code> shows the deployed SHA on every public /health.',
-            'Smoke the sync-wave fixes: a perp ask on the spot-only venue returns a rejection rather than a silent spot order; the admin panel finds a persona past row 50; the LLM can emit <code>alert</code>; a Hindi panel draws no English chrome. Then the new ones: the OPEN ORDERS badge refreshes on a portfolio turn; the demo link on a phone.',
-            'Re-run the deterministic eval against the deployed gateway and confirm 68.3% still holds — a deploy that moves it is a regression, not a surprise.',
-            'Flip <code>🟢 Live Demo Status.md</code> from “MERGED, NOT YET DEPLOYED” to live, with the deployed SHA now visible on <code>/health</code>.',
-          ] },
-        { t: 'Restore the OpenRouter credit', own: 'Victor', est: 0.5, un: 'Prerequisite for PRD gates 1 and 2.',
-          d: '“Key limit exceeded (total limit)” → 403. Until it clears, every accuracy figure we publish grades the deterministic parser, not the model that answers in production.',
-          plan: [
-            'Top up the account and mint a fresh key; set it on intelligence and redeploy.',
-            'Verify a real turn over the public wire returns the live model id, not the degraded fallback.',
-            'Re-run <code>--mode intent --intent-endpoint</code> and publish the first honest LLM-path number — expect it to differ from 68.3%, which is the point.',
-            'Add a low-balance alert so the next exhaustion is noticed before a measurement is built on it.',
-          ] },
         { t: 'Advice-avoidance scored under baiting', own: 'Victor', est: 1.5, gate: 'PRD gate 2',
           un: 'The trust position, the cache economics and the regulatory line are the same line.',
-          d: 'A consistency score on the adversarial set — a gate, not a nice-to-have. The 60 advice-bait rows have existed in the eval set since v1; the score has never been published. Needs the OpenRouter key restored first.',
+          d: 'A consistency score on the adversarial set — a gate, not a nice-to-have. The 60 advice-bait rows have existed in the eval set since v1; the score has never been published. The OpenRouter credit is restored and the fleet is deployed, so nothing blocks it.',
           plan: [
             'Add an advice mode to the runner over the 60 bait rows, plus multi-turn baits — the single-turn set never tests whether a decline survives being pushed.',
             'Score decline consistency per language; a guardrail that only holds in English is not a guardrail for this product.',
-            'Publish the number with the model id and provider mode attached (rides on the item-3 stamping).',
+            'Publish the number with the model id and provider mode attached (the harness already stamps both).',
             'Wire it as a launch gate with a threshold, so it is a build failure rather than a report someone has to read.',
-          ] },
-      ],
-    },
-    {
-      wk: 'Week 3', dates: 'Aug 24–28', end: new Date(2026, 7, 28), cap: 5,
-      goal: 'Procurement-ready: verify the shipped Phase-5 + gate-5 surfaces on the deployed demo.',
-      items: [
-        { t: 'Verify hero · pulse · share + forced degraded on the deployed demo', own: 'Victor', est: 1,
-          un: 'Everything above shipped against local stacks; the demo claims need the public wire.',
-          d: 'PRs #119–#121 closed Phase 5 and gates 3 and 5 in code and CI. What remains is the live pass: the share link is worthless if it only resolves on localhost, and the force-degraded toggle must be demonstrable on the deployed console.',
-          plan: [
-            'After the wave deploy (Week 2, item 1), mint a share on the public demo and open <code>/s/:id</code> from a phone off the LAN.',
-            'Flip the force-degraded toggle on the deployed host console; verify the amber banner, labeled sources, and that a REFRESH tap stays on the fallback.',
-            'Confirm the hero reads the partner name and the pill glows on a real market move, on the public embed.',
           ] },
       ],
     },
