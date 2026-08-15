@@ -11,7 +11,7 @@ import { filesOpen, filesView, type LibraryFile, loadFiles, relativeTime } from 
 import { t } from './i18n.js'
 import { signOutUplink } from './identity.js'
 import { IdentityForm } from './identity-card.js'
-import { consentRows, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
+import { consentRows, heroQueries, type OnboardingStore } from './onboarding.js'
 import { dispatch } from './outbox.js'
 import {
   type ClearMemoryEvent,
@@ -24,7 +24,14 @@ import {
   showLearnedFacts,
   showLearnedMemoryToggle,
 } from './settings.js'
-import { briefClipboardText, COPIED_FLASH_MS, shareCardView } from './share.js'
+import {
+  briefClipboardText,
+  COPIED_FLASH_MS,
+  createShare,
+  displayUrl,
+  type ShareLink,
+  shareCardView,
+} from './share.js'
 import {
   entitlements,
   glass,
@@ -37,6 +44,7 @@ import {
   persistLocale,
   settingsOpen,
   shareFrame,
+  suggestedQueries,
   venueName,
 } from './state.js'
 import { send } from './transport.js'
@@ -273,7 +281,9 @@ export function OnboardingOverlay({
           <>
             <span class="obmark">H</span>
             <h2>{t(locale.value, 'ob_ask_anything')}</h2>
-            <Typewriter queries={HERO_QUERIES} />
+            {/* Partner-curated queries from the session-mint config, same
+                rule as the empty-thread hero — HERO_QUERIES only as floor. */}
+            <Typewriter queries={heroQueries(suggestedQueries.value)} />
             <button type="button" class="obcta" onClick={() => store.next()}>
               {t(locale.value, 'ob_next')}
             </button>
@@ -444,16 +454,40 @@ export function FilesSheet() {
 
 /**
  * Share overlay (baseline §6) — a live, co-branded card, not a screenshot.
- * Renders entirely from the brief's frame data: the server's LIVE flag, the
- * server's headline, EVERY server paragraph. No short link is drawn (see
- * share.ts) and the copy action puts the brief's own prose on the clipboard,
- * never a fabricated address.
+ * Renders from the brief's frame data: the server's LIVE flag, the server's
+ * headline, EVERY server paragraph. The short link is SERVER-MINTED on open
+ * (createShare → the gateway's /s/:id page, which re-grounds live at view
+ * time); if the mint fails, no address is drawn at all — a URL that can't
+ * resolve never renders. Copy actions put the brief's prose / the server's
+ * URL on the clipboard, never anything fabricated.
  */
 export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
   const L = locale.value
   const [copied, setCopied] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [link, setLink] = useState<ShareLink | null>(null)
   const timer = useRef(0)
-  useEffect(() => () => clearTimeout(timer.current), [])
+  const linkTimer = useRef(0)
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current)
+      clearTimeout(linkTimer.current)
+    },
+    [],
+  )
+  // Mint the share when the overlay opens. Null (offline, old gateway,
+  // expired session) simply means the card shows no address — the exact
+  // pre-share-service behavior, never a dead link.
+  useEffect(() => {
+    let alive = true
+    setLink(null)
+    void createShare(frame.id).then((l) => {
+      if (alive) setLink(l)
+    })
+    return () => {
+      alive = false
+    }
+  }, [frame.id])
   const view = shareCardView(frame)
   const close = () => {
     shareFrame.value = null
@@ -465,6 +499,15 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
     setCopied(true)
     clearTimeout(timer.current)
     timer.current = window.setTimeout(() => setCopied(false), COPIED_FLASH_MS)
+  }
+  const copyLink = () => {
+    if (!link) return
+    // The copied text is the server's URL VERBATIM — the display strips the
+    // scheme for the mono look, the clipboard never does.
+    void navigator.clipboard?.writeText(link.url).catch(() => {})
+    setLinkCopied(true)
+    clearTimeout(linkTimer.current)
+    linkTimer.current = window.setTimeout(() => setLinkCopied(false), COPIED_FLASH_MS)
   }
   const cardRef = useTrapFocus()
   return (
@@ -499,6 +542,19 @@ export function ShareOverlay({ frame }: { frame: ResearchBrief }) {
         {/* NON-NEGOTIABLE: printed on the card itself so viral distribution
             never crosses the advice line (baseline §6). Do not remove. */}
         <div class="shrdisc">MARKET INFORMATION · NOT INVESTMENT ADVICE</div>
+        {/* The server-minted link — the /s/:id page re-grounds live on open.
+            Drawn ONLY when the mint answered; display drops the scheme, the
+            copied text is the resolving URL verbatim. */}
+        {link && (
+          <div class="shrlink">
+            <span class="shrurl" dir="ltr">
+              {displayUrl(link.url)}
+            </span>
+            <button type="button" class="shrcopylink" onClick={copyLink}>
+              {linkCopied ? t(L, 'copied') : t(L, 'copy_link')}
+            </button>
+          </div>
+        )}
         <button type="button" class="obcta" onClick={copy}>
           {copied ? t(L, 'copied') : t(L, 'copy_brief')}
         </button>

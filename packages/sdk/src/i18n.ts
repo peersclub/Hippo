@@ -84,6 +84,7 @@ export type MessageKey =
   | 'learned_toggle_title'
   | 'learned_off'
   | 'copy_brief'
+  | 'copy_link'
   | 'copied'
   | 'stop_streaming'
   | 'composer_placeholder_unavailable'
@@ -275,6 +276,7 @@ const en: Catalog = {
   learned_toggle_title: 'Remember my preferences',
   learned_off: 'Preference memory is off — Hippo won’t learn from this chat.',
   copy_brief: 'Copy this brief',
+  copy_link: 'Copy link',
   copied: 'Copied',
   stop_streaming: 'Stop generating',
   composer_placeholder_unavailable: 'Hippo isn’t available right now',
@@ -456,6 +458,7 @@ const hi: Catalog = {
   learned_toggle_title: 'मेरी पसंद याद रखें',
   learned_off: 'पसंद की मेमोरी बंद है — Hippo इस चैट से कुछ नहीं सीखेगा।',
   copy_brief: 'यह ब्रीफ़ कॉपी करें',
+  copy_link: 'लिंक कॉपी करें',
   copied: 'कॉपी हो गया',
   stop_streaming: 'जनरेट करना रोकें',
   composer_placeholder_unavailable: 'Hippo अभी उपलब्ध नहीं है',
@@ -638,6 +641,7 @@ const hiLatn: Catalog = {
   learned_toggle_title: 'Meri preferences yaad rakho',
   learned_off: 'Preference memory off hai — Hippo is chat se kuch nahi seekhega.',
   copy_brief: 'Yeh brief copy karo',
+  copy_link: 'Link copy karo',
   copied: 'Copy ho gaya',
   stop_streaming: 'Generate karna roko',
   composer_placeholder_unavailable: 'Hippo abhi available nahi hai',
@@ -826,6 +830,7 @@ const ar: Catalog = {
   learned_toggle_title: 'تذكّر تفضيلاتي',
   learned_off: 'ذاكرة التفضيلات متوقفة — لن يتعلّم Hippo من هذه المحادثة.',
   copy_brief: 'نسخ هذا الموجز',
+  copy_link: 'نسخ الرابط',
   copied: 'تم النسخ',
   stop_streaming: 'إيقاف التوليد',
   composer_placeholder_unavailable: 'Hippo غير متاح حاليًا',

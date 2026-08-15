@@ -8,12 +8,24 @@ import { signal } from '@preact/signals'
 
 export const ONBOARDING_STEPS = 4
 
-/** Real queries — shared by the hero typewriter and the empty-thread hero. */
+/** Real queries — the FLOOR for the hero typewriter and the empty-thread
+ * hero, used only when the partner configured no suggested queries. */
 export const HERO_QUERIES = [
   'why is BTC down today?',
   "what's driving SOL volume?",
   'explain funding rates',
 ]
+
+/**
+ * The queries both heroes draw: the partner's server-side suggestedQueries
+ * (carried on the session-mint config) when configured, HERO_QUERIES as the
+ * floor. One rule for the onboarding typewriter AND the empty-thread hero —
+ * the intro must type the same real questions the partner curated, never a
+ * constant list the venue has no say over.
+ */
+export function heroQueries(suggested: string[]): string[] {
+  return suggested.length > 0 ? suggested.slice(0, 3) : HERO_QUERIES
+}
 
 export type OnboardingDeps = {
   /** Reads persisted completion (localStorage in prod, a fake in tests). */

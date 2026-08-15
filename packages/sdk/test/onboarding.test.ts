@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { consentRows, createOnboardingStore, ONBOARDING_STEPS } from '../src/onboarding.js'
+import {
+  consentRows,
+  createOnboardingStore,
+  HERO_QUERIES,
+  heroQueries,
+  ONBOARDING_STEPS,
+} from '../src/onboarding.js'
 
 function fakePersistence() {
   let done = false
@@ -53,6 +59,22 @@ describe('onboarding gating store', () => {
     store.offerIfNeeded()
     for (let i = 0; i < 10; i++) store.next()
     expect(store.step.value).toBe(ONBOARDING_STEPS - 1)
+  })
+})
+
+describe('hero queries — partner-configured, constants only as floor', () => {
+  it('prefers the partner’s suggested queries from the session-mint config', () => {
+    const partner = ['why is KOIN pumping?', 'INR withdrawal limits', 'BTC funding on KoinBX']
+    expect(heroQueries(partner)).toEqual(partner)
+  })
+
+  it('caps the typewriter list at three', () => {
+    const partner = ['q1', 'q2', 'q3', 'q4', 'q5']
+    expect(heroQueries(partner)).toEqual(['q1', 'q2', 'q3'])
+  })
+
+  it('falls back to HERO_QUERIES only when the partner configured none', () => {
+    expect(heroQueries([])).toEqual(HERO_QUERIES)
   })
 })
 

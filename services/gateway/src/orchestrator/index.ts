@@ -34,6 +34,7 @@ import type { DraftFields, Session, SessionStore } from '../plugins/auth.js'
 import type { EmitFrame, FrameDraft, JournalEntry } from '../plugins/sse.js'
 import { emitTransient } from '../plugins/sse.js'
 import type { Telemetry } from '../plugins/telemetry.js'
+import { createPulseWatcher } from '../pulse.js'
 import type { ClarificationPlan } from './clarify.js'
 import {
   buildClarification,
@@ -1802,6 +1803,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     { timer: ReturnType<typeof setInterval>; sessions: Set<Session> }
   >()
 
+  /** Ambient market pulse (pill glow + mono tag), piggybacked on the ticker
+   * poll — same snapshot, no extra market-data traffic. Threshold + cooldown
+   * live in pulse.ts (env-tunable); per-session state is a WeakMap, so an
+   * evicted session never leaks an entry. */
+  const pulse = createPulseWatcher()
+
   /** Register the session's CURRENT symbol with the shared poller (starting
    * one if this symbol had none). Called on stream connect and after a
    * context symbol switch; the old symbol's poller sheds the session on its
@@ -1853,6 +1860,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         changePct: snap.change12hPct,
         asOfIso: snap.asOfIso,
       })
+      // Ambient pulse: a real >threshold 1h move glows the minimized pill.
+      // Transient like the tick — a resume must never replay an old nudge —
+      // and cooldown-gated per session in the watcher (no spam, one state).
+      const tag = pulse.maybeTag(s, snap)
+      if (tag) emitTransient(s, { type: 'pulse', tag })
     }
   }
 

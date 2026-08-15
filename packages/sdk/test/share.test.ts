@@ -38,15 +38,32 @@ describe('shareCardView — the shared artifact is the server’s, whole', () =>
 })
 
 describe('the share card fabricates no address', () => {
-  it('the module exports no link or slug builder at all', () => {
-    // The dead `hippo.app/s/<slug>` placeholder is gone, not merely unused:
-    // nothing can render or copy an address that resolves nowhere.
+  it('the only link path is the server mint — no client slug builder', () => {
+    // The dead client-fabricated `hippo.app/s/<slug>` never came back: the
+    // exports are the pure card/clipboard helpers plus createShare (which
+    // returns the SERVER's URL or null) and the display-only scheme strip.
     expect(Object.keys(shareModule).sort()).toEqual([
       'COPIED_FLASH_MS',
       'COPY_DISCLAIMER',
       'briefClipboardText',
+      'createShare',
+      'displayUrl',
       'shareCardView',
     ])
+  })
+
+  it('createShare answers null with no session — the overlay draws no address', async () => {
+    // Fresh module state: no gateway, no session → null, never a made-up URL.
+    await expect(shareModule.createShare('frame_1')).resolves.toBeNull()
+  })
+
+  it('displayUrl strips only the scheme — the address itself stays verbatim', () => {
+    expect(shareModule.displayUrl('https://gw.example/s/abc123def456')).toBe(
+      'gw.example/s/abc123def456',
+    )
+    expect(shareModule.displayUrl('http://gw.example/s/x')).toBe('gw.example/s/x')
+    // No scheme → untouched (never mangles a path that merely contains "http").
+    expect(shareModule.displayUrl('gw.example/http-notes')).toBe('gw.example/http-notes')
   })
 
   it('the clipboard carries the brief’s own prose, never a URL', () => {

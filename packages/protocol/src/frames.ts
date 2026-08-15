@@ -224,16 +224,18 @@ export const BannerFrame = z.object({
 })
 
 /**
- * Ambient market pulse (pill glow + mono event tag). Currently produced only
- * by the mock gateway and tests — the production gateway has no market
- * watcher yet, so no prod trader sees this frame. Documented decision, not
- * drift: the SDK surface stays wired so a gateway producer can ship without
- * an SDK release.
+ * Ambient market pulse (pill glow + mono event tag). Produced by the gateway's
+ * market watcher (services/gateway/src/pulse.ts) when the session symbol's 1h
+ * move crosses a threshold — cooldown-gated per session, delivered TRANSIENT
+ * (journal-bypassing, like price_tick) so a resume can never replay a stale
+ * nudge. `tag` is SERVER-authored and rendered verbatim (stop-line law: the
+ * SDK does no market math). The SDK shows it only while minimized to the pill
+ * and clears it when the panel opens — one state, no counts.
  */
 export const PulseFrame = z.object({
   ...base,
   type: z.literal('pulse'),
-  tag: z.string(), // e.g. "· BTC −4.2%"
+  tag: z.string(), // e.g. "BTC −4.2% 1H"
 })
 
 /**
