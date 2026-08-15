@@ -77,6 +77,23 @@ jobs:
             "
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Host-safety gate (PRD gate 3): the built SDK on a hostile page —
+      # aggressive !important CSS, strict CSP (no unsafe-inline/eval), a
+      # transformed ancestor. Asserts the pill renders byte-identical to a
+      # clean baseline, zero new globals, zero host layout shift, and a
+      # clean CSP report. The --self-test run serves a sabotaged loader and
+      # MUST fail — proving on every merge that the gate can go red.
+      - name: Host-safety browser
+        run: npx -y playwright@1.58.2 install --with-deps chromium
+
+      - name: Host-safety gate
+        working-directory: packages/sdk
+        run: node scripts/host-safety-check.mjs
+
+      - name: Host-safety gate self-test (must fail)
+        working-directory: packages/sdk
+        run: node scripts/host-safety-check.mjs --self-test
+
   lint:
     name: Lint (biome)
     runs-on: ubuntu-latest

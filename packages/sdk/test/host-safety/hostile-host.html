@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Strict CSP: no unsafe-inline anywhere. style-src 'self' blocks <style>
+       elements (even ones appended inside a shadow root); connect-src 'self'
+       blocks the gateway, forcing the panel's offline path. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'" />
+  <link rel="stylesheet" href="/fixtures/hostile.css" />
+  <link rel="stylesheet" href="/fixtures/patch.css" />
+  <title>Hostile host — aggressive CSS + strict CSP + transformed ancestor</title>
+</head>
+<body>
+  <!-- Transformed ancestor: position:fixed inside it resolves against the
+       transform, a classic embed killer. The SDK mounts on <body>, outside
+       this subtree — the fixture proves the mount stays there. -->
+  <div id="hs-transformed">
+    <h1 id="hs-h1">Hostile exchange page</h1>
+    <p id="hs-p">Global !important resets, unset buttons, a transformed
+      ancestor and a strict CSP. The pill must render identical to the clean
+      baseline, and this page's own layout must not shift when it mounts.</p>
+    <button id="hs-btn">host button</button>
+  </div>
+  <div id="hs-patch"></div>
+  <script src="/fixtures/probe.js"></script>
+  <script src="/dist/loader.js" data-hippo-key="pk_hostsafety" data-hippo-gateway="http://127.0.0.1:9"></script>
+</body>
+</html>

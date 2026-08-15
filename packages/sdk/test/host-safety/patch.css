@@ -1,0 +1,12 @@
+/* Identical opaque patch behind the pill on BOTH fixtures, so the byte-for-
+ * byte screenshot compare sees the same background pixels and only the pill
+ * itself can differ. Sits one z-layer below the SDK's host element. */
+#hs-patch {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  height: 130px;
+  background: #123456;
+  z-index: 2147482000;
+}

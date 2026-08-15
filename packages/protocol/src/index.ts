@@ -1,3 +1,7 @@
+// biome-ignore-all assist/source/organizeImports: csp.js must evaluate before the schema modules — alphabetizing re-breaks the CSP fix
+// csp.js first: its module-scope side effect must run before any
+// schema-constructing module evaluates (zod's JIT probe fires there).
+export * from './csp.js'
 export * from './admin.js'
 export * from './frames.js'
 export * from './orders.js'
