@@ -2480,8 +2480,19 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       case 'portfolio': {
         // Never cached — every read goes to the venue via the seam adapter.
         try {
-          const { positions } = await seam.portfolio(session.partner.partnerId, userKey(session))
+          const { positions, openOrders } = await seam.portfolio(
+            session.partner.partnerId,
+            userKey(session),
+          )
           emit(session, { type: 'positions', rows: positions })
+          // The same read MUST re-sync the orders strip: the SDK derives the
+          // OPEN ORDERS badge and the blotter pills from the latest
+          // orders_snapshot, so dropping openOrders here leaves both stale.
+          emit(session, {
+            type: 'orders_snapshot',
+            open: openOrders,
+            positionsCount: positions.length,
+          })
         } catch (err) {
           log.error({ err }, 'seam portfolio unavailable')
           emit(session, {
