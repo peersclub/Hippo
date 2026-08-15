@@ -53,7 +53,12 @@ describe('POST /v1/shares', () => {
 
   it('400s a malformed body (missing sessionId/frameId)', async () => {
     const app = await testApp()
-    for (const payload of [{}, { sessionId: 's' }, { frameId: 'f' }, { sessionId: '', frameId: '' }]) {
+    for (const payload of [
+      {},
+      { sessionId: 's' },
+      { frameId: 'f' },
+      { sessionId: '', frameId: '' },
+    ]) {
       const res = await app.app.inject({ method: 'POST', url: '/v1/shares', payload })
       expect(res.statusCode).toBe(400)
     }
@@ -164,7 +169,11 @@ describe('GET /s/:id', () => {
     const hostile = '<script>alert(1)</script> & "BTC" <b>down</b>'
     const app = await testApp({
       intel: stubIntel({
-        respond: () => ({ ...briefFixture, headline: hostile, paragraphs: ['<img src=x onerror=1>'] }),
+        respond: () => ({
+          ...briefFixture,
+          headline: hostile,
+          paragraphs: ['<img src=x onerror=1>'],
+        }),
       }),
     })
     const { id } = await mintShare(app)
