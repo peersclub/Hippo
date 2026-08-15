@@ -363,6 +363,9 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   // ── All data till now (from vault Roadmap.md, as-built @ 2649b37) ──
   const FEATURES = [
     // ───── SHIPPED (merged to main) ─────
+    { s:'done', cat:'sdk', t:'Phase 5 — onboarding hero, ambient pulse, share cards', d:'The three welcome-and-spread moments, none needing a partner. The first-run hero now draws the partner’s venue name and accent from session config instead of constants. The minimized pill glows on real 1-hour market moves, computed by the gateway — the client polls nothing. And share cards became real: the panel asks the gateway to mint a short link for a brief the session actually received (you can only share what the server sent you), and the public /s/:id page renders a co-branded card that re-grounds on the live market at open time — a link opened tomorrow shows tomorrow’s price beside the brief’s own honestly-timestamped prose. Share records carry market-level content only — no session, no identity — so a leaked link can never leak a person, and the NOT INVESTMENT ADVICE line is printed in the card body where a screenshot cannot lose it. On any mint failure the card simply shows no address; the SDK never fabricates a URL.', ref:'PR #121', date:'Aug 15' },
+    { s:'done', cat:'ops', t:'Degraded mode demonstrable on demand', d:'PRD gate 5: the SLA clause you can show in a procurement meeting instead of hoping for an outage. An internal-token-guarded, partner-scoped switch forces the gateway onto the same market-only fallback a real intelligence outage takes — amber banner, labeled sources, intent and orders staying responsive — and the host control console gained a force-degraded toggle beside the venue chaos controls, proxied so the console never touches internal auth. A REFRESH tap while forced takes the fallback too, with zero live model calls: the demo cannot be accidentally punctured by the most natural tap in the panel. Walkthrough on /testing so a partner can run it without us in the room.', ref:'PR #120', date:'Aug 15' },
+    { s:'done', cat:'sdk', t:'Host-safety gate in CI', d:'PRD gate 3: the loader’s 5KB budget and the closed Shadow DOM’s style isolation, enforced on every merge instead of trusted. A hostile-CSS fixture host — global !important resets, universal selectors, a transformed ancestor, a strict CSP — now renders the panel unchanged in CI, and the loader size budget fails the build if it drifts over its allowance. The gate was proven able to fail before it was trusted.', ref:'PR #119', date:'Aug 15' },
     { s:'done', cat:'infra', t:'The Python tests were never running in CI', d:'The root cause of two waves of drift, and the least glamorous fix here. services/intelligence had no test script, ci.yml had no Python step, and pytest was not even declared in requirements-dev.txt. 266 tests existed and passed for anyone who thought to run them locally; nothing gated a merge on them. That is how the intent prompt fell behind the parsers without a single red build. Fixed first, deliberately, before any of the drift it allowed — and proven by injecting a failing assertion and watching CI go red before reverting it. A CI step that has never been seen to fail is not evidence that it works.', ref:'PR #105', date:'Aug 6' },
     { s:'done', cat:'intelligence', t:'The prompt learns the taxonomy the parsers already knew', d:'The intent prompt enumerated eight intents and never named "alert" — the alerts wave added the intent, the parser has a fast path for it, and the model literally could not return it. Same gap for three host verbs and, more expensively, the entire perp order shape: the validator strips any field the prompt schema does not name, so capability, direction, leverage, margin mode and reduce-only were dropped in transit. A "long 0.5 BTC at 10x" arriving as a spot buy is a different trade, not a lossy one. The real deliverable is the parity tests: the taxonomy lives on four surfaces and they are now asserted EQUAL, so teaching one side a new value fails the build until the others learn it. Fixing the six values without the comparison would only have reset the clock.', ref:'PR #111', date:'Aug 6' },
     { s:'done', cat:'trust', t:'Capability truth on every order path', d:'A perpetuals request sent to a venue that only supports spot was quietly rewritten into a spot plan and rendered as "Set up your BUY BTC order" — the leverage silently gone. It now returns a rejection that names what the venue cannot do. Leverage is read from the live position row rather than invented, and on the simulated venue, which reports no leverage at all, the bound check rejects rather than clamps: guessing a number is the exact failure being fixed.', ref:'PR #106', date:'Aug 6' },
@@ -447,7 +450,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { s:'planned', cat:'seam', t:'Real-venue lifecycle feedback', d:'A spot pilot venue with no status-by-id or webhook blocks reliable terminal order state; the poll reconciler is the backstop. Open Decisions #9.', ref:'Decision #9', date:'partner' },
     { s:'planned', cat:'infra', t:'vLLM pods', d:'Regional intent (7–8B) + a global research tier (~30B) + the shared cache tier — the production serving topology.', ref:'infra', date:'—' },
     { s:'planned', cat:'infra', t:'GPU capacity plan', d:'India + Gulf GPU quotes (Kartik) feeding a real capacity model for the pilot regions.', ref:'infra', date:'—' },
-    { s:'planned', cat:'ops', t:'Pilot launch', d:'Onboarding hero moment, ambient market pulse, and share cards live for the first pilot partner (a large India exchange).', ref:'Phase 5', date:'—' },
+    { s:'planned', cat:'ops', t:'Pilot launch', d:'The hero moment, ambient pulse and share cards are built (PR #121); what remains is a real partner — embed on their exchange, their venue behind the seam, and the Phase-5 surfaces verified on their traffic.', ref:'Phase 5', date:'partner' },
     { s:'planned', cat:'trust', t:'Lift telemetry', d:'The last pilot-instrumentation piece: does Hippo move partner retention/volume — the number that turns a pilot into a contract.', ref:'Phase 5', date:'—' },
   ]
 
@@ -586,6 +589,9 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { t: 'Harness refuses to grade a mocked backend', est: 1 },
     { t: 'Portfolio turn re-syncs the open-orders strip', est: 1 },
     { t: 'host-demo responsive — survives a phone', est: 2 },
+    { t: 'Host-safety gate in CI — hostile CSS + loader budget', est: 2 },
+    { t: 'Degraded mode demonstrable on demand', est: 1 },
+    { t: 'Onboarding hero · ambient pulse · share cards', est: 4 },
   ]
 
   // Remaining, ours, scheduled. `end` is the last day of the lane — the lane
@@ -621,36 +627,19 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
             'Publish the number with the model id and provider mode attached (rides on the item-3 stamping).',
             'Wire it as a launch gate with a threshold, so it is a build failure rather than a report someone has to read.',
           ] },
-        { t: 'Host-safety pass in CI', own: 'Victor', est: 2, gate: 'PRD gate 3',
-          un: 'A budget nothing enforces is a number that drifts.',
-          d: 'A hostile-CSS page plus a performance budget, running on every merge. The loader sits at 1.54KB gz of its 5KB allowance today — nothing in CI keeps it there.',
-          plan: [
-            'Build a hostile-CSS fixture host: global resets with <code>!important</code>, aggressive universal selectors, a transformed ancestor, and a strict CSP with no <code>unsafe-inline</code>.',
-            'Assert the panel renders unchanged inside it — the closed Shadow DOM should make this pass, which is exactly why it has never been proven.',
-            'Add the loader size budget (fail over 5KB gz) and a CLS check to <code>ci.yml</code>.',
-            'Prove the gate fails on purpose before trusting it — inject a style leak, watch CI go red, revert.',
-          ] },
       ],
     },
     {
       wk: 'Week 3', dates: 'Aug 24–28', end: new Date(2026, 7, 28), cap: 5,
-      goal: 'Procurement-ready: the things a partner meeting needs, shown on demand.',
+      goal: 'Procurement-ready: verify the shipped Phase-5 + gate-5 surfaces on the deployed demo.',
       items: [
-        { t: 'Onboarding hero · ambient pulse · share cards', own: 'Victor', est: 4, un: 'The last of Phase 5 that does not need a partner.',
-          d: 'The welcome moment carrying the partner’s name, the pill that glows when the market moves while Hippo is minimized, and the co-branded share card with the no-advice line printed on it. The vault lists all three as not started.',
+        { t: 'Verify hero · pulse · share + forced degraded on the deployed demo', own: 'Victor', est: 1,
+          un: 'Everything above shipped against local stacks; the demo claims need the public wire.',
+          d: 'PRs #119–#121 closed Phase 5 and gates 3 and 5 in code and CI. What remains is the live pass: the share link is worthless if it only resolves on localhost, and the force-degraded toggle must be demonstrable on the deployed console.',
           plan: [
-            'Wire the welcome moment to partner config so “built for ___” reads from the embed rather than a constant.',
-            'Drive the ambient pulse from a real market-move signal on the minimized pill, with the mono event tag; opening the panel clears it.',
-            'Finish the share card: co-branded render, a short link that resolves current data at open time, and <code>MARKET INFORMATION · NOT INVESTMENT ADVICE</code> printed on the image — the compliance line has to survive being screenshotted.',
-            'Verify all three on the deployed demo rather than locally; the share link is worthless if it only resolves on localhost.',
-          ] },
-        { t: 'Degraded mode demonstrable on demand', own: 'Victor', est: 1, gate: 'PRD gate 5',
-          un: 'Shown in procurement, not discovered in an outage.',
-          d: 'The amber banner and labeled CACHED BRIEF badges are the SLA clause made visible. Edge-state completeness is a launch gate precisely because this one is only convincing before you need it.',
-          plan: [
-            'Add a force-degraded toggle to the host control console — the console already carries the venue chaos controls, so this belongs beside them.',
-            'Verify the amber banner and <code>CACHED BRIEF</code> badges live, and that intent and the order flow stay responsive while research is degraded, since that is the actual SLA claim.',
-            'Add it to <code>/testing</code> as a walkthrough so a partner can run the demo themselves without us in the room.',
+            'After the wave deploy (Week 2, item 1), mint a share on the public demo and open <code>/s/:id</code> from a phone off the LAN.',
+            'Flip the force-degraded toggle on the deployed host console; verify the amber banner, labeled sources, and that a REFRESH tap stays on the fallback.',
+            'Confirm the hero reads the partner name and the pill glows on a real market move, on the public embed.',
           ] },
       ],
     },
