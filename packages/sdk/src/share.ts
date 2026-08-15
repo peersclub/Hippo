@@ -1,13 +1,16 @@
 /**
- * Share-card logic — pure and testable. Baseline §6: sharing produces a
- * live, co-branded card, not a screenshot. There is no share backend yet, so
- * the overlay renders entirely from the brief's frame data.
+ * Share-card logic. Baseline §6: sharing produces a live, co-branded card,
+ * not a screenshot. The overlay renders from the brief's frame data; the
+ * short link comes from the gateway's share service (POST /v1/shares →
+ * GET /s/:id), which re-grounds the card on the live market at open time.
  *
- * NO SHORT LINK IS DRAWN. The card used to print a client-fabricated
- * `hippo.app/s/<slug>` and copy it to the clipboard — a URL that looks live
- * and resolves nowhere. The link comes back when a share service issues a
- * real slug on the frame; until then the card shows no address at all.
+ * THE LINK IS NEVER FABRICATED CLIENT-SIDE. The card once printed a
+ * client-invented `hippo.app/s/<slug>` that resolved nowhere; today the ONLY
+ * address that can render or be copied is the one the server minted and
+ * answered with — createShare returns the server's URL verbatim or nothing.
  */
+import { sessionId } from './state.js'
+import { gatewayUrl } from './transport.js'
 
 /** How long the copy button reads "Copied" before flipping back. */
 export const COPIED_FLASH_MS = 1500
@@ -37,6 +40,41 @@ export function shareCardView(frame: { live?: boolean; headline: string; paragra
 /** The advice line travels with every copied brief — same non-negotiable
  * rule as the share card (baseline §6): distribution never crosses it. */
 export const COPY_DISCLAIMER = 'MARKET INFORMATION · NOT INVESTMENT ADVICE'
+
+/** A server-minted share link: the id and the URL that actually resolves. */
+export type ShareLink = { id: string; url: string }
+
+/** The card shows the address without its scheme (the mono look); the
+ * clipboard always gets the server's URL verbatim — only display calls this. */
+export function displayUrl(url: string): string {
+  return url.replace(/^https?:\/\//, '')
+}
+
+/**
+ * Ask the gateway to mint a share for a brief this session received. Returns
+ * the server's link VERBATIM, or null (no session, network/HTTP failure,
+ * malformed answer) — on null the overlay simply draws no address, exactly
+ * the pre-share-service behavior. The SDK never assembles a URL itself.
+ */
+export async function createShare(frameId: string): Promise<ShareLink | null> {
+  const gateway = gatewayUrl()
+  const sid = sessionId.value
+  if (!gateway || !sid) return null
+  try {
+    const res = await fetch(`${gateway}/v1/shares`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: sid, frameId }),
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { id?: unknown; url?: unknown }
+    if (typeof data.id !== 'string' || data.id.length === 0) return null
+    if (typeof data.url !== 'string' || !/^https?:\/\//.test(data.url)) return null
+    return { id: data.id, url: data.url }
+  } catch {
+    return null
+  }
+}
 
 /** Plain-text rendering of a brief for the clipboard. Structural typing so
  * this module keeps zero runtime imports. */

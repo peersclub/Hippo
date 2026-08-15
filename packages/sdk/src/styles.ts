@@ -539,6 +539,15 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .shrx{position:absolute;top:10px;right:10px;width:24px;height:24px;border-radius:8px;
   border:1px solid var(--hippo-hairline);color:var(--hippo-text-dim);display:grid;place-items:center;font-size:10px}
 .shrx:hover{color:var(--hippo-text-hi)}
+/* Server-minted short link — mono address + its own copy action */
+.shrlink{display:flex;align-items:center;gap:8px}
+.shrurl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--hippo-font-mono);font-size:10px;color:var(--hippo-text-mid);
+  border:1px solid var(--hippo-hairline);border-radius:8px;padding:7px 9px;
+  background:rgba(var(--hippo-white-rgb),.03)}
+.shrcopylink{flex-shrink:0;font-family:var(--hippo-font-mono);font-size:9px;letter-spacing:.08em;
+  color:var(--hippo-amber);border:1px solid rgba(var(--hippo-amber-rgb),.4);border-radius:8px;padding:7px 10px}
+.shrcopylink:hover{background:rgba(var(--hippo-amber-rgb),.08)}
 /* settings sheet */
 .obcard.sheet{text-align:left;padding-top:18px}
 .shhd{display:flex;justify-content:space-between;align-items:center}

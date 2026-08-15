@@ -50,6 +50,7 @@ import { authenticate, createSessionStore, type SessionStore } from './plugins/a
 import { createRateLimiter, type RateLimitOptions } from './plugins/rate-limit.js'
 import { createEmitter, streamSession } from './plugins/sse.js'
 import { Telemetry } from './plugins/telemetry.js'
+import { InMemoryShareStore, registerShareRoutes, type ShareStore } from './shares.js'
 import { createFileAnalysisClient } from './upload/analysis.js'
 import { registerFileUploadRoute } from './upload/route.js'
 
@@ -101,6 +102,10 @@ export type GatewayOptions = {
   intentSignalStore?: IntentSignalStore
   /** Alert poll cadence override (tests). Defaults to ALERT_POLL_MS ?? 15s. */
   alertPollMs?: number
+  /** Share-card records (in-memory pilot store by default — see shares.ts). */
+  shareStore?: ShareStore
+  /** Share lifetime override (tests). Defaults to SHARE_TTL_MS ?? 7 days. */
+  shareTtlMs?: number
   /** Override the session store (tests inject a Redis-backed one). Defaults to
    * Redis when REDIS_URL is set, else in-memory. */
   sessions?: SessionStore
@@ -404,6 +409,20 @@ export async function buildApp(opts: GatewayOptions = {}) {
     ...(rateLimit ? { rateLimit } : {}),
   })
 
+  // Share cards (baseline §6): POST /v1/shares mints a short id for a brief
+  // the session already received; GET /s/:id is the public, co-branded card
+  // page that re-grounds on the live market at open time. Tenancy is
+  // structural — records carry market-level content only (see shares.ts).
+  const shares = opts.shareStore ?? new InMemoryShareStore()
+  registerShareRoutes(app, {
+    sessions,
+    market,
+    store: shares,
+    log: app.log,
+    ...(rateLimit ? { rateLimit } : {}),
+    ...(opts.shareTtlMs !== undefined ? { ttlMs: opts.shareTtlMs } : {}),
+  })
+
   /** Venue lifecycle events delivered by the seam (the callbackUrl given at
    * confirm time). Internal route: in pods this sits on the cluster network
    * behind mTLS, never exposed through the partner-facing ingress. Additionally
@@ -544,6 +563,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
     alerts,
     intentSignalStore,
     signals,
+    shares,
   }
 }
 
