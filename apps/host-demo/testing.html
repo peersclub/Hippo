@@ -50,7 +50,7 @@
     <a href="#m-talk">Conversation</a><a href="#m-memory">Memory</a><a href="#m-orders">Orders</a><a href="#m-manage">Order management</a>
     <a href="#m-alerts">Alerts</a><a href="#m-host">Host control</a><a href="#m-files">Identity &amp; files</a><a href="#m-clarify">Clarification</a>
     <a href="#w-draft">Order card</a><a href="#w-confirm">Confirm surfaces</a><a href="#w-exits">Protective exits</a><a href="#w-clarify">Clarify walkthrough</a><a href="#w-alerts">Alerts walkthrough</a>
-    <a href="#w-identity">Identity walkthrough</a><a href="#w-upload">Upload walkthrough</a><a href="#w-memory">Memory walkthrough</a>
+    <a href="#w-identity">Identity walkthrough</a><a href="#w-upload">Upload walkthrough</a><a href="#w-memory">Memory walkthrough</a><a href="#w-degraded">Degraded walkthrough</a>
     <a href="#admin">Admin</a><a href="#portal">Portal</a><a href="#hostset">Host settings</a>
     <a href="#resilience">Resilience</a><a href="#limits">Known limits</a><a href="#bugs">Report a bug</a>
   </div>
@@ -377,6 +377,26 @@ pnpm dev</pre>
       <span class="expect">still an advice-decline card. Memory sits beneath the guardrail and cannot override it.</span></li>
   </ol>
 
+  <h2 id="w-degraded">Walkthrough — degraded mode on demand <span style="color:var(--dim);font-size:11px;text-transform:none;letter-spacing:0">— the SLA clause made visible (PRD gate 5); no outage required</span></h2>
+  <p>The contractual claim: under extreme load, research may slow — but intent, orders, prices and portfolio <b>stay responsive</b>, and everything degraded is <b>labeled, never disguised</b>. This walkthrough shows that live in a procurement meeting with one switch. The switch flips a gateway-side flag for the demo partner only; the AI service itself is never touched, so there is nothing to restart afterwards.</p>
+  <ol class="steps">
+    <li>Open <a href="/settings">host settings</a> → <b>Venue behaviour</b> → turn <b>Force degraded AI mode</b> ON.
+      <span class="expect">saved ✓ flashes. Sanity check: the <b>Hippo AI</b> card below still shows its live model — the service is up; only the gateway now treats it as down for this partner.</span></li>
+    <li>Back on the exchange, ask <code>why is BTC moving today?</code>
+      <span class="expect">an amber <b>HIGH MARKET LOAD</b> banner pins above the thread (once per degradation episode, not per turn), then a market-data-only brief: real price / 12h / funding stats and a sparkline from the live feed, one templated sentence saying fresh research is paused, source chip <code>PRICE FEED</code>, and <b>no model tag</b> — nothing pretends a model wrote it</span></li>
+    <li>Say <code>buy 0.05 btc</code>, submit the card, and confirm.
+      <span class="expect">the full interactive order flow, exactly as live — draft → ticket → lifecycle to FILLED in the host blotter. This is the SLA claim itself: the order path never depended on the AI service.</span></li>
+    <li>Say <code>my positions & p&l</code>.
+      <span class="expect">the live positions card — portfolio reads come from the venue, not the model</span></li>
+    <li>Say <code>should I buy the dip?</code>
+      <span class="expect">the advice-decline card, even degraded — the guardrail does not need a model to hold</span></li>
+    <li>Turn the toggle OFF and ask <code>why is ETH moving?</code>
+      <span class="expect">prose streams token-by-token again with the model tag top-right — live on the very next turn, no restart anywhere</span></li>
+    <li>(Optional) Open Hippo Admin → <b>Tech</b> while forced.
+      <span class="expect">the <b>Degraded seconds</b> tile counts and is badged <i>now</i> — the operator plane sees a forced demo exactly as it would a real episode</span></li>
+  </ol>
+  <div class="gotcha"><b>Labeled, never disguised:</b> when the AI's answer cache serves while its LLM is down (the other degradation flavour — force it with <b>Force mock engine</b> in host settings), briefs carry the <b>CACHED BRIEF · age</b> badge on the live bar. Either way the rule holds: degraded answers announce themselves. The forced flag survives until flipped back or the gateway restarts — restart fails back to <i>live</i>, so a forgotten demo switch can never strand a partner degraded.</div>
+
   <h2 id="admin">Operator surface — Hippo Admin</h2>
   <p>The operator plane. Login-gated; the counts you see are live and will differ from any number written here, so this table describes <i>what each page is</i>, not what it currently reads.</p>
   <table>
@@ -414,7 +434,7 @@ pnpm dev</pre>
   <table>
     <tr><th>Group</th><th>What you can do — and what to watch</th></tr>
     <tr><td><b>Embed &amp; appearance</b> <span style="color:var(--dim)">(browser-local)</span></td><td>Theme (dark/light), locale (English / हिन्दी / Hinglish / العربية RTL), launcher label, auto-open, partner key, <b>Hippo price source</b> (server / client / host), and <b>Allow Hippo to control this page</b> — this checkbox <i>is</i> the <code>data-hippo-page-control</code> attribute, and it defaults ON. These are localStorage preferences the exchange reads on its <b>next load</b>, so reload before testing. Turning page control off and reloading is the cleanest way to prove the opt-in gate.</td></tr>
-    <tr><td><b>Venue behaviour</b> <span style="color:var(--dim)">(writes /admin/config live)</span></td><td>The chaos bench. <b>Confirm surface</b> (API vs host modal), <b>fill mode</b> (working / instant / <b>manual</b>, where you approve every fill by hand), partial fills, working window in ms, taker and maker fees, slippage %, <b>added latency</b>, <b>reject rate</b> (0–1, for exercising rejection cards) and <b>maintenance mode</b> (rejects every order — a venue-down simulation). Each change saves immediately and flashes <i>saved ✓</i>.</td></tr>
+    <tr><td><b>Venue behaviour</b> <span style="color:var(--dim)">(writes /admin/config live)</span></td><td>The chaos bench. <b>Confirm surface</b> (API vs host modal), <b>fill mode</b> (working / instant / <b>manual</b>, where you approve every fill by hand), partial fills, working window in ms, taker and maker fees, slippage %, <b>added latency</b>, <b>reject rate</b> (0–1, for exercising rejection cards), <b>maintenance mode</b> (rejects every order — a venue-down simulation) and <b>force degraded AI mode</b> (a <i>gateway</i>-side flag for the demo partner: amber banner + market-only briefs while orders stay live — see the <a href="#w-degraded">degraded walkthrough</a>). Each change saves immediately and flashes <i>saved ✓</i>.</td></tr>
     <tr><td><b>Instruments &amp; capabilities</b></td><td>Spot / perps / options toggles, max leverage, margin modes (never allowed to be empty), tradable pairs, and min/max order size. <code>/v1/capabilities</code> is <i>derived</i> from this config — turn perps off and watch the draft card lose its perp options and the leverage slider's ceiling follow whatever you set here.</td></tr>
     <tr><td><b>Hippo AI</b></td><td>Switch the live model from the list the intelligence service reports, <b>force mock engine</b> (the fastest way to see the degraded path), toggle the <b>answer cache</b> off so every turn is a fresh model call, and override the persona level. All proxied same-origin, so the browser never touches the internal AI service. Shows the current model with an <code>LLM</code> or <code>MOCK</code> pill, and says <i>intelligence unreachable</i> when it is.</td></tr>
     <tr><td><b>Order management</b></td><td>A live table of resting orders. <b>Cancel</b> any of them and watch the matching Hippo card flip to CANCELLED, not a phantom FILLED. In <i>manual</i> fill mode each row also gets a <b>Fill</b> button, so you can hold an order in WORKING for as long as you like and then fill it on cue.</td></tr>
@@ -425,7 +445,7 @@ pnpm dev</pre>
   <h2 id="resilience">Resilience &amp; edge cases</h2>
   <table>
     <tr><th>Do this</th><th>Expected</th></tr>
-    <tr><td>Take the AI service down (locally: <code>pkill -f uvicorn</code>; or force mock from host settings), then ask a research question</td><td>Never a 500. You get a truthful market-data-only brief plus an amber <b>HIGH MARKET LOAD</b> banner, pinned above the thread and shown once per degradation episode. Orders and prices keep working.</td></tr>
+    <tr><td>Take the AI service down (easiest: <b>Force degraded AI mode</b> in host settings — the on-demand switch, see the <a href="#w-degraded">walkthrough</a>; locally also <code>pkill -f uvicorn</code>, or force mock for the cached flavour), then ask a research question</td><td>Never a 500. You get a truthful market-data-only brief plus an amber <b>HIGH MARKET LOAD</b> banner, pinned above the thread and shown once per degradation episode. Orders and prices keep working.</td></tr>
     <tr><td>While degraded, say <code>buy 0.05 btc</code></td><td>Still parses and still prepares a ticket. The gateway keeps its own deterministic parsers for spot, perps, chart control, the wider host verbs and orders queries.</td></tr>
     <tr><td>While degraded, say <code>close btc</code></td><td><b>No clarification card.</b> Degraded mode skips it deliberately — the fallback classifier pins every confidence at 0.5, so clarifying would mean asking about every costly turn.</td></tr>
     <tr><td>While degraded, say <code>alert me when BTC crosses 70k</code></td><td><b>Alerts do not work degraded.</b> The fallback classifier has no alert parser, so this falls through to a research answer. See Known limits.</td></tr>
