@@ -20,7 +20,7 @@ import { counterLabel, enterAction, MAX_COMPOSER_HEIGHT_PX } from './composer.js
 import { filesOpen, openFiles } from './files.js'
 import { resolveLocale, t } from './i18n.js'
 import { IdentityFirstRunCard } from './identity-card.js'
-import { createOnboardingStore, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
+import { createOnboardingStore, heroQueries, type OnboardingStore } from './onboarding.js'
 import { EXAMPLE_INTENTS, NEW_ORDER, parseOrderSummary, toggleExpand } from './orders-expand.js'
 import { dispatch, outbox } from './outbox.js'
 import { FilesSheet, OnboardingOverlay, SettingsSheet, ShareOverlay } from './overlays.js'
@@ -510,8 +510,8 @@ function PinnedBanners() {
 
 /** Empty thread — never blank: value is one tap away (edge state №1). */
 function EmptyHero() {
-  const chips = suggestedQueries.value.slice(0, 3)
-  const list = chips.length > 0 ? chips : HERO_QUERIES
+  // Same rule as the onboarding typewriter: partner-curated queries first.
+  const list = heroQueries(suggestedQueries.value)
   return (
     <div class="empty">
       <img class="emark" src={HIPPO_MARK} alt="" />

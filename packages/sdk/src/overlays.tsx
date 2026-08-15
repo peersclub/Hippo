@@ -11,7 +11,7 @@ import { filesOpen, filesView, type LibraryFile, loadFiles, relativeTime } from 
 import { t } from './i18n.js'
 import { signOutUplink } from './identity.js'
 import { IdentityForm } from './identity-card.js'
-import { consentRows, HERO_QUERIES, type OnboardingStore } from './onboarding.js'
+import { consentRows, heroQueries, type OnboardingStore } from './onboarding.js'
 import { dispatch } from './outbox.js'
 import {
   type ClearMemoryEvent,
@@ -37,6 +37,7 @@ import {
   persistLocale,
   settingsOpen,
   shareFrame,
+  suggestedQueries,
   venueName,
 } from './state.js'
 import { send } from './transport.js'
@@ -273,7 +274,9 @@ export function OnboardingOverlay({
           <>
             <span class="obmark">H</span>
             <h2>{t(locale.value, 'ob_ask_anything')}</h2>
-            <Typewriter queries={HERO_QUERIES} />
+            {/* Partner-curated queries from the session-mint config, same
+                rule as the empty-thread hero — HERO_QUERIES only as floor. */}
+            <Typewriter queries={heroQueries(suggestedQueries.value)} />
             <button type="button" class="obcta" onClick={() => store.next()}>
               {t(locale.value, 'ob_next')}
             </button>

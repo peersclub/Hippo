@@ -61,6 +61,8 @@ async function load() {
     connection: state.connection,
     sessionId: state.sessionId,
     entitlements: state.entitlements,
+    venueName: state.venueName,
+    suggestedQueries: state.suggestedQueries,
   }
 }
 
@@ -124,6 +126,40 @@ describe('stream death → re-mint', () => {
     // No re-mint — the same session's stream is expected to recover itself.
     expect(n).toBe(1)
     expect(mockEventSources).toHaveLength(1)
+  })
+})
+
+describe('mint captures partner config — the onboarding hero reads THESE, no constants', () => {
+  it('lands config.venueName + suggestedQueries into their signals ("built for {venue}")', async () => {
+    stubFetch((url) => {
+      if (url.includes('/v1/session')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sessionId: 's1',
+            config: {
+              venueName: 'KoinBX',
+              suggestedQueries: ['why is KOIN pumping?', 'INR withdrawal limits'],
+            },
+          }),
+        }
+      }
+      return { ok: true, status: 200 }
+    })
+    const { connect, venueName, suggestedQueries } = await load()
+    await connect(cfg)
+    // The exact values the welcome hero (ob_tagline {venue}) and the intro
+    // typewriter draw — server-side partner config, end to end.
+    expect(venueName.value).toBe('KoinBX')
+    expect(suggestedQueries.value).toEqual(['why is KOIN pumping?', 'INR withdrawal limits'])
+  })
+
+  it('keeps the neutral default when the mint carries no venueName', async () => {
+    stubFetch(() => sessionOk('s1'))
+    const { connect, venueName } = await load()
+    await connect(cfg)
+    expect(venueName.value).toBe('your exchange')
   })
 })
 
