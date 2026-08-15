@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: hostile fixture — the !important attacks are the test */
 /* Realistic-aggressive host CSS: the patterns exchange frontends and CSS
  * frameworks actually ship, all forced with !important. Inheritable
  * properties (font, color) cross the shadow boundary unless the embed sets
@@ -14,8 +15,11 @@
   box-sizing: content-box !important;
 }
 
-html, body {
-  font: 32px/1.1 "Comic Sans MS", cursive !important;
+html,
+body {
+  font:
+    32px / 1.1 "Comic Sans MS",
+    cursive !important;
   color: #ff00ff !important;
   background: #ffff00 !important;
   letter-spacing: 3px !important;
@@ -23,7 +27,9 @@ html, body {
 
 /* The classic framework reset that destroys unstyled embeds. The pill is a
  * <button> — if the shadow boundary leaked, this would erase it. */
-button, input, select {
+button,
+input,
+select {
   all: unset !important;
   display: block !important;
   font-size: 40px !important;
@@ -35,7 +41,9 @@ img {
   filter: invert(1) hue-rotate(90deg) !important;
 }
 
-div, p, h1 {
+div,
+p,
+h1 {
   float: left !important;
   text-transform: uppercase !important;
 }
