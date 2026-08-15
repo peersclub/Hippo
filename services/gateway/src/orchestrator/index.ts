@@ -674,7 +674,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   function enterDegraded(session: Session, err: unknown, forced = false): void {
     telemetry.markDegraded()
-    if (forced) log.warn({ partnerId: session.partner.partnerId }, 'degraded mode FORCED by operator')
+    if (forced)
+      log.warn({ partnerId: session.partner.partnerId }, 'degraded mode FORCED by operator')
     else log.warn({ err }, 'intelligence unreachable — degraded mode')
     if (!session.degradedBannerShown) {
       session.degradedBannerShown = true
