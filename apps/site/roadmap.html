@@ -368,6 +368,9 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { s:'done', cat:'trust', t:'Capability truth on every order path', d:'A perpetuals request sent to a venue that only supports spot was quietly rewritten into a spot plan and rendered as "Set up your BUY BTC order" — the leverage silently gone. It now returns a rejection that names what the venue cannot do. Leverage is read from the live position row rather than invented, and on the simulated venue, which reports no leverage at all, the bound check rejects rather than clamps: guessing a number is the exact failure being fixed.', ref:'PR #106', date:'Aug 6' },
     { s:'done', cat:'seam', t:'One number for the leverage bound, and the forgotten route', d:'The maximum-leverage limit existed as a hardcoded 50 in two places that were free to disagree — the value advertised to the trader and the value enforced on their order. It is now derived from the venue capabilities so both read the same source. Separately, the older prepare route had never gained the spot-support gate its replacement already had, so an unsupported order could enter through the side door.', ref:'PR #107', date:'Aug 6' },
     { s:'done', cat:'ops', t:'The admin panel could not find anyone past row 50', d:'The memory service documented a lookup-one-persona route that was never actually registered. The panel compensated by scanning the first page of the list, so any user beyond row 50 came back as "no memory held" — which is the single answer a deletion request must never get wrong. The route now exists, and a never-stored key returns an honest 404 instead of the empty default persona that reads like real emptiness. The test parses the documentation comment and asserts the router serves every path it advertises, so a docblock that lies now fails the build.', ref:'PR #109', date:'Aug 6' },
+    { s:'done', cat:'trust', t:'Build provenance + a harness that refuses to grade a mock', d:'Every service now answers /health with the git sha and build time it was built from — a deploy stopped being a hope and became a check, and one script prints the whole fleet side by side. The intelligence service also reports whether a live model or the mock fallback is answering, and the eval harness probes that before grading: pointed at a degraded backend it now exits loudly instead of publishing a number that graded the wrong thing. That exact failure happened once — an over-credit-limit key produced a score byte-identical to the offline run — and can no longer happen silently.', ref:'PR #115', date:'Aug 15' },
+    { s:'done', cat:'sdk', t:'OPEN ORDERS badge told yesterday’s truth', d:'Asking about your portfolio now refreshes the open-orders strip in the same turn: the gateway was fetching your open orders and then throwing them away, so the badge count could disagree with the blotter it sat above. Fixed server-side with the existing wire frame — the panel needed no changes, because badge and blotter already read from one store. The regression test was proven able to fail before it was trusted.', ref:'PR #116', date:'Aug 15' },
+    { s:'done', cat:'host', t:'The demo link survives a phone', d:'The demo exchange page was a fixed three-column desk that overflowed sideways on any phone. It now stacks at 900px and goes single-column at 600px, tables scroll inside their cards rather than dragging the page, and the desktop render is proven byte-identical above 900px by screenshot comparison — verified down to 320px wide with the drawer and confirm modal open.', ref:'PR #117', date:'Aug 15' },
     { s:'done', cat:'sdk', t:'25 strings that ignored the language you chose', d:'Card badges, the live-price row, the feedback follow-up and the onboarding screens had their English typed straight into the markup, so a Hindi or Arabic panel rendered them in English — in the worst cases directly beside a correctly-translated screen-reader label, so the panel said one language and showed another. All 25 now come from the catalog in all four languages. Nine strings stay English on purpose, each with a written reason: the brand name, the compliance claims including the NOT INVESTMENT ADVICE line on shared cards (an unreviewed translation of a legal claim is worse than English, because it changes the promise), and BUY/SELL pending a decision on whether trading terms should localize at all. A new check fails the build on any future untranslated string, and also fails on a stale exemption, so the list cannot quietly become a dumping ground.', ref:'PR #110', date:'Aug 6' },
     { s:'done', cat:'infra', t:'Two memory backings that disagreed with each other', d:'The in-memory and Postgres stores were meant to be interchangeable and were not: they truncated oversized values at different lengths, and the Postgres side dropped the injected timestamp when reading back learned facts, so a write at any non-current time returned empty from one store and populated from the other. Both now share one clamp, and the composed memory snapshot keeps its full length because it is an audit record of what was sent to the model, not a prompt budget. The test derives the interface from the class itself, so a new write method without parity coverage fails.', ref:'PR #108', date:'Aug 6' },
     { s:'done', cat:'trust', t:'/testing — the test matrix that is actually current', d:'The old test guide was written in July and had drifted about ten features behind — alerts, protective exits, fractional sizing, conversational amend, the wider host verbs, in-panel identity, file upload, the consolidated orders view and the clarification card all shipped after it. /testing replaces it: 97 use-case rows across eight areas plus 16 resilience cases, eight walkthroughs for the multi-step flows, every operator surface described as it actually is, and a Known limits section that says plainly what does not work. The method matters as much as the page — every phrasing quoted was executed through the intent parser before it was written down, the ones marked EVAL come from the labeled eval set rather than being invented, and the accuracy figures are from a fresh harness run (68.3% overall, 95.3% English). Writing it that way also surfaced six claims the old guide had outright WRONG, including a live bug: the portfolio handler fetches your open orders and then throws them away.', ref:'PR #103', date:'Aug 5' },
@@ -579,59 +582,25 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { t: 'Durability — Redis sessions, durable routing, Postgres audit', est: 1.5 },
     { t: 'Eval harness v1 + intent harness + pilot dashboard', est: 2.5 },
     { t: 'Agentic installer — scan · conform · embed · verify', est: 3 },
+    { t: 'Build provenance — sha/builtAt on every /health', est: 0.5 },
+    { t: 'Harness refuses to grade a mocked backend', est: 1 },
+    { t: 'Portfolio turn re-syncs the open-orders strip', est: 1 },
+    { t: 'host-demo responsive — survives a phone', est: 2 },
   ]
 
   // Remaining, ours, scheduled. `end` is the last day of the lane — the lane
   // containing today renders as active, so the highlight advances by itself.
   const SPRINTS = [
     {
-      wk: 'Now', dates: 'Aug 14–16', end: new Date(2026, 7, 16), cap: 3,
-      goal: 'Make the truth verifiable — every claim after this lane is checkable from outside.',
-      items: [
-        { t: '/health reports the build SHA', own: 'Victor', est: 0.5, un: 'Turns a deploy from a hope into a check.',
-          d: 'Surfaced twice now — once by the audit, once by not being able to answer “is this fix live?” during the sync wave. It is the reason the wave was held rather than shipped.',
-          plan: [
-            'Bake the commit into the image: <code>ARG GIT_SHA</code> in each service Dockerfile, passed as a Railway build arg, read back through the environment at boot.',
-            'Add <code>sha</code>, <code>builtAt</code> and <code>providerMode</code> to every <code>/health</code> payload — <code>providerMode</code> is what item 3 asserts against.',
-            'Add a one-line script that prints the SHA of all eight services side by side, so “is this live?” is one command and not an archaeology exercise.',
-            'CI asserts the field is present and non-empty, so a service can never ship anonymous again.',
-          ] },
-        { t: 'The harness must fail loudly on a degraded backend', own: 'Victor', est: 1, gate: 'measurement integrity',
-          un: 'Same failure class as PR #105: a check that cannot fail is not a check.',
-          d: 'A live --intent-endpoint run against an over-limit key reported 68.3% — byte-identical to the offline run — because the service degraded to mock and kept answering. It was only caught because the two runs matched exactly. Surface provider mode on /health and assert it.',
-          plan: [
-            'Intelligence reports <code>llm: "live" | "mock"</code> plus the resolved model id on <code>/health</code> (rides on item 2).',
-            'Every <code>--intent-endpoint</code> run probes that first and exits non-zero on mock, rather than quietly grading <code>rule_classify</code>.',
-            'Stamp provider mode and model id into the report header, so an archived report can never be misread later.',
-            'Regression test: point the runner at a deliberately mocked service and assert the non-zero exit — the same “prove it can fail” discipline that closed PR #105.',
-          ] },
-        { t: 'The demo link has to survive a phone', own: 'Victor', est: 2, un: 'The demo link is the sales surface.',
-          d: 'apps/host-demo/index.html:41 is a fixed 1fr 260px 300px grid with zero @media queries — a partner opening the link on mobile gets horizontal overflow. Exploratory work already sits on feat/host-demo-responsive.',
-          plan: [
-            'Rebase <code>feat/host-demo-responsive</code> onto main — it carries the exploratory work and is seven commits behind.',
-            'Replace the fixed <code>1fr 260px 300px</code> grid with named areas plus breakpoints at 900px and 600px; the orderbook and blotter stack rather than overflow.',
-            'Switch the panel to its mobile posture below 600px — the SDK already ships <code>packages/sdk/embed/mobile.html</code>, so this is wiring, not new UI.',
-            'Verify at 390×844 and 360×640, and check <code>/testing</code> and <code>/how</code> at the same widths — they were written for a desktop column.',
-          ] },
-        { t: 'The portfolio handler throws your open orders away', own: 'Victor', est: 1, un: 'Fixes the stale OPEN ORDERS · N badge.',
-          d: 'orchestrator/index.ts:2346 destructures { positions } and discards openOrders — a live defect caught while writing /testing, and one of six things the old /how guide had outright wrong.',
-          plan: [
-            'Thread <code>openOrders</code> through the portfolio frame instead of destructuring it away at <code>orchestrator/index.ts:2346</code>.',
-            'Point the <code>OPEN ORDERS · N</code> badge at that value so the count and the blotter can no longer disagree.',
-            'Unit-test the handler on a portfolio carrying both positions and resting orders — the shape that was silently lossy.',
-            'Add the row to <code>/testing</code> that would have caught it, since the matrix is now the regression surface for claims.',
-          ] },
-      ],
-    },
-    {
       wk: 'Week 2', dates: 'Aug 17–21', end: new Date(2026, 7, 21), cap: 5,
       goal: 'Deploy what is merged, then score the gates that have a number instead of an opinion.',
       items: [
-        { t: 'Deploy the sync wave', own: 'Victor', est: 0.5, un: 'Unblocks every “verified live” claim made since Aug 6.',
-          d: 'PRs #105–#111 are merged and main is green at 30/30 — and none of it is running. Railway does not auto-deploy, and five services changed: gateway, seam, memory, admin, intelligence. No migrations in this wave, so the deploy is the whole job. Held until /health carries the build SHA so the deploy is provable from outside.',
+        { t: 'Deploy both merged waves', own: 'Victor', est: 0.5, un: 'Unblocks every “verified live” claim made since Aug 6.',
+          d: 'The sync wave (PRs #105–#111) and the verifiability wave (PRs #115–#117) are merged and green — and none of it is running. Railway does not auto-deploy. No migrations in either wave, so the deploy is the whole job — and /health now carries the build SHA, so for the first time the deploy is provable from outside.',
           plan: [
-            'Confirm no pending migrations, then <code>railway up --detach</code> per changed service — gateway, seam, memory, admin, intelligence. Specs are committed at <code>deploy/railway/*.json</code>; <code>--detach</code> is the known workaround for the CLI status-stream timeout.',
-            'Smoke the four fixes this wave was for: a perp ask on the spot-only venue returns a rejection rather than a silent spot order; the admin panel finds a persona past row 50; the LLM can emit <code>alert</code>; a Hindi panel draws no English chrome.',
+            'Set the provenance vars per service — <code>railway variables --set "GIT_SHA=$(git rev-parse HEAD)" --set "BUILT_AT=..."</code> (recipe in <code>deploy/README.md</code>) — then <code>railway up --detach</code> per changed service.',
+            'Prove it: <code>scripts/fleet-versions.sh</code> shows the deployed SHA on every public /health.',
+            'Smoke the sync-wave fixes: a perp ask on the spot-only venue returns a rejection rather than a silent spot order; the admin panel finds a persona past row 50; the LLM can emit <code>alert</code>; a Hindi panel draws no English chrome. Then the new ones: the OPEN ORDERS badge refreshes on a portfolio turn; the demo link on a phone.',
             'Re-run the deterministic eval against the deployed gateway and confirm 68.3% still holds — a deploy that moves it is a regression, not a surprise.',
             'Flip <code>🟢 Live Demo Status.md</code> from “MERGED, NOT YET DEPLOYED” to live, with the deployed SHA now visible on <code>/health</code>.',
           ] },
