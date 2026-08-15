@@ -207,6 +207,12 @@ export async function buildApp(opts: GatewayOptions = {}) {
     memory,
     log: app.log,
   })
+  // Operator-forced degraded mode (SLA demo — PRD gate 5). PartnerIds whose
+  // turns are forced down the degraded path via /internal/degraded below.
+  // Deliberately in-process and unpersisted: a gateway restart clears every
+  // forced flag, so the failure mode of a forgotten demo switch is "back to
+  // live", never "stuck degraded".
+  const forcedDegradedPartners = new Set<string>()
   // Instrumented pass-through wrappers feed the diagnostics call log. The
   // market client is deliberately NOT wrapped: the shared price-tick poller
   // calls snapshot() every few seconds and would drown the 100-entry log.
@@ -234,6 +240,7 @@ export async function buildApp(opts: GatewayOptions = {}) {
     // in-memory store, restart-proof on Redis (see orchestrator/index.ts).
     sessions,
     signals,
+    forcedDegraded: (partnerId) => forcedDegradedPartners.has(partnerId),
   })
 
   // Alert poll loop: unref'd interval, torn down with the app so a test
@@ -512,6 +519,37 @@ export async function buildApp(opts: GatewayOptions = {}) {
       .type('application/x-ndjson')
       .header('content-disposition', 'attachment; filename="intent-signals.jsonl"')
       .send(toJsonl(toEvalRows(signals)))
+  })
+
+  // ── operator-forced degraded mode (SLA demo — PRD gate 5) ───────────────
+  // The procurement-meeting switch: force one partner's turns down the SAME
+  // degraded path a real intelligence outage takes (amber HIGH MARKET LOAD
+  // banner, deterministic classifier, market-data-only research — orders,
+  // prices and portfolio stay fully live) WITHOUT touching the intelligence
+  // service. Flip off → the next turn is live again; no restart anywhere.
+  // Guarded like every /internal surface: a partner key or session token can
+  // never reach it — only operators (admin service, host-demo settings proxy)
+  // presenting INTERNAL_API_TOKEN.
+  app.get('/internal/degraded', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    return { forced: [...forcedDegradedPartners] }
+  })
+
+  app.post('/internal/degraded', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const body = (req.body ?? {}) as { partnerId?: unknown; forced?: unknown }
+    if (typeof body.partnerId !== 'string' || body.partnerId.length === 0) {
+      reply.code(400)
+      return { error: 'partnerId required' }
+    }
+    if (typeof body.forced !== 'boolean') {
+      reply.code(400)
+      return { error: 'forced must be a boolean' }
+    }
+    if (body.forced) forcedDegradedPartners.add(body.partnerId)
+    else forcedDegradedPartners.delete(body.partnerId)
+    app.log.info({ partnerId: body.partnerId, forced: body.forced }, 'forced-degraded flag set')
+    return { partnerId: body.partnerId, forced: body.forced }
   })
 
   // ── live-session inventory + kill switch (admin panel) ──────────────────

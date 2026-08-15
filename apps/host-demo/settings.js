@@ -165,6 +165,31 @@ fetch(`${HOST}/admin/config`)
   .then(applyConfig)
   .catch(() => {})
 
+// ══ Forced degraded mode (host-venue proxy → gateway /internal/degraded) ═════
+// The SLA-demo switch: gateway-side, partner-scoped, service untouched. Reads
+// the live flag on load; a failed flip reverts the checkbox instead of lying.
+async function loadDegraded() {
+  try {
+    const r = await (await fetch(`${HOST}/admin/gateway/degraded`)).json()
+    if (typeof r.forced === 'boolean') $('g-degraded').checked = r.forced
+  } catch {}
+}
+$('g-degraded').onchange = async (e) => {
+  try {
+    const r = await fetch(`${HOST}/admin/gateway/degraded`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ forced: e.target.checked }),
+    })
+    if (!r.ok) throw new Error(String(r.status))
+    flash('s-venue')
+    loadDegraded()
+  } catch {
+    e.target.checked = !e.target.checked
+  }
+}
+loadDegraded()
+
 // ══ Hippo AI (host-venue proxy → intelligence) ═══════════════════════════════
 async function loadAI() {
   try {

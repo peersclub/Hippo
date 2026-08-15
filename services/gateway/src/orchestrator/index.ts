@@ -21,6 +21,9 @@
  * with the deterministic `guessIntent`, and answer research turns with a
  * market-data-only brief — degraded but truthful. Orders, prices and
  * portfolio never depend on the intelligence service and stay fully live.
+ * The SAME path can be FORCED per partner by an operator (deps.forcedDegraded,
+ * driven by the gateway's /internal/degraded route) so the SLA clause is
+ * demonstrable on demand — shown in procurement, not discovered in an outage.
  */
 import { randomUUID } from 'node:crypto'
 import type { VenueCapabilities } from '@hippo/protocol'
@@ -117,6 +120,12 @@ export type OrchestratorDeps = {
    * absent = the four hooks below are no-ops and nothing is recorded. Every
    * hook is fire-and-forget — a turn never waits on or fails because of one. */
   signals?: AccuracySignals
+  /** Operator-forced degraded mode (SLA demo — PRD gate 5, /internal/degraded).
+   * True for a partnerId = every turn takes the SAME path a real intelligence
+   * outage takes (amber banner, deterministic classifier, market-data-only
+   * research) WITHOUT touching the intelligence service. Optional: absent =
+   * nothing is ever forced, behaviour byte-identical to before. */
+  forcedDegraded?: (partnerId: string) => boolean
 }
 
 export type Orchestrator = {
@@ -396,6 +405,7 @@ function formatFractionSize(n: number): string {
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const { intel, market, memory, seam, identity, alerts, emit, telemetry, log, sessions } = deps
+  const { forcedDegraded } = deps
 
   // In-panel username+PIN identity (identity_claim → identity frames). Owns
   // hashing, rate limiting and the sub→identity links; adoption flips what
@@ -662,9 +672,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   // ── degraded-mode helpers ──────────────────────────────────────────────
 
-  function enterDegraded(session: Session, err: unknown): void {
+  function enterDegraded(session: Session, err: unknown, forced = false): void {
     telemetry.markDegraded()
-    log.warn({ err }, 'intelligence unreachable — degraded mode')
+    if (forced)
+      log.warn({ partnerId: session.partner.partnerId }, 'degraded mode FORCED by operator')
+    else log.warn({ err }, 'intelligence unreachable — degraded mode')
     if (!session.degradedBannerShown) {
       session.degradedBannerShown = true
       emit(session, {
@@ -826,6 +838,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         reason:
           'This brief is too old to refresh in place — ask the question again for a fresh answer.',
       })
+      return
+    }
+    // Operator-forced degraded (SLA demo): a REFRESH tap must not sneak a
+    // live model call past the flag — take the same in-place market-only
+    // fallback a real outage's failed respond() below would take.
+    if (forcedDegraded?.(session.partner.partnerId)) {
+      enterDegraded(session, null, true)
+      await emitMarketOnlyBrief(session, origin.text, frameId)
       return
     }
     try {
@@ -2106,7 +2126,18 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     let degraded = false
     // Span + latency around intent classification (intent-p95 rate-card number).
     const span = telemetry.startSpan('hippo.turn')
-    if (resolved) {
+    if (forcedDegraded?.(session.partner.partnerId)) {
+      // Operator-forced degraded mode (the SLA demo switch — /internal/degraded):
+      // identical to a real intelligence outage — deterministic classifier,
+      // amber banner once per episode, market-data-only research below — but
+      // the service itself is never touched, so flipping the flag off restores
+      // live behaviour instantly. Checked before `resolved` too: while forced,
+      // even a clarified re-run must not reach the live research engine. No
+      // intent-latency sample — a synthetic ~0ms would pollute the intent-p95.
+      degraded = true
+      enterDegraded(session, null, true)
+      intentRes = resolved ?? guessIntent(text)
+    } else if (resolved) {
       // Nothing left to classify — re-classifying would land on the very
       // guess the trader just corrected. No intent call, no history, and no
       // intent-latency sample (that cost was paid on the asking turn).

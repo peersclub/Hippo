@@ -667,6 +667,115 @@ describe('discovery surface (hippo scan target)', () => {
   })
 })
 
+describe('forced-degraded proxy (/admin/gateway/degraded)', () => {
+  /** A fake gateway /internal/degraded so the proxy's wire contract is pinned:
+   * token header presented, demo partnerId injected server-side, GET list
+   * membership folded to a boolean. */
+  async function fakeGateway() {
+    const Fastify = (await import('fastify')).default
+    const calls: Array<{ method: string; token: unknown; body: unknown }> = []
+    const forced = new Set<string>()
+    const gw = Fastify()
+    gw.get('/internal/degraded', async (req) => {
+      calls.push({ method: 'GET', token: req.headers['x-hippo-internal-token'], body: null })
+      return { forced: [...forced] }
+    })
+    gw.post('/internal/degraded', async (req) => {
+      const body = req.body as { partnerId: string; forced: boolean }
+      calls.push({ method: 'POST', token: req.headers['x-hippo-internal-token'], body })
+      if (body.forced) forced.add(body.partnerId)
+      else forced.delete(body.partnerId)
+      return { partnerId: body.partnerId, forced: body.forced }
+    })
+    await gw.listen({ port: 0, host: '127.0.0.1' })
+    const address = gw.server.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+    return { gw, calls, url: `http://127.0.0.1:${port}` }
+  }
+
+  function makeProxyApp(gatewayUrl: string, adminToken?: string) {
+    const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG })
+    const keys = new Map<string, ApiKeyRecord>([[KEY, { secret: SECRET, userId: USER }]])
+    return buildService({
+      store,
+      keys,
+      uiUserId: USER,
+      gatewayUrl,
+      gatewayInternalToken: 'tok-internal',
+      demoPartnerId: 'assetworks-demo',
+      ...(adminToken ? { adminToken } : {}),
+    })
+  }
+
+  it('POST forwards {demo partnerId, forced} with the internal token; GET folds the list', async () => {
+    const { gw, calls, url } = await fakeGateway()
+    const app = makeProxyApp(url)
+
+    const off = await app.inject({ method: 'GET', url: '/admin/gateway/degraded' })
+    expect(off.json()).toEqual({ partnerId: 'assetworks-demo', forced: false })
+
+    const on = await app.inject({
+      method: 'POST',
+      url: '/admin/gateway/degraded',
+      payload: { forced: true },
+    })
+    expect(on.statusCode).toBe(200)
+    expect(on.json()).toEqual({ partnerId: 'assetworks-demo', forced: true })
+    // The wire the gateway saw: token presented, partnerId injected here —
+    // the browser chooses only on/off, never which partner.
+    expect(calls[1]).toEqual({
+      method: 'POST',
+      token: 'tok-internal',
+      body: { partnerId: 'assetworks-demo', forced: true },
+    })
+
+    const now = await app.inject({ method: 'GET', url: '/admin/gateway/degraded' })
+    expect(now.json()).toEqual({ partnerId: 'assetworks-demo', forced: true })
+
+    const clear = await app.inject({
+      method: 'POST',
+      url: '/admin/gateway/degraded',
+      payload: { forced: false },
+    })
+    expect(clear.json()).toEqual({ partnerId: 'assetworks-demo', forced: false })
+
+    await app.close()
+    await gw.close()
+  })
+
+  it('mutation is admin-guarded exactly like the other chaos controls', async () => {
+    const { gw, url } = await fakeGateway()
+    const app = makeProxyApp(url, 'op-secret')
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/admin/gateway/degraded',
+      payload: { forced: true },
+    })
+    expect(denied.statusCode).toBe(401)
+    const allowed = await app.inject({
+      method: 'POST',
+      url: '/admin/gateway/degraded',
+      headers: { 'x-admin-token': 'op-secret' },
+      payload: { forced: true },
+    })
+    expect(allowed.statusCode).toBe(200)
+    await app.close()
+    await gw.close()
+  })
+
+  it('an unreachable gateway is a 502, never a hang or a fake ok', async () => {
+    const app = makeProxyApp('http://127.0.0.1:1')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/gateway/degraded',
+      payload: { forced: true },
+    })
+    expect(res.statusCode).toBe(502)
+    expect((res.json() as { error: string }).error).toContain('gateway unreachable')
+    await app.close()
+  })
+})
+
 describe('build provenance', () => {
   it('/health reports sha + builtAt ("unknown" when the image is unstamped)', async () => {
     const { app } = makeApp()
