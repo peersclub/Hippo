@@ -1,3 +1,4 @@
+import './csp.js'
 import { z } from 'zod'
 import { CAPABILITIES } from './orders.js'
 

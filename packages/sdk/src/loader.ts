@@ -79,8 +79,7 @@ function normalizeLocale(raw: string): string {
       if (RTL.has(config.locale)) host.setAttribute('dir', 'rtl')
       const shadow = host.attachShadow({ mode: 'closed' })
 
-      const style = document.createElement('style')
-      style.textContent = `
+      const pillCss = `
         .pill{position:fixed;right:26px;bottom:26px;display:flex;align-items:center;gap:9px;
           border:1px solid rgba(240,185,74,.45);background:linear-gradient(135deg,#1E212A,#171A21);
           color:#E9EBF0;font:600 13.5px system-ui,sans-serif;padding:12px 20px;border-radius:999px;
@@ -96,7 +95,18 @@ function normalizeLocale(raw: string): string {
         @keyframes hglow{0%,100%{box-shadow:0 12px 32px rgba(0,0,0,.55),0 0 0 0 rgba(240,185,74,.4)}
           50%{box-shadow:0 12px 32px rgba(0,0,0,.55),0 0 0 10px rgba(240,185,74,0)}}
       `
-      shadow.appendChild(style)
+      // A strict host CSP (style-src without unsafe-inline) blocks <style>
+      // elements even inside a shadow root; constructable sheets are CSSOM
+      // and exempt. The <style> path stays as the pre-16.4-Safari fallback.
+      try {
+        const sheet = new CSSStyleSheet()
+        sheet.replaceSync(pillCss)
+        shadow.adoptedStyleSheets = [sheet]
+      } catch {
+        const style = document.createElement('style')
+        style.textContent = pillCss
+        shadow.appendChild(style)
+      }
 
       // A partner may override the pill text via data-hippo-label; otherwise
       // it's the locale default.
