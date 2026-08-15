@@ -38,10 +38,11 @@
   .lastpx{font-family:var(--mono);font-size:18px;font-weight:600}
   .chg{font-family:var(--mono);font-size:12px;font-weight:600;padding:2px 7px;border-radius:6px}
   .gear{border:1px solid var(--border);background:var(--bg);border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px}
-  main{display:grid;grid-template-columns:1fr 260px 300px;grid-template-rows:1fr 210px;gap:12px;padding:12px;flex:1;min-height:0}
+  /* biome-ignore lint/correctness/noInvalidGridAreas: biome 2.5.3 false positive — rows have equal cell counts */
+  main{display:grid;grid-template-columns:1fr 260px 300px;grid-template-rows:1fr 210px;grid-template-areas:"chart book tape" "blotter blotter ticket";gap:12px;padding:12px;flex:1;min-height:0}
   .card{background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;overflow:hidden}
   .card h5{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);padding:11px 14px 7px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
-  .chart{grid-row:1/2;grid-column:1/2}
+  .chart{grid-area:chart}
   .chart canvas{flex:1;width:100%;min-height:0}
   .chartctl{display:flex;align-items:center;gap:8px}
   .tfseg{display:inline-flex;gap:1px;background:var(--bg3);padding:2px;border-radius:7px}
@@ -55,10 +56,10 @@
   .chip button{border:0;background:none;color:var(--light);cursor:pointer;font-size:13px;line-height:1;padding:0 3px;border-radius:4px}
   .chip button:hover{color:var(--down)}
   #rsipane{flex:0 0 auto;height:62px;width:100%;border-top:1px solid var(--border-light)}
-  .book{grid-row:1/2;grid-column:2/3}
-  .tape{grid-row:1/2;grid-column:3/4}
-  .ticket{grid-row:2/3;grid-column:3/4}
-  .blotter{grid-row:2/3;grid-column:1/3}
+  .book{grid-area:book}
+  .tape{grid-area:tape}
+  .ticket{grid-area:ticket}
+  .blotter{grid-area:blotter}
   .book .rows{flex:1;overflow:hidden;font-family:var(--mono);font-size:11.5px;display:flex;flex-direction:column;justify-content:center}
   .brow{display:flex;justify-content:space-between;padding:2.5px 14px;position:relative}
   .brow .bar{position:absolute;right:0;top:0;bottom:0;opacity:.10}
@@ -125,6 +126,36 @@
   .modal .reject{background:var(--bg);color:var(--dim)}
   .conn{font:600 10px var(--mono);letter-spacing:.06em;padding:3px 8px;border-radius:5px}
   .conn.up{background:#d1fae5;color:#065f46}.conn.down{background:#fee2e2;color:#991b1b}
+  /* Everything below is media-scoped: >900px must render byte-identical to the
+     rules above (this page is demoed live on a projector). */
+  @media (max-width:900px){
+    /* The 100vh desk clips when panels stack; the page scrolls vertically instead. */
+    /* biome-ignore lint/suspicious/noDuplicateProperties: 100vh is the fallback for Safari <15.4; dvh overrides where supported */
+    body{height:auto;min-height:100vh;min-height:100dvh}
+    /* biome-ignore lint/correctness/noInvalidGridAreas: biome 2.5.3 false positive — rows have equal cell counts */
+    main{flex:none;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:none;grid-template-areas:"chart chart" "book tape" "ticket ticket" "blotter blotter"}
+    /* Stacked cards no longer inherit a height from the viewport row — each
+       needs its own, or flex:1 children collapse to 0. */
+    .chart{height:340px}
+    .book,.tape{height:300px}
+    .blotter{height:300px}
+    /* 8-column mono tables exceed a phone card: scroll inside the card, never the page. */
+    .blotter .scroll{overflow-x:auto}
+    .blotter table{white-space:nowrap}
+    header{height:auto;min-height:56px;flex-wrap:wrap;padding:8px 14px;row-gap:8px}
+  }
+  @media (max-width:600px){
+    /* biome-ignore lint/correctness/noInvalidGridAreas: biome 2.5.3 false positive — rows have equal cell counts */
+    main{grid-template-columns:minmax(0,1fr);grid-template-areas:"chart" "book" "tape" "ticket" "blotter";gap:10px;padding:10px}
+    nav{display:none}
+    /* Ticker is wider than a phone; it takes its own header row and wraps. */
+    .ticker{margin-left:0;width:100%;flex-wrap:wrap;gap:10px;row-gap:6px}
+    .chart{height:300px}
+    .book,.tape{height:260px}
+    /* 340px fixtures must never exceed the viewport (360px phones). */
+    .modal .box{width:min(340px,calc(100vw - 24px))}
+    .drawer{width:min(340px,100vw)}
+  }
 </style>
 </head>
 <body>
@@ -227,7 +258,12 @@
 
   <!-- ═══ The Hippo embed — the entire parasite-side integration ═══
        Unchanged from the original host-demo: one static <script> tag. The
-       parasite lives in its own Shadow DOM and never touches host styles. -->
+       parasite lives in its own Shadow DOM and never touches host styles.
+       Mobile posture (pill → sheet → full) needs no embed attribute: the SDK
+       derives it from window.innerWidth ≤ 640 (packages/sdk/src/posture.ts,
+       MOBILE_MAX). The host's only obligations are the width=device-width
+       viewport meta in <head> and a layout that never overflows horizontally —
+       both are load-bearing for the panel's phone behaviour. -->
   <script>
     (() => {
       const real = new URLSearchParams(location.search).get('gw') !== 'mock'
