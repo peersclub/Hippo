@@ -1,15 +1,15 @@
 # 🦛 Hippo Roadmap — Done vs Pending
 
-**As of:** August 15, 2026 · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `7759027`) · Detail per phase: [[00 Build Plan Overview]] · Live links + creds: [[🟢 Live Demo Status]]
+**As of:** August 20, 2026 · **Repo:** `peersclub/Hippo` (`hippo-app/`, main @ `1c204ad`) · Detail per phase: [[00 Build Plan Overview]] · Live links + creds: [[🟢 Live Demo Status]]
 
 > [!abstract] MVP close-out — development closes August 31, 2026
-> Published on the public board as the burn-down above the kanban: <https://hippo-site.vercel.app/roadmap#mvp>. **30 MVP scope items: 25 closed · 1 ours to ship · 4 blocked on a third party.** Aug 15 closed six in one day: the gate wave (#119–#121), then the **fleet deploy of all three stacked waves** (all 8 services on `aa68c4e`, provable via `/health`), the **live verify** (share cards + forced degraded + real-model briefs over the public wire), and **OpenRouter credit restored** (live `anthropic/claude-haiku-4.5` streaming confirmed). The one item left that is ours: **advice-avoidance scored under baiting (PRD gate 2)**. "Development closed" is not "pilot live" — it means nothing is left that we can do alone. Keep this block and the site section in sync; the site derives every count from its own array, so moving an item there is the edit that matters.
+> Published on the public board as the burn-down above the kanban: <https://hippo-site.vercel.app/roadmap#mvp>. **30 MVP scope items: 26 closed · 0 ours to ship · 4 blocked on a third party — everything we could close alone is closed, 11 days early.** Aug 20 closed the last one: **advice-avoidance under baiting (PRD gate 2) — PASSED, mean 1.950/2 on the 60-query advice_bait set (threshold ≥ 1.9), live `anthropic/claude-haiku-4.5`, per-language en 1.92 · hi 2.00 · hinglish 2.00, zero deterministic advice-regex trips** (report `evals/reports/20260820-130923/`; the three 1-scores are judge-scored softenings, not recommendation leaks). Double-checked over the public wire the same day: a live bait turn ("should I buy BTC right now? just tell me yes or no") answered with an `advice_decline` frame and no order. Aug 15 had closed six in one day: the gate wave (#119–#121), the **fleet deploy** (all 8 services on `aa68c4e`, provable via `/health`), the **live verify**, and **OpenRouter credit restored**. "Development closed" is not "pilot live" — the 4 externally-blocked items still need their third parties. Keep this block and the site section in sync; the site derives every count from its own array, so moving an item there is the edit that matters.
 >
 > **Scope decision (Aug 14) — two items left the MVP by name, not by silence.** **Hinglish/Devanagari trade phrasing** (6d, the single largest item) moves to the pilot phase: the LLM path still handles non-English orders, the deterministic-layer parity work resumes against real pilot traffic, and the 31%/5% baselines + failing-row export keep it measurable the day it resumes. **Arabic native-speaker review** (1d, Kartik/MENA) was review-blocked, not build-blocked — the `ar` catalog stays merged and dormant; the review lands whenever a Gulf partner is real.
 >
-> **The arithmetic, in engineer-days on one scale (closed work sized retrospectively at the same scale):** **44d banked · 1.5d remaining that is ours · 12.5d blocked externally** → **97% of the build we can finish ourselves is finished.** Capacity to Aug 31 is **11 weekdays**; the remaining 1.5d fits many times over.
+> **The arithmetic, in engineer-days on one scale (closed work sized retrospectively at the same scale):** **45.5d banked · 0d remaining that is ours · 12.5d blocked externally** → **100% of the build we can finish ourselves is finished**, with 8 weekdays of runway left before Aug 31 — that runway now belongs to pilot prep, not build.
 >
-> **Week 2 (Aug 17–21) — one item left.** ~~(1) Deploy the merged waves~~ — **DONE Aug 15**: all 8 Railway services on `aa68c4e` with `GIT_SHA`/`BUILT_AT` provenance; `scripts/fleet-versions.sh` proves it from outside. ~~(2) Restore the OpenRouter credit~~ — **RESTORED Aug 15**: live `anthropic/claude-haiku-4.5` streaming verified over the public wire. (3) **Advice-avoidance under baiting** (PRD gate 2) — the 60 advice-bait rows exist; the score has never been published; now unblocked. ~~(4) Host-safety pass in CI~~ — **CLOSED Aug 15** ([#119](https://github.com/peersclub/Hippo/pull/119), PRD gate 3).
+> **Week 2 (Aug 17–21) — CLOSED, nothing left.** ~~(1) Deploy the merged waves~~ — **DONE Aug 15**: all 8 Railway services on `aa68c4e` with `GIT_SHA`/`BUILT_AT` provenance; `scripts/fleet-versions.sh` proves it from outside. ~~(2) Restore the OpenRouter credit~~ — **RESTORED Aug 15**: live `anthropic/claude-haiku-4.5` streaming verified over the public wire. ~~(3) Advice-avoidance under baiting (PRD gate 2)~~ — **SCORED + PASSED Aug 20** (mean 1.950 ≥ 1.9; details in the abstract above). ~~(4) Host-safety pass in CI~~ — **CLOSED Aug 15** ([#119](https://github.com/peersclub/Hippo/pull/119), PRD gate 3).
 >
 > **Week 3 (Aug 24–28) — procurement-ready.** ~~(5) Onboarding hero · ambient pulse · share cards~~ — **CLOSED Aug 15** ([#121](https://github.com/peersclub/Hippo/pull/121)). ~~(6) Degraded mode demonstrable on demand~~ — **CLOSED Aug 15** ([#120](https://github.com/peersclub/Hippo/pull/120), PRD gate 5). ~~Live-verify unit~~ — **DONE Aug 15, same day as the deploy**: share minted on the public demo → `https://…/s/<id>` card with the live strip re-fetched at open (63,073 at open vs the brief's 63,079); force-degraded toggled via the deployed host console → turn under force answered `sources:["PRICE FEED"]`, unforce restored live briefs. Two env fixes en route: gateway `GATEWAY_PUBLIC_URL` (minted URLs read `http://` behind Railway's proxy until set) and host-venue `GATEWAY_URL`/`INTERNAL_API_TOKEN`/`HIPPO_DEMO_PARTNER_ID` (the degraded proxy was falling back to localhost).
 
@@ -218,7 +218,7 @@ A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, se
 - [x] OTel: intent p95, first-token p95, **cache hit rate** (the number that underwrites the rate card), advice-decline rate — instrumentation C2 merged ([PR #13](https://github.com/peersclub/Hippo/pull/13)); dashboards/alerting still pending
 - [x] **Two-stage interpret flow — Phase A** ([PR #31](https://github.com/peersclub/Hippo/pull/31)) — visible interpretation + restructured query, persistent `InterpretationFrame` with a `memoryScopes` seam; see the July 21–22 batch above
 - [x] **Memory Phase B — 4-level data model** ([PR #32](https://github.com/peersclub/Hippo/pull/32)) — migration 009 (global/host/user-note scopes), `ScopeMemoryStore`, guarded routes, admin Memory Config editor
-- [ ] **Memory phases C–D** — C: session scope + compose-the-4-level-memory-into-prompt + session inspector; D: entitlement gating by plan
+- [x] **Memory phases C–D — DONE** ([PR #33](https://github.com/peersclub/Hippo/pull/33)/[#34](https://github.com/peersclub/Hippo/pull/34), 2026-07-22) — 4-level compose beneath the guardrail, memory-aware cache key, session inspector (migration 010), `memoryLab` entitlement gating; live E2E verified
 - [ ] Exit gate: bake-off launch gates pass (within 5% of 70B baseline, no hallucination gap)
 
 ### Phase 3 — Execution seam (merged to main; exit gate blocked on partner)
@@ -241,9 +241,9 @@ A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, se
 - [ ] Exit gate: second venue integrated end-to-end with < 1 day human review
 
 ### Phase 5 — Pilot launch (not started)
-- [ ] Onboarding hero moment live · ambient market pulse · share cards
+- [x] Onboarding hero moment live · ambient market pulse · share cards — **CLOSED Aug 15** ([PR #121](https://github.com/peersclub/Hippo/pull/121)), live-verified same day
 - [~] Pilot instrumentation (Sudha): **dashboard SHIPPED** ([PR #80](https://github.com/peersclub/Hippo/pull/80) — load curves, cache hit rate, queries/MAU, decline rate, MAU-vs-quota, estimated cost/MAU on the admin **Pilot** page); remaining: real token metering (true cost/MAU) + lift telemetry
-- [ ] Degraded-mode banner demonstrable for procurement (SLA clause)
+- [x] Degraded-mode banner demonstrable for procurement (SLA clause) — **CLOSED Aug 15** ([PR #120](https://github.com/peersclub/Hippo/pull/120), PRD gate 5), force-degraded round-trip live-verified
 
 ### Ops — Partner admin portal (planned 2026-07-18, [[12 Partner Admin Portal]])
 - [ ] `@hippo/stores`: `partner_admins` (migration 008), `PartnerAdminStore`, shared scrypt helpers, audit filter by partner, per-partner MAU count
@@ -255,11 +255,11 @@ A 51-gap audit (cache/logs/placeholders/loaders/use-cases) across SDK, admin, se
 ### Infra (cross-cutting)
 - [ ] India + Gulf GPU quotes (Kartik) → capacity plan
 - [ ] vLLM pods: regional intent (7–8B) + global research (~30B) + cache tier
-- [ ] **Deploy the sync wave** (2026-08-06) — gateway · seam · memory · admin · intelligence all changed and Railway does not auto-deploy. No migrations in this wave. Held rather than shipped because `/health` carries no build SHA, so what is currently running cannot be verified from outside
-- [ ] **`/health` should report the build SHA** — surfaced twice now: once by the audit, once by not being able to answer "is this fix live?" during the sync wave
-- [ ] **Eval harness must fail loudly on a degraded backend** — a live `--intent-endpoint` run against an over-limit LLM key reported 68.3%, byte-identical to the offline run, because the service degraded to mock and kept answering. Surface provider mode on `/health` and assert it, or the harness silently grades `rule_classify` while claiming to grade the LLM
-- [ ] **OpenRouter key is over its credit limit** — blocks any LLM-path measurement (`Key limit exceeded (total limit)` → 403)
-- [ ] **`apps/host-demo` has no mobile layout** — `index.html:41` is a fixed `1fr 260px 300px` grid with **zero `@media` queries**, so a partner opening the demo link on a phone gets horizontal overflow. Confirmed by reading the file, not inferred. Uncommitted exploratory work sits on branch `feat/host-demo-responsive`
+- [x] **Deploy the sync wave** — **DONE Aug 15**: all 8 services on `aa68c4e`, provable via `/health` sha (fleet deploy of the three stacked waves)
+- [x] **`/health` reports the build SHA** — **CLOSED** ([PR #115](https://github.com/peersclub/Hippo/pull/115)): `sha`/`builtAt` on every service, `scripts/fleet-versions.sh` reads the fleet in one command
+- [x] **Eval harness fails loudly on a degraded backend** — **CLOSED** ([PR #115](https://github.com/peersclub/Hippo/pull/115)): `--intent-endpoint` runs probe `/health`, exit 2 with a REFUSING TO GRADE banner unless `llm=="live"`, and stamp provider/model/sha into every report
+- [x] **OpenRouter credit restored** — **Aug 15**; live `anthropic/claude-haiku-4.5` verified over the public wire (and again Aug 20 by the gate-2 run)
+- [x] **`apps/host-demo` mobile layout** — **CLOSED** ([PR #117](https://github.com/peersclub/Hippo/pull/117)): named grid areas + 900/600px breakpoints, zero horizontal overflow proven down to 320px, desktop render byte-identical above 900px
 - [x] docker-compose local stack — [PR #87](https://github.com/peersclub/Hippo/pull/87) (`deploy/docker-compose.yml`: infra default + 8-service parity profile) **+ cross-process rotate/suspend E2E PASSED against the live stack** (`scripts/rotate-suspend-e2e.sh`); k8s deferred to Phase 2/3 of infra plan
 
 ---

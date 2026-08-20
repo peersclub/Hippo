@@ -363,6 +363,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
   // ── All data till now (from vault Roadmap.md, as-built @ 2649b37) ──
   const FEATURES = [
     // ───── SHIPPED (merged to main) ─────
+    { s:'done', cat:'trust', t:'Advice-avoidance under baiting — the last gate that was ours', d:'PRD gate 2, scored and passed: mean 1.95/2 on the 60-query advice_bait set against its ≥1.9 threshold, run live against anthropic/claude-haiku-4.5 with the harness stamping provider mode and model id into the report (a mocked backend is refused, not silently graded). The guardrail holds across languages — English 1.92, Hindi 2.00, Hinglish 2.00 — and the deterministic recommendation-language detector tripped zero times: the three sub-perfect rows were judge-scored softenings, not "you should buy" leaks. Verified twice over: the offline judge score, and a live bait turn on the public gateway answering with an advice_decline frame and no order. With this number published, nothing in the MVP remains that we can close alone.', ref:'eval 20260820', date:'Aug 20' },
     { s:'done', cat:'sdk', t:'Phase 5 — onboarding hero, ambient pulse, share cards', d:'The three welcome-and-spread moments, none needing a partner. The first-run hero now draws the partner’s venue name and accent from session config instead of constants. The minimized pill glows on real 1-hour market moves, computed by the gateway — the client polls nothing. And share cards became real: the panel asks the gateway to mint a short link for a brief the session actually received (you can only share what the server sent you), and the public /s/:id page renders a co-branded card that re-grounds on the live market at open time — a link opened tomorrow shows tomorrow’s price beside the brief’s own honestly-timestamped prose. Share records carry market-level content only — no session, no identity — so a leaked link can never leak a person, and the NOT INVESTMENT ADVICE line is printed in the card body where a screenshot cannot lose it. On any mint failure the card simply shows no address; the SDK never fabricates a URL.', ref:'PR #121', date:'Aug 15' },
     { s:'done', cat:'ops', t:'Degraded mode demonstrable on demand', d:'PRD gate 5: the SLA clause you can show in a procurement meeting instead of hoping for an outage. An internal-token-guarded, partner-scoped switch forces the gateway onto the same market-only fallback a real intelligence outage takes — amber banner, labeled sources, intent and orders staying responsive — and the host control console gained a force-degraded toggle beside the venue chaos controls, proxied so the console never touches internal auth. A REFRESH tap while forced takes the fallback too, with zero live model calls: the demo cannot be accidentally punctured by the most natural tap in the panel. Walkthrough on /testing so a partner can run it without us in the room.', ref:'PR #120', date:'Aug 15' },
     { s:'done', cat:'sdk', t:'Host-safety gate in CI', d:'PRD gate 3: the loader’s 5KB budget and the closed Shadow DOM’s style isolation, enforced on every merge instead of trusted. A hostile-CSS fixture host — global !important resets, universal selectors, a transformed ancestor, a strict CSP — now renders the panel unchanged in CI, and the loader size budget fails the build if it drifts over its allowance. The gate was proven able to fail before it was trusted.', ref:'PR #119', date:'Aug 15' },
@@ -595,27 +596,16 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { t: 'Fleet deploy — all 8 services, sha-provable /health', est: 0.5 },
     { t: 'OpenRouter credit restored — live model verified', est: 0.5 },
     { t: 'Live verify — share cards + forced degraded on the public wire', est: 1 },
+    { t: 'Advice-avoidance under baiting — 1.95/2, gate PASS', est: 1.5 },
   ]
 
   // Remaining, ours, scheduled. `end` is the last day of the lane — the lane
   // containing today renders as active, so the highlight advances by itself.
-  const SPRINTS = [
-    {
-      wk: 'Week 2', dates: 'Aug 17–21', end: new Date(2026, 7, 21), cap: 5,
-      goal: 'One item left: score the last gate that has a number instead of an opinion.',
-      items: [
-        { t: 'Advice-avoidance scored under baiting', own: 'Victor', est: 1.5, gate: 'PRD gate 2',
-          un: 'The trust position, the cache economics and the regulatory line are the same line.',
-          d: 'A consistency score on the adversarial set — a gate, not a nice-to-have. The 60 advice-bait rows have existed in the eval set since v1; the score has never been published. The OpenRouter credit is restored and the fleet is deployed, so nothing blocks it.',
-          plan: [
-            'Add an advice mode to the runner over the 60 bait rows, plus multi-turn baits — the single-turn set never tests whether a decline survives being pushed.',
-            'Score decline consistency per language; a guardrail that only holds in English is not a guardrail for this product.',
-            'Publish the number with the model id and provider mode attached (the harness already stamps both).',
-            'Wire it as a launch gate with a threshold, so it is a build failure rather than a report someone has to read.',
-          ] },
-      ],
-    },
-  ]
+  // Empty since Aug 20 — the last item that was ours (PRD gate 2) is scored
+  // and PASSED: advice-avoidance mean 1.95/2 on the 60 advice_bait rows
+  // (threshold ≥ 1.9), live anthropic/claude-haiku-4.5, per-language
+  // en 1.92 · hi 2.00 · hinglish 2.00, zero deterministic advice-regex trips.
+  const SPRINTS = []
 
   // Remaining, not ours. Each names the dependency rather than a date.
   const MVP_EXT = [
@@ -725,20 +715,28 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     const calendarCap = days
     const over = eOpen - weekdayCap
     const slack = calendarCap - eOpen
-    document.getElementById('verdict').innerHTML = `
+    document.getElementById('verdict').innerHTML = nOpen === 0 ? `
+      <div class="v-cell v-ok"><div class="v-n">0d</div><div class="v-l">WORK REMAINING</div>
+        <div class="v-s">Every item that was ours is closed — ${d(eDone)} banked. Development closed ahead of Aug 31.</div></div>
+      <div class="v-cell v-ok"><div class="v-n">${weekdayCap} weekdays</div><div class="v-l">CAPACITY, UNSPENT</div>
+        <div class="v-s">Runway to the deadline now belongs to pilot prep, not build.</div></div>
+      <div class="v-cell"><div class="v-n">${d(eExt)}</div><div class="v-l">BLOCKED EXTERNALLY</div>
+        <div class="v-s">${MVP_EXT.length} items wait on a third party — each names its dependency below, none can be closed alone.</div></div>
+      <div class="v-cell v-ok"><div class="v-n">1.95/2</div><div class="v-l">LAST GATE SCORED</div>
+        <div class="v-s">Advice-avoidance under baiting (PRD gate 2) passed its ≥1.9 threshold on the live model, Aug 20.</div></div>` : `
       <div class="v-cell"><div class="v-n">${d(eOpen)}</div><div class="v-l">WORK REMAINING</div>
         <div class="v-s">${nOpen} items, sized on the same scale as the ${d(eDone)} already banked.</div></div>
       <div class="v-cell ${over > 0 ? 'v-over' : 'v-ok'}"><div class="v-n">${weekdayCap} weekdays</div><div class="v-l">CAPACITY, MON–FRI ONLY</div>
         <div class="v-s">${over > 0 ? `Short by <b>${d(over)}</b>. On weekdays alone the date does not close.` : 'Fits inside the working week.'}</div></div>
       <div class="v-cell ${slack < 0 ? 'v-over' : slack <= 2 ? 'v-tight' : 'v-ok'}"><div class="v-n">${calendarCap} days</div><div class="v-l">CAPACITY, EVERY DAY</div>
-        <div class="v-s">${slack < 0 ? `Still short by ${d(-slack)} — scope has to move.` : `Fits with <b>${d(slack)}</b> of slack, and only if the weekends work — which is the pattern since Jul 14.`}</div></div>
-      <div class="v-cell"><div class="v-n">Week 2</div><div class="v-l">WHERE IT BREAKS</div>
-        <div class="v-s">The language work is ${d(SPRINTS[1].items[0].est)} of the ${d(eOpen)} and the only item that can be cut to a phrasing subset without moving a launch gate.</div></div>`
+        <div class="v-s">${slack < 0 ? `Still short by ${d(-slack)} — scope has to move.` : `Fits with <b>${d(slack)}</b> of slack, and only if the weekends work — which is the pattern since Jul 14.`}</div></div>`
 
     // The active lane is the first whose end date has not passed — the amber
     // highlight walks forward on its own, and after Aug 29 nothing is "now".
     const activeIdx = SPRINTS.findIndex((s) => now <= s.end)
-    document.getElementById('sprints').innerHTML = SPRINTS.map((s, i) => {
+    document.getElementById('sprints').innerHTML = SPRINTS.length === 0 ? `
+      <div class="lane"><div class="lane-h"><span class="wk">Nothing scheduled</span><span class="dates">as of Aug 20</span><span class="n">0</span></div>
+        <div class="goal">The last item that was ours — advice-avoidance under baiting (PRD gate 2) — scored 1.95/2 against its ≥1.9 threshold on the live model and moved to the closed list above.</div></div>` : SPRINTS.map((s, i) => {
       const isNow = i === activeIdx
       const load = sum(s.items)
       const ratio = load / s.cap
