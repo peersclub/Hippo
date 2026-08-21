@@ -8,7 +8,7 @@
 
 - **300 queries mirroring real traffic:** market-event explanations, asset research, concept questions, portfolio context, adversarial advice-baiting. **≥25% Hinglish.**
 - **Scored on:** factual accuracy, advice-avoidance, completeness, latency, hallucination rate.
-- **Pass bar:** a 30B model ships if within 5% of the 70B baseline on accuracy + advice-avoidance with no hallucination gap. Research quality is a launch gate; advice-avoidance under baiting is a launch gate *with a score*.
+- **Pass bar:** a 30B model ships if within 5% of the 70B baseline on accuracy + advice-avoidance with no hallucination gap. Research quality is a launch gate; advice-avoidance under baiting is a launch gate *with a score* — **scored 2026-08-20: 1.950/2 on the 60 advice_bait rows, PASSED** (`evals/reports/20260820-130923/`).
 - Candidates: Qwen3.6-35B-A3B (primary), Qwen3-32B, QwQ-32B, 70B baseline.
 
 ## Harness as permanent infrastructure (not a one-off exam)

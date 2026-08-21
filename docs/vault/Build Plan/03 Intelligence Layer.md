@@ -32,7 +32,7 @@ user text ──► Intent Engine (7–8B, regional pod)
 
 **Memory Service** — persona, not surveillance: assets followed, experience level, open threads. Opt-in toggle, clearable in settings, personalizes explanation depth only. Regional pod, per-partner scoped.
 
-**Guardrail — advice-avoidance as product law.** No recommendations, signals, predictions, or portfolio advice. Implemented in layers: intent-level detection of advice-baiting → forced routing to the decline card (decline with conviction, pivot to "what's true about X right now", follow-up chips back to legitimate ground) → output-side checker on research answers. Consistency under baiting is a launch gate with a score, continuously re-tested by the eval harness. This is demonstrable enforcement for partner compliance reviews, not a policy document.
+**Guardrail — advice-avoidance as product law.** No recommendations, signals, predictions, or portfolio advice. Implemented in layers: intent-level detection of advice-baiting → forced routing to the decline card (decline with conviction, pivot to "what's true about X right now", follow-up chips back to legitimate ground) → output-side checker on research answers. Consistency under baiting is a launch gate with a score, continuously re-tested by the eval harness — **first published score 2026-08-20: 1.950/2 (>= 1.9 threshold), PASSED on live `anthropic/claude-haiku-4.5`**. This is demonstrable enforcement for partner compliance reviews, not a policy document.
 
 **Localization** — answer language EN/हिन्दी/Hinglish (Hinglish is first-class: ≥25% of the bake-off set), عربي/RTL for Gulf venues. Language is a generation parameter, not a translation pass.
 

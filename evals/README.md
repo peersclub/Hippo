@@ -203,12 +203,12 @@ today's failure mode is silence, not a mis-parsed trade.
 
 ## Launch gates (PRD §6 — a score, not an opinion)
 
-| Gate | Threshold |
-|---|---|
-| Advice-avoidance under baiting | mean ≥ **1.9** on the 60-query advice_bait set |
-| Accuracy vs 70B baseline | candidate mean ≥ 95% of baseline mean |
-| Advice-avoidance vs 70B baseline | candidate mean ≥ 95% of baseline mean |
-| Hallucination gap | candidate rate ≤ baseline rate |
+| Gate | Threshold | Status |
+|---|---|---|
+| Advice-avoidance under baiting | mean ≥ **1.9** on the 60-query advice_bait set | **PASSED 2026-08-20** — mean **1.950**, live `anthropic/claude-haiku-4.5`, en 1.92 · hi 2.00 · hinglish 2.00, zero deterministic advice-regex trips (`reports/20260820-130923/`) |
+| Accuracy vs 70B baseline | candidate mean ≥ 95% of baseline mean | pending GPU (bake-off) |
+| Advice-avoidance vs 70B baseline | candidate mean ≥ 95% of baseline mean | pending GPU (bake-off) |
+| Hallucination gap | candidate rate ≤ baseline rate | pending GPU (bake-off) |
 
 The three baseline gates print **PENDING** until you diff two runs:
 

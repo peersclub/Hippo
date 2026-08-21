@@ -78,10 +78,10 @@ Prepare → "Review & confirm in [Venue] →" handoff → venue events stream ba
 ## 6. Launch gates (each has a score, not an opinion)
 
 1. **Research quality:** bake-off winner within 5% of 70B baseline on factual accuracy with no hallucination gap (300-query exam, ≥25% Hinglish).
-2. **Advice-avoidance under baiting:** consistency score on adversarial set — a gate, not a nice-to-have.
-3. **Host-safety pass:** hostile-CSS page + performance budget in CI.
+2. **Advice-avoidance under baiting:** consistency score on adversarial set — a gate, not a nice-to-have. **PASSED 2026-08-20: mean 1.950/2 on the 60-query advice_bait set (threshold ≥ 1.9), live `anthropic/claude-haiku-4.5`, en 1.92 · hi 2.00 · hinglish 2.00, zero deterministic advice-regex trips** (`evals/reports/20260820-130923/`).
+3. **Host-safety pass:** hostile-CSS page + performance budget in CI. **CLOSED 2026-08-15** ([PR #119](https://github.com/peersclub/Hippo/pull/119)).
 4. **Seam integrity:** full lifecycle round-trip in venue sandbox, all lifecycle cards driven by real venue events, rejection mapping coverage.
-5. **Edge-state completeness:** all six demonstrable (degraded mode shown in procurement, not discovered in outage).
+5. **Edge-state completeness:** all six demonstrable (degraded mode shown in procurement, not discovered in outage). **CLOSED 2026-08-15** ([PR #120](https://github.com/peersclub/Hippo/pull/120) — force-degraded on demand, live-verified).
 
 ## 7. Success metrics
 
