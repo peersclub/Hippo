@@ -2,7 +2,9 @@
 
 **As of:** August 22, 2026 · main @ `f55e44d` · Method: 6-dimension multi-agent audit (route parity, panel data truth, settings sync, auth/security, performance, feature coverage); every finding adversarially verified against the code before inclusion — 32 confirmed, 0 refuted. Related: [[Roadmap]] · [[🟢 Live Demo Status]]
 
-> [!danger] Verdict: NOT operator-ready for go-live. The trader loop is solid; the operator/compliance layer has 3 blockers and 16 majors clustered on one theme — **the deletion and outage paths lie to the operator**. None of this affects the public demo; all of it affects running a pilot with a real partner and a real data-deletion request.
+> [!check] **ALL 32 FINDINGS FIXED — 2026-08-22, main `35bd29f`.** Six build tracks in dependency waves + adversarial review per track; the review caught 5 issues in the fixes themselves (incl. a percent-encoding bypass of the new fail-closed admin gate — `/%61dmin/config` — now decoded before matching) which were fixed before merge. 30/30 turbo tasks + 298 pytest green on main. Deployed: migration 019 applied, all 8 services redeployed on `35bd29f`, ASSETWORKS_ADMIN_TOKEN + HOST_VENUE_ADMIN_ORIGINS set on host-venue (console now sends x-admin-token; token lives in Railway/Vercel env, never in git), TRUST_PROXY=1 on admin. The findings below are the historical record.
+
+> [!danger] ~~Verdict: NOT operator-ready for go-live.~~ (superseded above) The trader loop is solid; the operator/compliance layer has 3 blockers and 16 majors clustered on one theme — **the deletion and outage paths lie to the operator**. None of this affects the public demo; all of it affects running a pilot with a real partner and a real data-deletion request.
 
 ## BLOCKERS (3)
 
