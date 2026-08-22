@@ -239,7 +239,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     <div class="s-prog"><div class="big" data-stat="progress">0</div><div class="lbl">IN PROGRESS</div></div>
     <div class="s-plan"><div class="big" data-stat="planned">0</div><div class="lbl">PLANNED</div></div>
   </div>
-  <div class="asof" id="asof">AS OF AUGUST 10, 2026 · main @ 53471ae</div>
+  <div class="asof" id="asof">AS OF AUGUST 22, 2026 · branch feat/central-ui-kernel</div>
 </div>
 
 <!-- ═══ MVP close-out ═══ -->
@@ -438,6 +438,7 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { s:'done', cat:'sdk', t:'i18n Phase 1 + Arabic copy', d:'Chrome catalog with t()/resolveLocale/isRtl and data-hippo-locale; RTL plumbing. The ar catalog is complete but dormant until a partner enables it.', ref:'PR #15 · #17', date:'Jul 18' },
 
     // ───── IN PROGRESS ─────
+    { s:'progress', cat:'sdk', t:'Central UI kernel — one token source, two kits', d:'Four frontend surfaces were inlining the same Dark Glass Instrument tokens, and admin/portal had copy-pasted the chrome kit — already drifted (the portal’s empty-hash route silently said dashboard, so Overview never highlighted). Two packages, not one: @hippo/tokens (zero-dep --hippo-* values, :root + :host) and @hippo/ui (SPA kernel for admin + portal only). The SDK does not import the SPA kit — stop-line, closed Shadow DOM, 5KB loader gate. Shared values are the right seam. Admin and portal now emit the same CSS hash; the site @imports the tokens; the panel splices darkVars/lightVars into :host{all:initial} and keeps its pixel-identical amber-ink override. Remaining on the same track: split cards.tsx / state.ts / panel.tsx into the folders the FE architecture already named, then migrate class="btn" to &lt;Button&gt; per page.', ref:'branch', date:'Aug 22' },
     { s:'done', cat:'installer', t:'Model-driven adapter codegen (stage 4)', d:'hippo scan now synthesizes the venue’s mapping.ts bodies with a model — the prompt carries the venue’s documented response shape and the exact CTI target type, and every candidate must pass the same strict standalone typecheck the test suite enforces (one diagnostics-informed retry, then an honest throwing stub). Unconfigured model = byte-identical deterministic output, so CI stays hermetic. rejections.yaml was already deterministic and complete.', ref:'PR #66', date:'Jul 29' },
     { s:'done', cat:'host', t:'Demo venue state persistence', d:'Positions are sustained now: the Assetworks demo venue’s entire book of record — positions, resting orders, wallets, venue settings, even the order-id counter — persists to Postgres as a debounced snapshot and restores on boot. A container restart used to silently wipe everything (positions vanished mid-demo); verified live: open a position, restart the venue, the position survives. Wallet reset stays the one deliberate clean slate.', ref:'PR #68', date:'Jul 29' },
     { s:'done', cat:'ops', t:'Tier-2 durability', d:'Nothing rides only in memory anymore: sessions + frame journals live in Redis (cold resume across restarts), the ticket→session routing is a TTL’d Redis key so a venue fill lands even if the gateway restarts mid-order (proven live: an event delivered 15s after a fresh boot still routed), and the seam’s audit trail persists to Postgres (migration 013). Restarts stopped being data loss.', ref:'PR #64·#65', date:'Jul 29' },
@@ -453,6 +454,8 @@ try{if(localStorage.getItem('hippo_theme')==='light')document.documentElement.da
     { s:'planned', cat:'infra', t:'GPU capacity plan', d:'India + Gulf GPU quotes (Kartik) feeding a real capacity model for the pilot regions.', ref:'infra', date:'—' },
     { s:'planned', cat:'ops', t:'Pilot launch', d:'The hero moment, ambient pulse and share cards are built (PR #121); what remains is a real partner — embed on their exchange, their venue behind the seam, and the Phase-5 surfaces verified on their traffic.', ref:'Phase 5', date:'partner' },
     { s:'planned', cat:'trust', t:'Lift telemetry', d:'The last pilot-instrumentation piece: does Hippo move partner retention/volume — the number that turns a pilot into a contract.', ref:'Phase 5', date:'—' },
+    { s:'planned', cat:'sdk', t:'Split the SDK into the folders the architecture already named', d:'cards.tsx (1315), panel.tsx (1013) and state.ts (453) are still bags of files. The locked FE architecture called for a card registry + one component per type, and named stores (session / thread / orders / connection / prefs). Mechanical split, no behaviour change — the kernel tokens work already landed the values; this lands the shape.', ref:'09 FE Arch', date:'—' },
+    { s:'planned', cat:'ops', t:'Admin/portal primitives pass', d:'The SPA kernel ships class-stable CSS so every page still uses class="btn". The incremental pass wraps those classes as &lt;Button&gt; / &lt;Badge&gt; / &lt;PageHead&gt; per page, then moves PartnerRecord types off @hippo/stores so the operator SPA stops importing pg.', ref:'@hippo/ui', date:'—' },
   ]
 
   // ── Render ──

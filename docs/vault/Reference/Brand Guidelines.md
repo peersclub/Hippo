@@ -116,4 +116,4 @@ Numbers are always mono — prices, sizes, fees, P&L, timestamps. This is what m
 ## Open brand items
 - [ ] `positions` P&L colouring (`tone: pos/neg`) vs "neutral facts only" — see [[Ram JSX vs Victor Dev]] #product-law. Resolve before P&L ships coloured.
 - [ ] Light theme: defined in tokens, not yet built in the SDK — decide if it ships for pilot.
-- [ ] Wire `hippo-tokens.css` into the SDK (`styles.ts` currently inlines the values) so brand + code have one source.
+- [x] Wire `hippo-tokens.css` into the SDK — **DONE 2026-08-22** (`@hippo/tokens`, branch `feat/central-ui-kernel`). `styles.ts` splices `darkVars`/`lightVars` into `:host{all:initial;…}`. The panel still overrides amber-ink to `#15171D` (brand core is `#1A1405`) so the existing dark rendering stays pixel-identical. Site + admin + portal consume the same CSS.
