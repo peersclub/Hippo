@@ -1,3 +1,5 @@
+import { darkVars, lightVars } from '@hippo/tokens'
+
 /**
  * Panel styles — Dark Glass Instrument, fully token-driven.
  * Injected as a constructable stylesheet into the closed shadow root.
@@ -12,34 +14,20 @@
  * Hard rule: solid card backgrounds inside the scroll container;
  * backdrop-filter is reserved for full-surface overlays only (iOS/WebKit).
  *
- * Token naming mirrors the brand core at
- * Hippo/Reference/brand/hippo-tokens.css (the SDK set is the superset).
+ * Core --hippo-* values come from @hippo/tokens. The block below is the
+ * SDK superset (panel gradient, skeleton, rgb triplets used in shadows)
+ * plus an amber-ink override: brand core is #1A1405; the panel keeps
+ * #15171D so the existing dark rendering stays pixel-identical.
  */
 export const panelCss = /* css */ `
-:host{all:initial;
-  /* ── surfaces ── */
-  --hippo-panel-top:#15171D;--hippo-panel-bottom:#101217;--hippo-panel:#14161C;
-  --hippo-card:#232733;--hippo-card-2:#262B36;--hippo-user-bubble:#2A2E38;
+:host{all:initial;${darkVars};
+  --hippo-panel-top:#15171D;--hippo-panel-bottom:#101217;
+  --hippo-user-bubble:#2A2E38;
   --hippo-skeleton-1:#2A2F3B;--hippo-skeleton-2:#353B49;
-  /* ── accent (the single brand accent) ── */
-  --hippo-amber:#F0B94A;--hippo-amber-ink:#15171D;--hippo-amber-tint:#E8CE93;
-  /* ── semantic status (NOT brand accents) ── */
-  --hippo-up:#2EC48D;--hippo-down:#FF8585;
-  /* ── text tiers ── */
-  --hippo-text-hi:#E9EBF0;--hippo-text-mid:#B8BDC9;--hippo-text-dim:#8A8F9C;
-  --hippo-text-faint:#6A7080;--hippo-text-dim-2:#9BA1AE;
-  /* ── rgb triplets, for tinted fills / borders / shadows ── */
-  --hippo-amber-rgb:240,185,74;--hippo-up-rgb:46,196,141;--hippo-down-rgb:255,133,133;
-  --hippo-white-rgb:255,255,255;--hippo-black-rgb:0,0,0;--hippo-bg-rgb:14,16,20;
-  --hippo-panel-deep-rgb:20,22,28;--hippo-surface-rgb:38,42,52;
-  /* ── lines ── */
-  --hippo-hairline:rgba(255,255,255,.07);
-  /* ── type ── */
-  --hippo-font-display:'Outfit',system-ui,sans-serif;
-  --hippo-font-body:'Inter',system-ui,sans-serif;
-  --hippo-font-mono:'IBM Plex Mono',ui-monospace,monospace;
-  /* ── radius ── */
-  --hippo-radius-card:16px;--hippo-radius-cell:10px;--hippo-radius-button:12px;--hippo-radius-pill:999px}
+  --hippo-amber-ink:#15171D;--hippo-amber-tint:#E8CE93;
+  --hippo-text-dim-2:#9BA1AE;
+  --hippo-white-rgb:255,255,255;--hippo-black-rgb:0,0,0;
+  --hippo-panel-deep-rgb:20,22,28;--hippo-surface-rgb:38,42,52}
 *{margin:0;padding:0;box-sizing:border-box}
 /* Logical inset/border properties so dir="rtl" mirrors the dock to the
    opposite edge automatically (RTL groundwork for the Gulf market). In LTR
@@ -698,16 +686,11 @@ svg.spark{display:block;width:100%;height:48px;margin-top:7px}
 .filehd:focus-visible{
   outline:2px solid var(--hippo-amber);outline-offset:1px}
 /* ── light lean — PURE token swap (redeclares tokens only) ── */
-:host([data-theme="light"]){
-  --hippo-panel-top:#F7F8FA;--hippo-panel-bottom:#E9ECF1;--hippo-panel:#F7F8FA;
-  --hippo-card:#FFFFFF;--hippo-card-2:#F0F2F6;--hippo-user-bubble:#F0F2F6;
+:host([data-theme="light"]){${lightVars};
+  --hippo-panel-top:#F7F8FA;--hippo-panel-bottom:#E9ECF1;
+  --hippo-user-bubble:#F0F2F6;
   --hippo-skeleton-1:#E4E7EE;--hippo-skeleton-2:#F2F4F8;
-  --hippo-amber:#B98A1E;--hippo-amber-ink:#FFFFFF;--hippo-amber-tint:#7A5B12;
-  --hippo-up:#149469;--hippo-down:#D94F4F;
-  --hippo-text-hi:rgba(14,18,26,.92);--hippo-text-mid:rgba(14,18,26,.62);
-  --hippo-text-dim:rgba(14,18,26,.46);--hippo-text-faint:rgba(14,18,26,.42);--hippo-text-dim-2:rgba(14,18,26,.52);
-  --hippo-amber-rgb:185,138,30;--hippo-up-rgb:20,148,105;--hippo-down-rgb:217,79,79;
-  --hippo-white-rgb:12,16,24;--hippo-black-rgb:60,70,90;--hippo-bg-rgb:233,236,241;
-  --hippo-panel-deep-rgb:225,229,236;--hippo-surface-rgb:240,242,246;
-  --hippo-hairline:rgba(12,16,24,.09)}
+  --hippo-amber-tint:#7A5B12;--hippo-text-dim-2:rgba(14,18,26,.52);
+  --hippo-white-rgb:12,16,24;--hippo-black-rgb:60,70,90;
+  --hippo-panel-deep-rgb:225,229,236;--hippo-surface-rgb:240,242,246}
 `

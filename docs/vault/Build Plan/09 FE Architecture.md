@@ -75,4 +75,17 @@ Onboarding steps (welcome/confetti → hero → consent → ground rules), setti
 4. **Protocol fuzzing** — malformed/unknown frames must yield `FallbackCard`, never a throw.
 5. **Size gate in CI** — loader ≤ 5KB gz fails the build if exceeded.
 
+## 10. Shared tokens, separate kits (2026-08-22)
+
+The trader SDK and the operator SPAs (admin + portal) share **values**, not components.
+
+| Package | Who imports it | Why this seam |
+|---|---|---|
+| `@hippo/tokens` | SDK, site, `@hippo/ui` | Zero runtime deps. `--hippo-*` CSS (`:root` + `:host`) plus `darkVars`/`lightVars` declaration lists so the SDK can splice them **after** `:host{all:initial}` (the reset would otherwise wipe custom properties). |
+| `@hippo/ui` | `apps/admin`, `apps/portal` **only** | SPA kernel: chrome CSS, primitives (`Button`/`Badge`/`Stat`), feedback (toast/confirm/Busy/Empty), `AppShell`, `createHashRouter(defaultPage)`, `createApi({ identity })`. |
+
+**The SDK must not import `@hippo/ui`.** Thin-client stop-line, closed Shadow DOM, and the 5KB loader gate make a shared component kit the wrong cut. Pages may keep `class="btn"`; primitives wrap those classes so migrations are per-file.
+
+Decision: [[001 Central UI kernel]]. Remaining: split this package's `cards.tsx` / `state.ts` / `panel.tsx` into the folders §3–§4 already named.
+
 Related: [[08 PRD v1]] · [[02 Thin Client SDK]] (productionization scope) · [[10 BE Architecture]] (the other side of the wire)

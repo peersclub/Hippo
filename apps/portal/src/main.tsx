@@ -3,6 +3,7 @@
  * pages. Everything rendered here is already scoped to the signed-in
  * partner by the service — the SPA never handles a partner id.
  */
+import { AppShell } from '@hippo/ui'
 import { render } from 'preact'
 import { useEffect } from 'preact/hooks'
 import { currentAdmin, get, type PortalIdentity, post } from './api.js'
@@ -13,14 +14,15 @@ import { OverviewPage } from './pages/overview.js'
 import { PlanPage } from './pages/plan.js'
 import { UsersPage } from './pages/users.js'
 import { navigate, route } from './router.js'
-import { ConfirmHost, Toasts } from './ui.js'
+
+import '@hippo/ui/spa.css'
 
 const NAV = [
-  ['overview', 'Overview'],
-  ['users', 'Users'],
-  ['integration', 'Integration'],
-  ['plan', 'Plan'],
-  ['audit', 'Activity'],
+  { key: 'overview', label: 'Overview' },
+  { key: 'users', label: 'Users' },
+  { key: 'integration', label: 'Integration' },
+  { key: 'plan', label: 'Plan' },
+  { key: 'audit', label: 'Activity' },
 ] as const
 
 function Page() {
@@ -43,7 +45,6 @@ function Shell() {
   const admin = currentAdmin.value
 
   useEffect(() => {
-    // Resume an existing cookie session on load.
     get<PortalIdentity>('/auth/me')
       .then((me) => {
         currentAdmin.value = me
@@ -54,43 +55,28 @@ function Shell() {
       })
   }, [])
 
+  useEffect(() => {
+    if (admin && (page === 'login' || page === 'claim')) navigate('overview')
+  }, [admin, page])
+
   if (!admin) return page === 'claim' ? <ClaimPage /> : <LoginPage />
 
   return (
-    <div class="layout">
-      <aside class="sidebar">
-        <div class="logo">
-          <span class="dot">H</span>Hippo <span class="sub">{admin.venueName}</span>
-        </div>
-        <nav class="nav">
-          {NAV.map(([key, label]) => (
-            <a key={key} href={`#/${key}`} class={page === key ? 'on' : ''}>
-              {label}
-            </a>
-          ))}
-        </nav>
-        <div class="foot">
-          <div>{admin.email}</div>
-          <div class="dim">{admin.role === 'admin' ? 'admin' : 'read-only'}</div>
-          <button
-            type="button"
-            onClick={() => {
-              void post('/auth/logout').finally(() => {
-                currentAdmin.value = null
-                navigate('login')
-              })
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      </aside>
-      <main class="main">
-        <Page />
-      </main>
-      <Toasts />
-      <ConfirmHost />
-    </div>
+    <AppShell
+      sub={admin.venueName}
+      nav={NAV}
+      page={page}
+      email={admin.email}
+      role={admin.role === 'admin' ? 'admin' : 'read-only'}
+      onSignOut={() => {
+        void post('/auth/logout').finally(() => {
+          currentAdmin.value = null
+          navigate('login')
+        })
+      }}
+    >
+      <Page />
+    </AppShell>
   )
 }
 

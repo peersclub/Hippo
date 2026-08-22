@@ -24,8 +24,8 @@ describe('hash router', () => {
   it('parses pages, params, and defaults; reacts to hashchange; navigates', async () => {
     const { route, navigate } = await import('../src/router.js')
 
-    // Default with empty hash.
-    expect(route.value).toEqual({ page: 'dashboard', params: [] })
+    // Default with empty hash — overview, not dashboard (copy-paste trap).
+    expect(route.value).toEqual({ page: 'overview', params: [] })
 
     fireHashChange('#/partners')
     expect(route.value).toEqual({ page: 'partners', params: [] })

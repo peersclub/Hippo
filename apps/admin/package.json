@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@hippo/protocol": "workspace:*",
+    "@hippo/stores": "workspace:*",
+    "@hippo/ui": "workspace:*",
     "@preact/signals": "^2.0.0",
     "preact": "^10.26.0"
   },
