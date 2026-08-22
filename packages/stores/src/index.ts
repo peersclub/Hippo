@@ -73,6 +73,7 @@ export {
   type UploadedFileStore,
 } from './uploaded-file-store.js'
 export {
+  IDENTITIES_LIST_CAP,
   InMemoryUserIdentityStore,
   PostgresUserIdentityStore,
   type UserIdentity,

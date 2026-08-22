@@ -60,6 +60,7 @@ export function MemoryConfigPage() {
   const [sessionId, setSessionId] = useState('')
   const [body, setBody] = useState('')
   const [sessionFacts, setSessionFacts] = useState<LearnedFact[]>([])
+  const [sessionFactsError, setSessionFactsError] = useState(false)
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -73,11 +74,18 @@ export function MemoryConfigPage() {
       return
     }
     // The session inspector also lists what was auto-learned this session —
-    // read-only, degrades to an empty list if the facts fetch fails.
+    // read-only. A fetch failure is rendered as a failure: "no facts learned"
+    // is a claim, and we can't make it while the facts service is erroring.
     if (readOnly) {
       void get<LearnedFact[]>(`/v1/learned-facts/session/${encodeURIComponent(sessionId.trim())}`)
-        .then((rows) => setSessionFacts(Array.isArray(rows) ? rows : []))
-        .catch(() => setSessionFacts([]))
+        .then((rows) => {
+          setSessionFacts(Array.isArray(rows) ? rows : [])
+          setSessionFactsError(false)
+        })
+        .catch(() => {
+          setSessionFacts([])
+          setSessionFactsError(true)
+        })
     }
     // Session returns { composed, … }; the editable scopes return { body }.
     const doc = await get<Doc & { composed?: string }>(path)
@@ -189,7 +197,12 @@ export function MemoryConfigPage() {
           <span class="dim mono">{body.length} chars · exactly what was sent to the model</span>
 
           <h2>Learned this session</h2>
-          {sessionFacts.length === 0 ? (
+          {sessionFactsError ? (
+            <ErrorBanner
+              message="Learned-facts fetch failed — what was learned this session is UNKNOWN, not necessarily nothing."
+              retry={state.retry}
+            />
+          ) : sessionFacts.length === 0 ? (
             <p class="dim">
               No facts were auto-learned in this session — the composed block above is everything
               that was sent.

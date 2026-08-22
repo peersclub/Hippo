@@ -155,6 +155,9 @@ describe('restart durability across service instances (shared state store)', () 
       uiUserId: USER,
       stateStore,
       persistDebounceMs: 5,
+      // The admin surface is fail-closed without a token — these tests flip
+      // drawer settings, so they run with one.
+      adminToken: 'op-secret',
     })
 
   it('instance 2 boots from instance 1 state and serves it over the trade routes', async () => {
@@ -176,7 +179,12 @@ describe('restart durability across service instances (shared state store)', () 
     })
     expect(placed.statusCode).toBe(200)
     const orderId = placed.json().orderId as number
-    await first.inject({ method: 'POST', url: '/admin/config', payload: { slippagePct: 0.01 } })
+    await first.inject({
+      method: 'POST',
+      url: '/admin/config',
+      headers: { 'x-admin-token': 'op-secret' },
+      payload: { slippagePct: 0.01 },
+    })
     await first.close() // onClose flushes the pending debounced save
 
     // …"pod 2" (fresh store) restores the row before serving.

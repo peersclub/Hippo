@@ -264,15 +264,41 @@ export class AssetworksVenueAdapter implements VenueAdapter {
   }
 
   /** Discover what the host supports (spot + perps), read live from the host's
-   *  own /v1/capabilities. Falls back to the known Assetworks set if offline. */
-  async capabilities(): Promise<VenueCapabilitiesShape> {
+   *  own /v1/capabilities. Falls back to the known Assetworks set if offline.
+   *  The host's sibling fields — instruments and the per-order size bounds —
+   *  ride along additively instead of being discarded, so callers can see the
+   *  tradable universe and size limits the venue actually enforces. The
+   *  offline fallback omits them: unknown, not empty. */
+  async capabilities(): Promise<
+    VenueCapabilitiesShape & {
+      /** Tradable symbols the host advertises (e.g. "BTC/USDT"). Additive. */
+      instruments?: string[]
+      /** Per-order base-quantity bounds (0 = unbounded). Additive. */
+      minOrderSize?: number
+      maxOrderSize?: number
+    }
+  > {
     try {
       const res = await this.opts.fetchImpl(`${this.opts.baseUrl}/v1/capabilities`, {
         signal: AbortSignal.timeout(2_000),
       })
       if (res.ok) {
-        const body = (await res.json()) as { capabilities?: VenueCapabilitiesShape }
-        if (body.capabilities) return body.capabilities
+        const body = (await res.json()) as {
+          capabilities?: VenueCapabilitiesShape
+          instruments?: unknown
+          minOrderSize?: unknown
+          maxOrderSize?: unknown
+        }
+        if (body.capabilities)
+          return {
+            ...body.capabilities,
+            ...(Array.isArray(body.instruments) &&
+            body.instruments.every((s): s is string => typeof s === 'string')
+              ? { instruments: body.instruments }
+              : {}),
+            ...(typeof body.minOrderSize === 'number' ? { minOrderSize: body.minOrderSize } : {}),
+            ...(typeof body.maxOrderSize === 'number' ? { maxOrderSize: body.maxOrderSize } : {}),
+          }
       }
     } catch {
       /* fall through */

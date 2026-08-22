@@ -48,11 +48,14 @@ const BASE_CONFIG: AdminConfig = {
   maxOrderSize: 0,
 }
 
-function makeApp(cfg: Partial<AdminConfig> = {}) {
+function makeApp(
+  cfg: Partial<AdminConfig> = {},
+  svc: { adminToken?: string; adminOrigins?: string[] } = {},
+) {
   const config: AdminConfig = { ...BASE_CONFIG, ...cfg }
   const store = new VenueStore(async () => 60_000, config)
   const keys = new Map<string, ApiKeyRecord>([[KEY, { secret: SECRET, userId: USER }]])
-  return { app: buildService({ store, keys, uiUserId: USER }), store }
+  return { app: buildService({ store, keys, uiUserId: USER, ...svc }), store }
 }
 
 describe('host-venue signed trade wire', () => {
@@ -693,7 +696,9 @@ describe('forced-degraded proxy (/admin/gateway/degraded)', () => {
     return { gw, calls, url: `http://127.0.0.1:${port}` }
   }
 
-  function makeProxyApp(gatewayUrl: string, adminToken?: string) {
+  // The admin surface is fail-closed (503 without a configured token), so the
+  // proxy tests always run with one — the guard itself has its own suite.
+  function makeProxyApp(gatewayUrl: string, adminToken = 'op-secret') {
     const store = new VenueStore(async () => 60_000, { ...BASE_CONFIG })
     const keys = new Map<string, ApiKeyRecord>([[KEY, { secret: SECRET, userId: USER }]])
     return buildService({
@@ -703,20 +708,23 @@ describe('forced-degraded proxy (/admin/gateway/degraded)', () => {
       gatewayUrl,
       gatewayInternalToken: 'tok-internal',
       demoPartnerId: 'assetworks-demo',
-      ...(adminToken ? { adminToken } : {}),
+      adminToken,
     })
   }
+  const OP = { 'x-admin-token': 'op-secret' }
 
   it('POST forwards {demo partnerId, forced} with the internal token; GET folds the list', async () => {
     const { gw, calls, url } = await fakeGateway()
     const app = makeProxyApp(url)
 
-    const off = await app.inject({ method: 'GET', url: '/admin/gateway/degraded' })
+    // GET is operator-gated too now — the degraded flag names a partner.
+    const off = await app.inject({ method: 'GET', url: '/admin/gateway/degraded', headers: OP })
     expect(off.json()).toEqual({ partnerId: 'assetworks-demo', forced: false })
 
     const on = await app.inject({
       method: 'POST',
       url: '/admin/gateway/degraded',
+      headers: OP,
       payload: { forced: true },
     })
     expect(on.statusCode).toBe(200)
@@ -729,12 +737,13 @@ describe('forced-degraded proxy (/admin/gateway/degraded)', () => {
       body: { partnerId: 'assetworks-demo', forced: true },
     })
 
-    const now = await app.inject({ method: 'GET', url: '/admin/gateway/degraded' })
+    const now = await app.inject({ method: 'GET', url: '/admin/gateway/degraded', headers: OP })
     expect(now.json()).toEqual({ partnerId: 'assetworks-demo', forced: true })
 
     const clear = await app.inject({
       method: 'POST',
       url: '/admin/gateway/degraded',
+      headers: OP,
       payload: { forced: false },
     })
     expect(clear.json()).toEqual({ partnerId: 'assetworks-demo', forced: false })
@@ -768,11 +777,228 @@ describe('forced-degraded proxy (/admin/gateway/degraded)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/admin/gateway/degraded',
+      headers: OP,
       payload: { forced: true },
     })
     expect(res.statusCode).toBe(502)
     expect((res.json() as { error: string }).error).toContain('gateway unreachable')
     await app.close()
+  })
+})
+
+describe('admin surface — fail closed + scoped CORS', () => {
+  it('refuses EVERY /admin/* request 503 when the admin token env is unset — never open', async () => {
+    const { app } = makeApp() // no adminToken → the pre-fix behavior was "everyone is admin"
+    const read = await app.inject({ method: 'GET', url: '/admin/config' })
+    expect(read.statusCode).toBe(503)
+    expect(read.json().error).toMatch(/ASSETWORKS_ADMIN_TOKEN/)
+    const write = await app.inject({
+      method: 'POST',
+      url: '/admin/config',
+      payload: { maintenance: true },
+    })
+    expect(write.statusCode).toBe(503)
+    // And the gateway/AI proxies behind /admin/* are equally closed.
+    const proxy = await app.inject({
+      method: 'POST',
+      url: '/admin/gateway/degraded',
+      payload: { forced: true },
+    })
+    expect(proxy.statusCode).toBe(503)
+  })
+
+  it('with a token configured, mutations need the header and a bad token is 401', async () => {
+    const { app, store } = makeApp({}, { adminToken: 'op-secret' })
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/admin/config',
+      payload: { maintenance: true },
+    })
+    expect(denied.statusCode).toBe(401)
+    expect(store.config.maintenance).toBe(false)
+    const allowed = await app.inject({
+      method: 'POST',
+      url: '/admin/config',
+      headers: { 'x-admin-token': 'op-secret' },
+      payload: { maintenance: true },
+    })
+    expect(allowed.statusCode).toBe(200)
+    expect(store.config.maintenance).toBe(true)
+  })
+
+  it('admin responses never carry ACAO *: unlisted origins get NO header, allowlisted ones are reflected', async () => {
+    // No allowlist → no ACAO header at all on /admin/* (same-origin still works).
+    const { app } = makeApp({}, { adminToken: 'op-secret' })
+    const bare = await app.inject({
+      method: 'GET',
+      url: '/admin/config',
+      headers: { origin: 'https://evil.example' },
+    })
+    expect(bare.statusCode).toBe(200)
+    expect(bare.headers['access-control-allow-origin']).toBeUndefined()
+
+    // Allowlist → the MATCHING origin is reflected verbatim, never `*`.
+    const { app: listed } = makeApp(
+      {},
+      { adminToken: 'op-secret', adminOrigins: ['https://ops.example'] },
+    )
+    const ok = await listed.inject({
+      method: 'GET',
+      url: '/admin/config',
+      headers: { origin: 'https://ops.example' },
+    })
+    expect(ok.headers['access-control-allow-origin']).toBe('https://ops.example')
+    expect(ok.headers.vary).toContain('origin')
+    const stranger = await listed.inject({
+      method: 'GET',
+      url: '/admin/config',
+      headers: { origin: 'https://evil.example' },
+    })
+    expect(stranger.headers['access-control-allow-origin']).toBeUndefined()
+  })
+
+  it('public venue routes keep permissive CORS (the vercel.app demo frontends need it)', async () => {
+    const { app } = makeApp({}, { adminToken: 'op-secret' })
+    for (const url of ['/v1/capabilities', '/health']) {
+      const res = await app.inject({ method: 'GET', url })
+      expect(res.statusCode).toBe(200)
+      expect(res.headers['access-control-allow-origin']).toBe('*')
+    }
+  })
+})
+
+describe('marginModes enforced at placement', () => {
+  const perp = (o = {}) => ({
+    market: 'perp' as const,
+    pairName: 'BTC-USDT',
+    side: 'buy' as const,
+    kind: 'market' as const,
+    qty: 0.1,
+    rate: 60_000,
+    direction: 'long' as const,
+    leverage: 5,
+    ...o,
+  })
+
+  it('rejects a mode the venue does not offer, accepts one it does — both directions', () => {
+    const isolatedOnly = new VenueStore(async () => 60_000, {
+      ...BASE_CONFIG,
+      marginModes: ['isolated'],
+    })
+    expect(() => isolatedOnly.place(USER, perp({ marginMode: 'cross' }))).toThrow(
+      /cross margin is not offered/i,
+    )
+    expect(isolatedOnly.place(USER, perp({ marginMode: 'isolated' })).marginMode).toBe('isolated')
+
+    const crossOnly = new VenueStore(async () => 60_000, {
+      ...BASE_CONFIG,
+      marginModes: ['cross'],
+    })
+    expect(() => crossOnly.place(USER, perp({ marginMode: 'isolated' }))).toThrow(
+      /isolated margin is not offered/i,
+    )
+    // Omitted mode defaults to isolated — and that default is enforced too.
+    expect(() => crossOnly.place(USER, perp())).toThrow(/isolated margin is not offered/i)
+    expect(crossOnly.place(USER, perp({ marginMode: 'cross' })).marginMode).toBe('cross')
+  })
+
+  it('wire: an unsupported mode is a 400 rejection, never a silent rewrite to isolated', async () => {
+    const { app, store } = makeApp({ marginModes: ['isolated'] })
+    const cross = sign({
+      pairName: 'BTC-USDT',
+      orderType: 0,
+      tradeType: 20,
+      qty: 0.1,
+      rate: 60_000,
+      market: 'perp',
+      direction: 'long',
+      leverage: 5,
+      marginMode: 'cross',
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/v1/trade/orders', ...cross })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/cross margin is not offered/i)
+    expect(store.openOrders(USER)).toHaveLength(0) // nothing was coerced onto the book
+
+    // A mode outside the vocabulary entirely is caught at the wire parser.
+    const garbage = sign({
+      pairName: 'BTC-USDT',
+      orderType: 0,
+      tradeType: 20,
+      qty: 0.1,
+      rate: 60_000,
+      market: 'perp',
+      direction: 'long',
+      leverage: 5,
+      marginMode: 'portfolio',
+    })
+    const bad = await app.inject({ method: 'POST', url: '/api/v1/trade/orders', ...garbage })
+    expect(bad.statusCode).toBe(400)
+    expect(bad.json().error).toMatch(/invalid marginMode/i)
+  })
+})
+
+describe('instruments enforced at placement', () => {
+  it('rejects a symbol outside a non-empty instruments list; empty list = unrestricted', async () => {
+    const btcOnly = new VenueStore(async () => 60_000, {
+      ...BASE_CONFIG,
+      instruments: ['BTC/USDT'],
+    })
+    expect(() =>
+      btcOnly.place(USER, {
+        market: 'spot',
+        pairName: 'ETH-USDT',
+        side: 'buy',
+        kind: 'market',
+        qty: 0.1,
+        rate: 3_000,
+      }),
+    ).toThrow(/ETH\/USDT is not traded on this venue/i)
+    // The listed symbol places fine.
+    expect(
+      btcOnly.place(USER, {
+        market: 'spot',
+        pairName: 'BTC-USDT',
+        side: 'buy',
+        kind: 'market',
+        qty: 0.1,
+        rate: 60_000,
+      }).id,
+    ).toBeGreaterThan(0)
+
+    const unrestricted = new VenueStore(async () => 60_000, { ...BASE_CONFIG, instruments: [] })
+    expect(
+      unrestricted.place(USER, {
+        market: 'spot',
+        pairName: 'DOGE-USDT',
+        side: 'buy',
+        kind: 'market',
+        qty: 1,
+        rate: 0.1,
+      }).id,
+    ).toBeGreaterThan(0)
+  })
+
+  it('wire: an unlisted symbol is a 400 with the plain-words reason', async () => {
+    const { app } = makeApp({ instruments: ['BTC/USDT'] })
+    const eth = sign({ pairName: 'ETH-USDT', orderType: 0, tradeType: 20, qty: 0.1, rate: 3_000 })
+    const res = await app.inject({ method: 'POST', url: '/api/v1/trade/orders', ...eth })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/not traded on this venue/i)
+  })
+})
+
+describe('capabilities advertise the enforced size bounds', () => {
+  it('emits minOrderSize/maxOrderSize from live admin config', async () => {
+    const { app } = makeApp({ minOrderSize: 0.5, maxOrderSize: 2 })
+    const caps = (await app.inject({ method: 'GET', url: '/v1/capabilities' })).json()
+    expect(caps.minOrderSize).toBe(0.5)
+    expect(caps.maxOrderSize).toBe(2)
+    // Unbounded venue advertises 0 (the "no bound" sentinel), not undefined.
+    const { app: unbounded } = makeApp()
+    const caps2 = (await unbounded.inject({ method: 'GET', url: '/v1/capabilities' })).json()
+    expect(caps2.minOrderSize).toBe(0)
+    expect(caps2.maxOrderSize).toBe(0)
   })
 })
 

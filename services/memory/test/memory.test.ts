@@ -363,7 +363,39 @@ describe('bulk purge (partner offboarding)', () => {
       url: '/admin/personas?partnerId=pA',
       headers: { 'x-hippo-internal-token': 'tok' },
     })
-    expect(ok.json()).toEqual({ deleted: 1 })
+    expect(ok.json()).toEqual({ deleted: 1, facts: 0, notes: 0 })
+    await app.close()
+  })
+
+  it('DELETE /admin/personas also purges the partner’s learned facts and user notes', async () => {
+    const { InMemoryScopeMemoryStore } = await import('../src/scope-store.js')
+    const store = new InMemoryPersonaStore()
+    const scopeStore = new InMemoryScopeMemoryStore()
+    await store.update('pA', 'u1', { optIn: true })
+    await scopeStore.setUserNote('pA', 'u1', 'prefers terse answers', 1)
+    await scopeStore.setUserNote('pB', 'u2', 'unrelated partner', 1)
+    await scopeStore.upsertLearnedFacts(
+      'user',
+      { partnerId: 'pA', userId: 'u1' },
+      [
+        { type: 'risk', value: 'low', confidence: 0.7 },
+        { type: 'style', value: 'terse', confidence: 0.9 },
+      ],
+      Date.now(),
+    )
+    const app = buildService({ store, scopeStore, internalToken: 'tok' })
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/admin/personas?partnerId=pA',
+      headers: { 'x-hippo-internal-token': 'tok' },
+    })
+    expect(res.json()).toEqual({ deleted: 1, facts: 2, notes: 1 })
+
+    // pA holds nothing anymore; pB is untouched.
+    expect(await scopeStore.getLearnedFacts('user', { partnerId: 'pA', userId: 'u1' })).toEqual([])
+    expect((await scopeStore.getUserNote('pA', 'u1')).body).toBe('')
+    expect((await scopeStore.getUserNote('pB', 'u2')).body).toBe('unrelated partner')
     await app.close()
   })
 })
@@ -417,6 +449,34 @@ describe('scope-memory documents (global / host / user note)', () => {
     expect(
       (await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u2', headers: auth })).json().body,
     ).toBe('')
+  })
+
+  it('DELETE removes a user note (token-guarded), idempotently', async () => {
+    const app = buildService({ internalToken: TOKEN })
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/scope/user/pA/u1',
+      headers: auth,
+      payload: { body: 'prefers terse answers' },
+    })
+
+    // Unauthenticated delete is denied — the note survives.
+    expect((await app.inject({ method: 'DELETE', url: '/v1/scope/user/pA/u1' })).statusCode).toBe(
+      401,
+    )
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u1', headers: auth })).json().body,
+    ).toBe('prefers terse answers')
+
+    const del = await app.inject({ method: 'DELETE', url: '/v1/scope/user/pA/u1', headers: auth })
+    expect(del.statusCode).toBe(200)
+    expect(del.json()).toEqual({ deleted: true })
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/scope/user/pA/u1', headers: auth })).json(),
+    ).toMatchObject({ body: '', updatedAt: 0 })
+    // Second delete is a no-op, never an error.
+    const again = await app.inject({ method: 'DELETE', url: '/v1/scope/user/pA/u1', headers: auth })
+    expect(again.json()).toEqual({ deleted: false })
   })
 
   it('rejects a non-string body and a missing token', async () => {
@@ -579,8 +639,14 @@ describe('scope-store parity — one surface, two backings', () => {
       .filter((n) => n !== 'constructor')
       .sort()
     const reads = ['getGlobal', 'getHost', 'getLearnedFacts', 'getSession', 'getUserNote']
-    // clearLearnedFacts persists no string; it has its own parity test below.
-    const writes = [...CASES.map((c) => c.method), 'clearLearnedFacts']
+    // The deletes persist no string; each has its own parity test below.
+    const writes = [
+      ...CASES.map((c) => c.method),
+      'clearLearnedFacts',
+      'deleteLearnedFactsByPartner',
+      'deleteUserNote',
+      'deleteUserNotesByPartner',
+    ]
     expect(surface).toEqual([...reads, ...writes].sort())
 
     const twin = new InMemoryScopeMemoryStore() as unknown as Record<string, unknown>
@@ -625,6 +691,60 @@ describe('scope-store parity — one surface, two backings', () => {
     await session.postgres.clearLearnedFacts('session', { sessionId: 's1' })
     const [sessionDel] = statementsFor(session.calls, 'memory_learned_facts')
     expect(sessionDel.params).toEqual(['s1'])
+  })
+
+  it('deleteUserNote targets the same (partner,user) keys in both backings', async () => {
+    const { memory, postgres, calls } = await bothBackings()
+    await memory.setUserNote('pA', 'u1', 'note', NOW)
+    expect(await memory.deleteUserNote('pA', 'u1')).toBe(true)
+    expect((await memory.getUserNote('pA', 'u1')).body).toBe('')
+    expect(await memory.deleteUserNote('pA', 'u1')).toBe(false) // idempotent
+
+    await postgres.deleteUserNote('pA', 'u1')
+    const [del] = statementsFor(calls, 'memory_user_notes')
+    expect(del.sql).toMatch(/^DELETE FROM memory_user_notes/)
+    expect(del.params).toEqual(['pA', 'u1'])
+  })
+
+  it('deleteUserNotesByPartner purges only that partner in both backings', async () => {
+    const { memory, postgres, calls } = await bothBackings()
+    await memory.setUserNote('pA', 'u1', 'a', NOW)
+    await memory.setUserNote('pA', 'u2', 'b', NOW)
+    await memory.setUserNote('pB', 'u3', 'keep', NOW)
+    expect(await memory.deleteUserNotesByPartner('pA')).toBe(2)
+    expect((await memory.getUserNote('pB', 'u3')).body).toBe('keep')
+
+    await postgres.deleteUserNotesByPartner('pA')
+    const [del] = statementsFor(calls, 'memory_user_notes')
+    expect(del.sql).toMatch(/^DELETE FROM memory_user_notes/)
+    expect(del.params).toEqual(['pA'])
+  })
+
+  it('deleteLearnedFactsByPartner reaches user-scope facts only, in both backings', async () => {
+    const { memory, postgres, calls } = await bothBackings()
+    await memory.upsertLearnedFacts('user', IDS, [{ type: 't', value: 'v', confidence: 1 }], NOW)
+    await memory.upsertLearnedFacts(
+      'user',
+      { partnerId: 'pA', userId: 'u2' },
+      [{ type: 't', value: 'w', confidence: 1 }],
+      NOW,
+    )
+    // Session facts key on the session id alone — out of a partner purge's
+    // reach on both sides (the Postgres WHERE matches scope='user').
+    await memory.upsertLearnedFacts(
+      'session',
+      { sessionId: 's1' },
+      [{ type: 't', value: 's', confidence: 1 }],
+      NOW,
+    )
+    expect(await memory.deleteLearnedFactsByPartner('pA')).toBe(2)
+    expect(await memory.getLearnedFacts('user', IDS, NOW)).toEqual([])
+    expect(await memory.getLearnedFacts('session', { sessionId: 's1' }, NOW)).toHaveLength(1)
+
+    await postgres.deleteLearnedFactsByPartner('pA')
+    const [del] = statementsFor(calls, 'memory_learned_facts')
+    expect(del.sql).toMatch(/^DELETE FROM memory_learned_facts WHERE scope = 'user'/)
+    expect(del.params).toEqual(['pA'])
   })
 
   it('keeps the composed snapshot whole past MAX_BODY — it is an audit record', async () => {

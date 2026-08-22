@@ -38,8 +38,13 @@ export type BuildOptions = {
   /** apiKey → { secret, userId }. The parasite's key resolves to the SAME
    *  userId the host UI trades as, so their orders share one book. */
   keys: Map<string, ApiKeyRecord>
-  /** Optional guard on /admin mutations; open in dev when unset. */
+  /** Guard on /admin mutations. FAIL-CLOSED: when unset, every /admin/*
+   *  request is refused 503 naming the missing env — never served open. */
   adminToken?: string
+  /** Browser origins allowed to call /admin/* cross-origin (reflected, never
+   *  `*`). Unset = no ACAO header on /admin/* at all; same-origin and proxy
+   *  access keep working. Public venue routes stay permissive regardless. */
+  adminOrigins?: string[]
   /** The userId the first-party UI trades as (and the demo key maps to). */
   uiUserId?: string
   /** Instruments advertised to the parasite via /v1/capabilities. */
@@ -99,6 +104,12 @@ function parsePlace(body: Record<string, unknown>): PlaceRequest | string {
   if (market === 'perp') {
     req.direction = body.direction === 'short' ? 'short' : 'long'
     req.leverage = Number.isFinite(num(body.leverage)) ? num(body.leverage) : 1
+    // An unknown margin mode is a REJECTION, not a silent rewrite to isolated —
+    // the trader must never get a different margin regime than they asked for.
+    // Omitted = isolated (the venue default); the store then checks the mode
+    // against what the venue's config actually supports.
+    if (body.marginMode !== undefined && body.marginMode !== 'cross' && body.marginMode !== 'isolated')
+      return 'invalid marginMode (want isolated or cross)'
     req.marginMode = body.marginMode === 'cross' ? 'cross' : 'isolated'
     req.reduceOnly = body.reduceOnly === true
   }
@@ -184,11 +195,57 @@ export function buildService(opts: BuildOptions) {
     }
   })
 
-  app.addHook('onSend', async (_req, reply) => {
+  // ── CORS, split by audience ───────────────────────────────────────────────
+  // Public venue routes (/v1/*, /health, /ui/*, the signed wire) stay
+  // permissive — the demo frontends on vercel.app need it. The ADMIN surface
+  // must never carry `*`: it reflects an origin only when it is explicitly
+  // allowlisted (HOST_VENUE_ADMIN_ORIGINS, comma list). No allowlist = no
+  // ACAO header on /admin/* — same-origin and server-side proxy access are
+  // unaffected, browsers on foreign origins are refused by CORS.
+  const adminOrigins =
+    opts.adminOrigins ??
+    (process.env.HOST_VENUE_ADMIN_ORIGINS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  // Match on the DECODED path: fastify routes on the decoded URL, so testing
+  // the raw req.url would let `/%61dmin/config` reach the handler unguarded.
+  const isAdminUrl = (url: string) => {
+    let path = url.split('?')[0] ?? url
+    try {
+      path = decodeURIComponent(path)
+    } catch {
+      // malformed escapes cannot route anywhere — treat as admin to fail closed
+      return true
+    }
+    return path === '/admin' || path.startsWith('/admin/')
+  }
+  app.addHook('onSend', async (req, reply) => {
+    if (isAdminUrl(req.url)) {
+      const origin = req.headers.origin
+      if (typeof origin === 'string' && adminOrigins.includes(origin)) {
+        reply.header('access-control-allow-origin', origin)
+        reply.header('access-control-allow-headers', '*')
+        reply.header('vary', 'origin')
+      }
+      return
+    }
     reply.header('access-control-allow-origin', '*')
     reply.header('access-control-allow-headers', '*')
   })
   app.options('/*', async (_req, reply) => reply.code(204).send())
+
+  // ── admin fail-closed gate ───────────────────────────────────────────────
+  // With no admin token configured, the ENTIRE /admin surface is refused —
+  // loudly, naming the missing env — rather than served open. An unset env in
+  // production must never mean "everyone is admin".
+  app.addHook('onRequest', async (req, reply) => {
+    if (!opts.adminToken && isAdminUrl(req.url))
+      return reply.code(503).send({
+        error:
+          'admin surface disabled: ASSETWORKS_ADMIN_TOKEN is not set — set it to enable /admin/*',
+      })
+  })
 
   // Simulated venue latency on the signed trade surface — makes the parasite's
   // "working"/thinking states visible and stresses its request timeouts.
@@ -351,6 +408,11 @@ export function buildService(opts: BuildOptions) {
     return {
       venue: 'assetworks',
       instruments: c.instruments.length ? c.instruments : instruments,
+      // Per-order base-quantity bounds (0 = unbounded) — enforced at placement,
+      // so they must be advertised too: the parasite can size orders honestly
+      // instead of discovering the limit as a rejection.
+      minOrderSize: c.minOrderSize,
+      maxOrderSize: c.maxOrderSize,
       capabilities,
     }
   })
@@ -396,9 +458,10 @@ export function buildService(opts: BuildOptions) {
   })
 
   // Admin drawer — flip the confirm surface and fill behaviour at runtime.
+  // No fail-open branch: an unset token never reaches here (the onRequest
+  // gate above already refused the whole /admin surface with a 503).
   function adminOk(req: FastifyRequest, reply: FastifyReply): boolean {
-    if (!opts.adminToken) return true
-    if (req.headers['x-admin-token'] === opts.adminToken) return true
+    if (opts.adminToken && req.headers['x-admin-token'] === opts.adminToken) return true
     reply.code(401).send({ error: 'bad admin token' })
     return false
   }
@@ -463,8 +526,14 @@ export function buildService(opts: BuildOptions) {
     }
   }
   // GET → combined AI status; the settings page reads this once.
-  app.get('/admin/ai', async (_req, reply) => aiProxy(reply, '/admin/status', 'GET'))
-  app.get('/admin/ai/model', async (_req, reply) => aiProxy(reply, '/admin/model', 'GET'))
+  app.get('/admin/ai', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    return aiProxy(reply, '/admin/status', 'GET')
+  })
+  app.get('/admin/ai/model', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    return aiProxy(reply, '/admin/model', 'GET')
+  })
   app.post('/admin/ai/model', async (req, reply) => {
     if (!adminOk(req, reply)) return reply
     const model = (req.body as { model?: unknown })?.model
@@ -530,7 +599,10 @@ export function buildService(opts: BuildOptions) {
       return reply.code(502).send({ error: `gateway unreachable: ${String(err)}` })
     }
   }
-  app.get('/admin/gateway/degraded', async (_req, reply) => gatewayDegraded(reply, 'GET'))
+  app.get('/admin/gateway/degraded', async (req, reply) => {
+    if (!adminOk(req, reply)) return reply
+    return gatewayDegraded(reply, 'GET')
+  })
   app.post('/admin/gateway/degraded', async (req, reply) => {
     if (!adminOk(req, reply)) return reply
     return gatewayDegraded(reply, 'POST', (req.body as { forced?: unknown })?.forced === true)

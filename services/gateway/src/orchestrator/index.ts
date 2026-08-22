@@ -854,6 +854,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         text: origin.text,
         intent: origin.intent,
         symbol: symbolFromText(origin.text, defaultSymbol(session)),
+        ...(session.language ? { language: session.language } : {}),
       })
       if (res.kind === 'decline') {
         emit(session, declineFrame(res))
@@ -2346,6 +2347,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             text: intentRes.restructuredQuery ?? text,
             intent: intentRes.intent,
             symbol,
+            // Answer language from the settings uplink — without it the SDK's
+            // language picker changed chip labels while answers stayed English.
+            ...(session.language ? { language: session.language } : {}),
             ...(persona?.optIn && persona.experienceLevel
               ? { persona: { experienceLevel: persona.experienceLevel } }
               : {}),
@@ -2454,6 +2458,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             text,
             intent: 'advice',
             symbol: symbolFromText(text, defaultSymbol(session)),
+            ...(session.language ? { language: session.language } : {}),
           })
           const declined = res.kind === 'decline'
           telemetry.recordAdvice(declined)

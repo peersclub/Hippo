@@ -66,6 +66,17 @@ describe('InMemoryAlertStore', () => {
     expect(await store.cancel('a2', 'koinbx-dev', 'user-1')).toBeNull()
   })
 
+  it('lists a partner’s alerts across users, newest first, bounded', async () => {
+    const store = new InMemoryAlertStore()
+    await store.create(alert({ id: 'a1', createdAt: 1 }))
+    await store.create(alert({ id: 'b1', userKey: 'user-2', createdAt: 2 }))
+    await store.create(alert({ id: 'c1', partnerId: 'other-partner', createdAt: 3 }))
+
+    expect((await store.listByPartner('koinbx-dev')).map((a) => a.id)).toEqual(['b1', 'a1'])
+    expect((await store.listByPartner('koinbx-dev', 1)).map((a) => a.id)).toEqual(['b1'])
+    expect(await store.listByPartner('nobody')).toEqual([])
+  })
+
   it('markTriggered wins exactly once; markDelivered flips the flag', async () => {
     const store = new InMemoryAlertStore()
     await store.create(alert({ id: 'a1' }))

@@ -1,10 +1,13 @@
 /**
  * Request hardening for the admin service.
  *
- * LoginThrottle — sliding-window failure counters keyed by email AND by IP.
- * 5 failures in 15 minutes locks that key out for the remainder of the
- * window (429 + Retry-After). In-memory on purpose: this is per-instance
- * abuse control, not billing data; a restart resetting it is acceptable.
+ * LoginThrottle — sliding-window failure counters; the login route keys them
+ * on email+IP combined (never bare IP: behind a proxy TRUST_PROXY doesn't
+ * cover, every operator shares one address, and a bare-IP key would let one
+ * attacker's 5 failures lock the whole team out). 5 failures in 15 minutes
+ * locks that key out for the remainder of the window (429 + Retry-After).
+ * In-memory on purpose: this is per-instance abuse control, not billing
+ * data; a restart resetting it is acceptable.
  *
  * originCheck — belt-and-braces CSRF defence on top of the SameSite=Strict
  * cookie: mutating requests that carry an Origin header must match the
@@ -52,7 +55,8 @@ export class LoginThrottle {
     }
   }
 
-  /** Success clears the email key (not the IP — a spraying IP stays throttled). */
+  /** Success clears the caller's own email+IP key — other keys (an attacker
+   * hammering the same email from elsewhere) stay throttled. */
   clear(key: string): void {
     this.failures.delete(key)
   }

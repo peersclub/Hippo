@@ -112,8 +112,12 @@ class RespondRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     intent: str
     symbol: str | None = None
-    # Additive: future callers pass the language detected at intent time.
-    language: Literal["en", "hi", "hinglish"] | None = None
+    # Additive: the session's answer language (SDK settings picker, forwarded
+    # by the gateway). The Literal mirrors the protocol's SettingsUplink
+    # language enum (uplinks.ts) — tests/test_answer_language.py pins parity,
+    # so a value the SDK can send is never rejected here. Scopes the answer
+    # cache; English default when absent.
+    language: Literal["en", "hi", "hinglish", "ar"] | None = None
     # Additive (Memory v1): opt-in persona from the gateway's memory read.
     persona: PersonaIn | None = None
     # Additive (Memory levels): the composed layered memory block (platform →
@@ -222,7 +226,11 @@ class AnalyzeFileRequest(BaseModel):
 
     kind: Literal["csv", "image"]
     name: str = Field(min_length=1, max_length=256)
-    language: Literal["en", "hi", "hinglish"] | None = None
+    # Full protocol language enum (uplinks.ts) — parity pinned by
+    # tests/test_answer_language.py. The gateway forwards session.language
+    # verbatim on every upload, so a narrower Literal here 500s that upload
+    # (the `ar` drift bug: Arabic sessions couldn't analyze any file).
+    language: Literal["en", "hi", "hinglish", "ar"] | None = None
     # csv:
     digest: dict[str, Any] | None = None
     # image:

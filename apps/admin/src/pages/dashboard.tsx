@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'preact/hooks'
 import { get } from '../api.js'
+import { hitRateDisplay } from '../metrics-format.js'
 import { Busy, ErrorBanner, useLoad } from '../ui.js'
 
 type Metrics = {
   gateway: {
     mau?: { month: string; research_answered: number; order_executed: number }
-    cache?: { hitRate: number | null }
+    cache?: { hits?: number; misses?: number; hitRate: number | null }
     degraded?: { active: boolean; seconds: number }
   } | null
   intelligence: {
@@ -28,9 +29,12 @@ export function DashboardPage() {
     setUpdatedAt(new Date())
   })
 
-  // Ambient auto-refresh — the panel is a monitoring surface.
+  // Ambient auto-refresh — the panel is a monitoring surface. Hidden tabs
+  // skip the poll (same guard as the Pilot/Tech pages).
   useEffect(() => {
-    const t = setInterval(() => state.retry(), REFRESH_MS)
+    const t = setInterval(() => {
+      if (!document.hidden) state.retry()
+    }, REFRESH_MS)
     return () => clearInterval(t)
   }, [state.retry])
 
@@ -42,8 +46,11 @@ export function DashboardPage() {
   const intel = metrics.intelligence
   // The intelligence-side cache stats are authoritative (Redis-backed, live
   // entry occupancy); the gateway's in-process counter is only the fallback.
-  const hitRate = intel?.cache ? intel.cache.hitRate : gw?.cache?.hitRate
-  const hitRateFromGateway = !intel?.cache && gw?.cache?.hitRate != null
+  // With no cache traffic yet the rate is null — 0% would read as failure.
+  const { rate: hitRate, fromGateway: hitRateFromGateway } = hitRateDisplay(
+    intel?.cache,
+    gw?.cache,
+  )
   const sandbox = metrics.counts.sandboxPartners
 
   return (
@@ -102,7 +109,10 @@ export function DashboardPage() {
         </div>
         <div class="stat">
           <div class="n">{hitRate == null ? '—' : `${Math.round(hitRate * 100)}%`}</div>
-          <div class="l">Answer-cache hit rate{hitRateFromGateway ? ' (gateway)' : ''}</div>
+          <div class="l">
+            Answer-cache hit rate{hitRateFromGateway ? ' (gateway)' : ''}
+            {hitRate == null ? ' · no traffic yet' : ''}
+          </div>
         </div>
         <div class="stat">
           <div class="n">{intel?.cache ? intel.cache.entries : '—'}</div>

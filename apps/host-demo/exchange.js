@@ -16,6 +16,15 @@ const qs = new URLSearchParams(location.search)
 const envHost = import.meta.env.VITE_HOST_VENUE_URL || ''
 const HOST = qs.get('host') || (envHost.startsWith('http') ? envHost : 'http://localhost:8796')
 
+// Same admin-token plumbing as settings.js — the venue /admin/* surface fails
+// closed; ?admintoken=... persists to localStorage, VITE var is the demo bake.
+const qsToken = qs.get('admintoken')
+if (qsToken) localStorage.setItem('hippo_admin_token', qsToken)
+const ADMIN_TOKEN =
+  qsToken || localStorage.getItem('hippo_admin_token') || import.meta.env.VITE_HOST_VENUE_ADMIN_TOKEN || ''
+const adminHeaders = (extra = {}) =>
+  ADMIN_TOKEN ? { ...extra, 'x-admin-token': ADMIN_TOKEN } : { ...extra }
+
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
 let pair = qs.get('pair') || PAIRS[0]
 
@@ -247,7 +256,7 @@ $('fee').onchange = (e) => patchConfig({ feeRate: +e.target.value })
 async function patchConfig(patch) {
   await fetch(`${HOST}/admin/config`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: adminHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify(patch),
   })
 }
@@ -810,7 +819,7 @@ connectSSE()
 startMarket()
 announceCapabilities() // proactive — an SDK already mounted hears it now; a later one asks
 // Load current admin config so the drawer reflects reality on first open.
-fetch(`${HOST}/admin/config`)
+fetch(`${HOST}/admin/config`, { headers: adminHeaders() })
   .then((r) => r.json())
   .then(applyConfig)
   .catch(() => {})

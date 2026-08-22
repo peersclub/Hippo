@@ -47,7 +47,14 @@ Not exhaustive — the boot-time source of truth is each service's env handling.
   never in prod), `RATE_LIMIT_MAX`/`RATE_LIMIT_WINDOW`
 - **admin / portal**: `ADMIN_JWT_SECRET` / `PORTAL_JWT_SECRET` (fail-loud in
   prod), `*_ALLOWED_ORIGIN` (CORS for the Vercel apps), `GATEWAY_URL`,
-  `INTELLIGENCE_URL` (admin), `RATE_LIMIT_*`
+  `INTELLIGENCE_URL` (admin), `MEMORY_URL` (admin — memory/persona/learned-fact
+  proxies; the service warns at boot when unset and falls back to localhost,
+  which is only right in dev), `ADMIN_BOOTSTRAP_EMAIL`/`ADMIN_BOOTSTRAP_PASSWORD`
+  (admin — first owner operator, created only while the operator table is
+  empty; hashed immediately, never logged), `TRUST_PROXY=1` (admin — honor
+  `x-forwarded-for` so login lockout keys on the real client IP; set it on any
+  deploy behind a proxy, leave unset when clients hit the service directly),
+  `RATE_LIMIT_*`
 - **seam**: `VENUE` (`sim` | `assetworks`), `ASSETWORKS_API_KEY/_SECRET/_BASE_URL`,
   `GATEWAY_URL` (callback SSRF allowlist seed)
 - **intelligence**: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` (OpenRouter —

@@ -218,6 +218,8 @@ export const OPENAPI_DOC = {
                   properties: {
                     venue: { type: 'string' },
                     instruments: { type: 'array', items: { type: 'string' } },
+                    minOrderSize: { type: 'number' },
+                    maxOrderSize: { type: 'number' },
                     capabilities: { type: 'object' },
                   },
                 },

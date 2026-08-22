@@ -490,9 +490,14 @@ export async function buildApp(opts: GatewayOptions = {}) {
   // ── implicit misunderstanding signals (admin "Understanding" + evals) ────
   // Operator data (it can carry trader text), so it sits behind internalGuard
   // like every other /internal surface. `partnerId` narrows to one partner;
-  // omitted, the route fans out over the partner registry — the pilot runs a
-  // handful of partners and each read is a single indexed query.
+  // omitted, the route fans out over the ENTIRE partner registry in bounded
+  // batches — no silent cap: `partnersScanned` in the response states exactly
+  // how many partners the read covered, so truncation is impossible to miss.
   type SignalsQuery = { partnerId?: string; limit?: string; since?: string; signal?: string }
+
+  /** Registry fan-out batch size: bounds concurrent store reads (each partner
+   * costs two queries — rows + summary) without one giant Promise.all. */
+  const SIGNALS_SCAN_BATCH = 10
 
   async function readSignals(q: SignalsQuery) {
     const limit = Math.min(
@@ -501,25 +506,41 @@ export async function buildApp(opts: GatewayOptions = {}) {
     )
     const since = Number(q.since)
     const signal = q.signal as IntentSignalKind | undefined
-    const partnerIds = q.partnerId
-      ? [q.partnerId]
-      : (await partners.list()).map((p) => p.partnerId).slice(0, 50)
-    const perPartner = await Promise.all(
-      partnerIds.map(async (partnerId) => ({
-        rows: await intentSignalStore.list({
-          partnerId,
-          limit,
-          ...(Number.isFinite(since) && since > 0 ? { since } : {}),
-          ...(signal ? { signal } : {}),
-        }),
-        summary: await intentSignalStore.summary(partnerId),
-      })),
-    )
+    const partnerIds = q.partnerId ? [q.partnerId] : (await partners.list()).map((p) => p.partnerId)
+    // The store has no cross-partner read, so this is per-partner by
+    // construction — but batched: at most SIGNALS_SCAN_BATCH partners in
+    // flight, and each per-partner list is already bounded by `limit` (so a
+    // limit=1 summary poll reads one row per partner, never a full page).
+    const perPartner: Array<{
+      rows: Awaited<ReturnType<typeof intentSignalStore.list>>
+      summary: Awaited<ReturnType<typeof intentSignalStore.summary>>
+    }> = []
+    for (let i = 0; i < partnerIds.length; i += SIGNALS_SCAN_BATCH) {
+      const batch = partnerIds.slice(i, i + SIGNALS_SCAN_BATCH)
+      perPartner.push(
+        ...(await Promise.all(
+          batch.map(async (partnerId) => ({
+            rows: await intentSignalStore.list({
+              partnerId,
+              limit,
+              ...(Number.isFinite(since) && since > 0 ? { since } : {}),
+              ...(signal ? { signal } : {}),
+            }),
+            summary: await intentSignalStore.summary(partnerId),
+          })),
+        )),
+      )
+    }
     const rows = perPartner
       .flatMap((p) => p.rows)
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, limit)
-    return { signals: rows, summary: mergeSummaries(perPartner.map((p) => p.summary)) }
+    return {
+      signals: rows,
+      summary: mergeSummaries(perPartner.map((p) => p.summary)),
+      // Additive: how many partners this read actually covered.
+      partnersScanned: partnerIds.length,
+    }
   }
 
   app.get<{ Querystring: SignalsQuery }>('/internal/intent-signals', async (req, reply) => {
@@ -584,6 +605,140 @@ export async function buildApp(opts: GatewayOptions = {}) {
   app.delete<{ Params: { id: string } }>('/internal/sessions/:id', async (req, reply) => {
     if (!internalGuard(req, reply)) return reply
     return { revoked: sessions.revoke(req.params.id) }
+  })
+
+  // ── operator visibility: alerts / shares / identities ────────────────────
+  // The operator previously had ZERO read surface over these stores. All three
+  // reads require an explicit partnerId (they are per-tenant views, never a
+  // cross-tenant dump) and sit behind internalGuard like every /internal route.
+
+  /** GET /internal/alerts?partnerId= — a partner's alerts across all its
+   * users, newest first, bounded by the store (ALERTS_LIST_CAP default). */
+  app.get<{ Querystring: { partnerId?: string } }>('/internal/alerts', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const { partnerId } = req.query
+    if (!partnerId) {
+      reply.code(400)
+      return { error: 'partnerId required' }
+    }
+    return { alerts: await alertStore.listByPartner(partnerId) }
+  })
+
+  /** POST /internal/alerts/:id/cancel {partnerId, userKey} — operator cancel.
+   * The store's cancel is ownership-scoped (id + partnerId + userKey), so the
+   * caller passes the owner fields it read from GET /internal/alerts. Unknown/
+   * foreign/already-terminal ids return {cancelled:false} — idempotent, never
+   * an error (same law as the conversational cancel). */
+  app.post<{ Params: { id: string } }>('/internal/alerts/:id/cancel', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const body = (req.body ?? {}) as { partnerId?: unknown; userKey?: unknown }
+    if (
+      typeof body.partnerId !== 'string' ||
+      body.partnerId.length === 0 ||
+      typeof body.userKey !== 'string' ||
+      body.userKey.length === 0
+    ) {
+      reply.code(400)
+      return { error: 'partnerId and userKey required' }
+    }
+    const cancelled = await alertStore.cancel(req.params.id, body.partnerId, body.userKey)
+    return { cancelled: cancelled !== null, ...(cancelled ? { alert: cancelled } : {}) }
+  })
+
+  /** GET /internal/shares?partnerId= — a partner's LIVE share links (expired
+   * rows never appear). DELETE /internal/shares/:id is the kill switch for a
+   * leaked link: the id 404s on the public /s/:id page from the next open. */
+  app.get<{ Querystring: { partnerId?: string } }>('/internal/shares', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const { partnerId } = req.query
+    if (!partnerId) {
+      reply.code(400)
+      return { error: 'partnerId required' }
+    }
+    return { shares: shares.list(partnerId) }
+  })
+
+  app.delete<{ Params: { id: string } }>('/internal/shares/:id', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    return { deleted: shares.delete(req.params.id) }
+  })
+
+  /** GET /internal/identities?partnerId= — a partner's in-panel identities,
+   * most recently seen first, bounded by the store (IDENTITIES_LIST_CAP
+   * default). pinHash never leaves the store surface — stripped here. */
+  app.get<{ Querystring: { partnerId?: string } }>('/internal/identities', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const { partnerId } = req.query
+    if (!partnerId) {
+      reply.code(400)
+      return { error: 'partnerId required' }
+    }
+    const rows = await identities.listByPartner(partnerId)
+    return { identities: rows.map(({ pinHash: _pinHash, ...rest }) => rest) }
+  })
+
+  // ── operator user purge (right-to-erasure, gateway-side stores) ──────────
+  // POST /internal/user-purge {partnerId, userKey}: hard-delete one user's
+  // gateway-side data — intent signals (raw trader text), upload records,
+  // alerts (every state) and the in-panel identity + its links. Per-store
+  // results are reported honestly: a rows-removed count, 'unsupported' when
+  // an injected store lacks the delete method, 'failed' when the delete threw
+  // (the other stores still purge — one bad store never blocks the rest).
+  // Memory-service data (persona, notes, learned facts) is purged via the
+  // memory service's own DELETE routes, not from here. Durable mau_events
+  // rows are DELIBERATELY retained — they are the billing record (a count,
+  // not content) — and the report says so rather than staying silent.
+  app.post('/internal/user-purge', async (req, reply) => {
+    if (!internalGuard(req, reply)) return reply
+    const body = (req.body ?? {}) as { partnerId?: unknown; userKey?: unknown }
+    if (
+      typeof body.partnerId !== 'string' ||
+      body.partnerId.length === 0 ||
+      typeof body.userKey !== 'string' ||
+      body.userKey.length === 0
+    ) {
+      reply.code(400)
+      return { error: 'partnerId and userKey required' }
+    }
+    const { partnerId, userKey: targetKey } = body
+    // Identity rows are keyed by usernameLower, not the effective user key.
+    // An identity-bound key is `id:<username_lower>` (orchestrator userKey()),
+    // so strip the prefix; a bare key still purges a same-named identity.
+    const usernameLower = (
+      targetKey.startsWith('id:') ? targetKey.slice(3) : targetKey
+    ).toLowerCase()
+    const deleted: Record<string, number | 'unsupported' | 'failed'> = {}
+    async function purgeStep(name: string, method: unknown, call: () => Promise<number>) {
+      if (typeof method !== 'function') {
+        deleted[name] = 'unsupported'
+        return
+      }
+      try {
+        deleted[name] = await call()
+      } catch (err) {
+        app.log.error({ err, store: name, partnerId }, 'user-purge: store delete failed')
+        deleted[name] = 'failed'
+      }
+    }
+    await purgeStep('intentSignals', intentSignalStore.deleteByUser, () =>
+      intentSignalStore.deleteByUser(partnerId, targetKey),
+    )
+    await purgeStep('uploadedFiles', uploadedFiles.deleteByUser, () =>
+      uploadedFiles.deleteByUser(partnerId, targetKey),
+    )
+    await purgeStep('alerts', alertStore.deleteByUser, () =>
+      alertStore.deleteByUser(partnerId, targetKey),
+    )
+    await purgeStep('identities', identities.deleteByUser, () =>
+      identities.deleteByUser(partnerId, usernameLower),
+    )
+    // Billing counts survive erasure by design; name it so the report is
+    // complete rather than silently omitting a store that holds the key.
+    const report: Record<string, number | 'unsupported' | 'failed' | 'retained'> = {
+      ...deleted,
+      mauEvents: 'retained',
+    }
+    return { partnerId, userKey: targetKey, deleted: report }
   })
 
   return {

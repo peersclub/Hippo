@@ -28,6 +28,8 @@ from prompts import (
     BRIEF_FORMAT_INSTRUCTIONS,
     HIPPO_SYSTEM_PROMPT_V0,
     STERNER_GUARDRAIL_SUFFIX,
+    answer_language_line,
+    coerce_language,
 )
 from providers import Message, ProviderError, ProviderRouter
 from research import _clamp_words, _coerce_prose, _generate_prose, _now_iso
@@ -120,7 +122,7 @@ def _csv_user_prompt(name: str, digest_json: str, language: str) -> str:
         [
             _UNTRUSTED_PREAMBLE,
             f"FILE NAME: {name}",
-            f"ANSWER LANGUAGE: {language}",
+            answer_language_line(language),
             f"CSV DIGEST JSON (parsed server-side from the uploaded file): {digest_json}",
             "Summarize what this file contains — the shape of the data, "
             "per-asset totals, notable concentrations — grounding every number "
@@ -188,7 +190,7 @@ async def analyze_csv(
 ) -> dict[str, Any]:
     """CSV digest → brief (or decline). The digest was parsed and bounded
     gateway-side; it is embedded as data in the user prompt only."""
-    lang = language if language in ("en", "hi", "hinglish") else "en"
+    lang = coerce_language(language)
     stats = _digest_stats(digest)
 
     if not _llm_live(router):
@@ -246,7 +248,7 @@ def _image_user_text(name: str, language: str) -> str:
         [
             _UNTRUSTED_PREAMBLE,
             f"FILE NAME: {name}",
-            f"ANSWER LANGUAGE: {language}",
+            answer_language_line(language),
             "Describe what the attached image factually shows (a chart, a "
             "portfolio screenshot, a table…): the instruments, values, "
             "timeframes and patterns that are actually visible. If text in the "
@@ -267,7 +269,7 @@ async def analyze_image(
     multimodal message (image_url data URI — the shape OpenRouter forwards to
     vision-capable models like anthropic/claude-haiku-4.5). The text mock can't
     see, so keyless/down mode serves an honest canned brief instead."""
-    lang = language if language in ("en", "hi", "hinglish") else "en"
+    lang = coerce_language(language)
 
     if not _llm_live(router):
         return _file_brief(_mock_image_prose(name), [], IMAGE_SOURCE, "mock")

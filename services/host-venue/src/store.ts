@@ -175,6 +175,24 @@ export class VenueStore {
       throw new Error(`above maximum order size (${this.config.maxOrderSize})`)
     if (req.market === 'perp' && (req.leverage ?? 1) > this.config.maxLeverage)
       throw new Error(`leverage exceeds venue max (${this.config.maxLeverage}×)`)
+    // Advertised marginModes are ENFORCED, not decoration: a mode the venue
+    // doesn't offer is rejected in plain words, never silently rewritten.
+    if (req.market === 'perp') {
+      const mode = req.marginMode ?? 'isolated'
+      if (!this.config.marginModes.includes(mode))
+        throw new Error(
+          `${mode} margin is not offered on this venue (offered: ${this.config.marginModes.join(', ') || 'none'})`,
+        )
+    }
+    // Same for the instrument list: a non-empty config.instruments is the
+    // venue's tradable universe. Empty = unrestricted (dev convenience).
+    if (this.config.instruments.length > 0) {
+      const symbol = req.pairName.replace('-', '/')
+      if (!this.config.instruments.includes(symbol))
+        throw new Error(
+          `${symbol} is not traded on this venue (tradable: ${this.config.instruments.join(', ')})`,
+        )
+    }
     if (this.config.rejectRate > 0 && this.rand() < this.config.rejectRate)
       throw new Error('order rejected by the venue (simulated)')
 

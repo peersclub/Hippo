@@ -69,8 +69,14 @@ export class Telemetry {
   private readonly cacheRequests: Counter
   private readonly adviceTurns: Counter
   private readonly intentClassifications: Counter
+  /** Clock override (tests drive month rollover). Defaults to wall time. */
+  private readonly clock: () => Date
+  /** The month the MAU sets were last pruned to — see pruneMau(). */
+  private mauMonth: string
 
-  constructor(otel: TelemetryOtel = {}) {
+  constructor(otel: TelemetryOtel = {}, clock: () => Date = () => new Date()) {
+    this.clock = clock
+    this.mauMonth = this.month()
     const meter = otel.meter ?? metrics.getMeter(INSTRUMENTATION_NAME)
     this.tracer = otel.tracer ?? trace.getTracer(INSTRUMENTATION_NAME)
     this.intentDuration = meter.createHistogram('hippo.intent.classification.duration', {
@@ -162,8 +168,32 @@ export class Telemetry {
     this.uplinks[kind] = (this.uplinks[kind] ?? 0) + 1
   }
 
+  /** Current calendar month per the injected clock. */
+  private month(): string {
+    return monthKey(this.clock())
+  }
+
+  /** Lazily drop last month's keys from the three MAU sets on month rollover —
+   * mirrors pruneLoad(). Without this the sets accumulate `...:{month}` keys
+   * forever, and partnerMau() (session-mint hot path) plus snapshot() full-scan
+   * them. Called from every MAU read/write, no-op within the same month. */
+  private pruneMau(month: string): void {
+    // Strictly-forward guard: a clock step BACKWARDS across the boundary
+    // (NTP correction just after rollover) must not wipe the current month's
+    // quota state — YYYY-MM compares lexicographically, so > is monotonic.
+    if (month <= this.mauMonth) return
+    for (const set of [this.researchMau, this.orderMau, this.partnerMauSet]) {
+      for (const k of set) {
+        if (!k.endsWith(`:${month}`)) set.delete(k)
+      }
+    }
+    this.mauMonth = month
+  }
+
   recordResearchAnswered(userKey: string): void {
-    this.researchMau.add(`${userKey}:${monthKey()}`)
+    const month = this.month()
+    this.pruneMau(month)
+    this.researchMau.add(`${userKey}:${month}`)
   }
 
   // ── partner-scoped MAU (plan quota enforcement) ──────────────────────────
@@ -172,16 +202,21 @@ export class Telemetry {
   private partnerMauSet = new Set<string>()
 
   recordPartnerUser(partnerId: string, userKey: string): void {
-    this.partnerMauSet.add(`${partnerId}\u0000${userKey}:${monthKey()}`)
+    const month = this.month()
+    this.pruneMau(month)
+    this.partnerMauSet.add(`${partnerId}\u0000${userKey}:${month}`)
   }
 
   hasPartnerUser(partnerId: string, userKey: string): boolean {
-    return this.partnerMauSet.has(`${partnerId}\u0000${userKey}:${monthKey()}`)
+    const month = this.month()
+    this.pruneMau(month)
+    return this.partnerMauSet.has(`${partnerId}\u0000${userKey}:${month}`)
   }
 
   /** Distinct users seen for a partner in the current calendar month. */
   partnerMau(partnerId: string): number {
-    const month = monthKey()
+    const month = this.month()
+    this.pruneMau(month)
     let n = 0
     for (const k of this.partnerMauSet) {
       if (k.startsWith(`${partnerId}\u0000`) && k.endsWith(`:${month}`)) n += 1
@@ -191,6 +226,7 @@ export class Telemetry {
 
   /** Seed the in-process quota set from the durable MauStore (boot). */
   hydratePartnerMau(entries: Array<{ partnerId: string; userKey: string }>, month: string): void {
+    this.pruneMau(this.month())
     for (const e of entries) {
       this.partnerMauSet.add(`${e.partnerId}\u0000${e.userKey}:${month}`)
     }
@@ -198,7 +234,8 @@ export class Telemetry {
 
   /** Current-month MAU per partner — the admin panel's quota view. */
   mauByPartner(): Record<string, number> {
-    const month = monthKey()
+    const month = this.month()
+    this.pruneMau(month)
     const out: Record<string, number> = {}
     for (const k of this.partnerMauSet) {
       if (!k.endsWith(`:${month}`)) continue
@@ -209,7 +246,9 @@ export class Telemetry {
   }
 
   recordOrderExecuted(userKey: string): void {
-    this.orderMau.add(`${userKey}:${monthKey()}`)
+    const month = this.month()
+    this.pruneMau(month)
+    this.orderMau.add(`${userKey}:${month}`)
   }
 
   /** Cache-hit passthrough from the intelligence service's `cached` flag —
@@ -234,7 +273,8 @@ export class Telemetry {
   }
 
   snapshot(): Record<string, unknown> {
-    const month = monthKey()
+    const month = this.month()
+    this.pruneMau(month)
     const countMonth = (set: Set<string>) => [...set].filter((k) => k.endsWith(`:${month}`)).length
     const cacheTotal = this.cacheHits + this.cacheMisses
     const liveDegradedMs = this.degradedSince === null ? 0 : Date.now() - this.degradedSince

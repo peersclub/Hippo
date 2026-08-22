@@ -391,3 +391,44 @@ describe('InMemoryUploadedFileStore', () => {
     expect(capped[49]?.fileId).toBe('u_10')
   })
 })
+
+describe('InMemoryUserIdentityStore listByPartner', () => {
+  it('lists a partner’s identities, most recently seen first, bounded', async () => {
+    const { InMemoryUserIdentityStore } = await import('../src/user-identity-store.js')
+    const store = new InMemoryUserIdentityStore()
+    await store.create('p1', 'Alice', 'salt:key')
+    await store.create('p1', 'Bob', 'salt:key')
+    await store.create('p2', 'Carol', 'salt:key')
+    await store.touch('p1', 'alice', Date.now() + 60_000) // most recently seen
+
+    const rows = await store.listByPartner('p1')
+    expect(rows.map((i) => i.usernameLower)).toEqual(['alice', 'bob'])
+    expect((await store.listByPartner('p1', 1)).map((i) => i.usernameLower)).toEqual(['alice'])
+    expect(await store.listByPartner('nobody')).toEqual([])
+  })
+})
+
+describe('migration 019_usage_indexes.sql', () => {
+  const MIGRATIONS_DIR = new URL('../migrations', import.meta.url).pathname
+
+  it('is the next migration in filename order', async () => {
+    const { readdirSync } = await import('node:fs')
+    const files = readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+    expect(files).toContain('019_usage_indexes.sql')
+    expect(files.indexOf('019_usage_indexes.sql')).toBe(files.indexOf('018_intent_signals.sql') + 1)
+  })
+
+  it('declares the month and last_seen reporting indexes', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const sql = readFileSync(join(MIGRATIONS_DIR, '019_usage_indexes.sql'), 'utf8')
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS mau_events_month_idx ON mau_events (month)')
+    expect(sql).toContain(
+      'CREATE INDEX IF NOT EXISTS users_last_seen_idx ON users (last_seen DESC)',
+    )
+    // Indexes only — a usage migration must never mutate table shapes.
+    expect(sql).not.toMatch(/CREATE TABLE|ALTER TABLE|DROP/i)
+  })
+})

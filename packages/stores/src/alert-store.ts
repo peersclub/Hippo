@@ -51,6 +51,13 @@ export interface AlertStore {
   listArmed(): Promise<Alert[]>
   /** One user's alerts, newest first, bounded (default ALERTS_LIST_CAP). */
   listByUser(partnerId: string, userKey: string, limit?: number): Promise<Alert[]>
+  /** A partner's alerts across all its users, newest first, bounded (default
+   * ALERTS_LIST_CAP) — the operator read. */
+  listByPartner(partnerId: string, limit?: number): Promise<Alert[]>
+  /** GDPR purge: hard-delete one user's alerts in EVERY state — distinct from
+   * cancel, which flips armed→cancelled and keeps the row. Returns rows
+   * removed. */
+  deleteByUser(partnerId: string, userKey: string): Promise<number>
   /** armed → triggered. Returns false when the alert wasn't armed (already
    * triggered/cancelled, or unknown) — the caller must not emit twice. */
   markTriggered(id: string, triggeredAt?: number): Promise<boolean>
@@ -101,6 +108,25 @@ export class InMemoryAlertStore implements AlertStore {
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, limit)
       .map((a) => ({ ...a }))
+  }
+
+  async listByPartner(partnerId: string, limit = ALERTS_LIST_CAP): Promise<Alert[]> {
+    return [...this.alerts.values()]
+      .filter((a) => a.partnerId === partnerId)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+      .map((a) => ({ ...a }))
+  }
+
+  async deleteByUser(partnerId: string, userKey: string): Promise<number> {
+    let n = 0
+    for (const [id, a] of this.alerts) {
+      if (a.partnerId === partnerId && a.userKey === userKey) {
+        this.alerts.delete(id)
+        n += 1
+      }
+    }
+    return n
   }
 
   async markTriggered(id: string, triggeredAt = Date.now()): Promise<boolean> {
@@ -184,6 +210,25 @@ export class PostgresAlertStore implements AlertStore {
       [partnerId, userKey, limit],
     )
     return res.rows.map(rowToAlert)
+  }
+
+  async listByPartner(partnerId: string, limit = ALERTS_LIST_CAP): Promise<Alert[]> {
+    const res = await this.pool.query(
+      `SELECT * FROM alerts
+       WHERE partner_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [partnerId, limit],
+    )
+    return res.rows.map(rowToAlert)
+  }
+
+  async deleteByUser(partnerId: string, userKey: string): Promise<number> {
+    const res = await this.pool.query(
+      'DELETE FROM alerts WHERE partner_id = $1 AND user_key = $2',
+      [partnerId, userKey],
+    )
+    return res.rowCount ?? 0
   }
 
   async markTriggered(id: string, triggeredAt = Date.now()): Promise<boolean> {

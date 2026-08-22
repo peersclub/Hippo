@@ -22,6 +22,8 @@ from prompts import (
     HIPPO_SYSTEM_PROMPT_V0,
     MEMORY_CONTEXT_PREFIX,
     STERNER_GUARDRAIL_SUFFIX,
+    answer_language_line,
+    coerce_language,
 )
 from providers import Message, MockProvider, ProviderError, ProviderRouter
 from textutil import JsonProseExtractor, extract_json_object
@@ -69,7 +71,9 @@ def _brief_user_prompt(
     language: str,
     experience_level: str | None = None,
 ) -> str:
-    lines = [f"QUESTION: {text}", f"ANSWER LANGUAGE: {language}"]
+    # Spelled-out directive, not the bare wire code — "hinglish"/"ar" alone
+    # were too thin an instruction and answers stayed English.
+    lines = [f"QUESTION: {text}", answer_language_line(language)]
     if snapshot is None and experience_level in _DEPTH_LINES:
         lines.append(_DEPTH_LINES[experience_level])
     if snapshot is not None:
@@ -250,6 +254,10 @@ _DECLINE_COPY: dict[str, dict[str, str]] = {
         "message": "मैं आपको खरीदने या बेचने की सलाह नहीं दे सकता — हिप्पो कभी यह कॉल नहीं करता।",
         "pivot": "{sym} की अभी की स्थिति",
     },
+    "ar": {
+        "message": "لا أستطيع أن أخبرك بالشراء أو البيع — هذا قرار لا يتخذه هيبو أبدًا.",
+        "pivot": "وضع {sym} الآن",
+    },
 }
 
 
@@ -381,7 +389,7 @@ async def respond(
 ) -> dict[str, Any]:
     """Handle POST /v1/respond. Always returns a brief or decline dict."""
     asset = (symbol or extract_symbol(text)).split("/")[0].upper()
-    lang = language if language in ("en", "hi", "hinglish") else "en"
+    lang = coerce_language(language)
 
     if intent == "advice":
         record_respond_outcome("decline")  # advice-decline rate
@@ -463,7 +471,7 @@ async def respond_stream(
     budget path). The model never contributes to meta — numbers are retrieval.
     """
     asset = (symbol or extract_symbol(text)).split("/")[0].upper()
-    lang = language if language in ("en", "hi", "hinglish") else "en"
+    lang = coerce_language(language)
 
     if intent == "advice":
         record_respond_outcome("decline")  # advice-decline rate

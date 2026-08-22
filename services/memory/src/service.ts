@@ -178,7 +178,11 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     const { partnerId } = req.query
     if (!partnerId) return reply.code(400).send({ error: 'partnerId required' })
     const deleted = await store.deleteByPartner(partnerId)
-    return { deleted }
+    // Offboarding must not orphan the partner's OTHER memory: the user-scope
+    // learned facts and freeform user notes go with the personas.
+    const facts = await scopeStore.deleteLearnedFactsByPartner(partnerId)
+    const notes = await scopeStore.deleteUserNotesByPartner(partnerId)
+    return { deleted, facts, notes }
   })
 
   // ── scope-memory documents (global / host / user note) ────────────────
@@ -219,6 +223,11 @@ export function buildService(opts: ServiceOptions = {}): FastifyInstance {
     const body = readBody(req.body)
     if (body === null) return reply.code(400).send({ error: 'body (string) required' })
     return scopeStore.setUserNote(req.params.partnerId, req.params.userId, body, Date.now())
+  })
+  app.delete<{ Params: Params }>('/v1/scope/user/:partnerId/:userId', async (req, reply) => {
+    if (!requireInternalToken(req, reply)) return reply
+    const deleted = await scopeStore.deleteUserNote(req.params.partnerId, req.params.userId)
+    return { deleted }
   })
 
   // Session composed-memory snapshot — the gateway writes what it sent; the

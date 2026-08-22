@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { get } from '../api.js'
+import { hitRateDisplay } from '../metrics-format.js'
 import { Busy, ErrorBanner, useLoad } from '../ui.js'
 
 /**
@@ -7,8 +8,9 @@ import { Busy, ErrorBanner, useLoad } from '../ui.js'
  * partner, queries/MAU, answer-cache hit rate, advice-decline rate, a 24h load
  * curve, and a cost-per-MAU ESTIMATOR (assumptions editable, clearly labeled —
  * real token accounting is a follow-up). Counter provenance is mixed and the
- * page says so: MAU is durable (calendar month), everything else is the
- * gateway's in-process memory since its last boot.
+ * page says so: the billable mau_events store is durable, but the live MAU
+ * counter rendered here is the gateway's in-process set (rebuilt from the
+ * current month's traffic after a restart) — like everything else since boot.
  */
 
 type LoadBucket = { hourStartMs: number; uplinks: number; queries: number }
@@ -358,7 +360,8 @@ export function PilotPage() {
   const misses = gw?.cache?.misses ?? 0
   // Intelligence-side cache stats are authoritative (Redis-backed); the
   // gateway counter is the since-boot fallback — same rule as the Dashboard.
-  const hitRate = intel?.cache ? intel.cache.hitRate : gw?.cache?.hitRate
+  // No cache traffic yet renders as an em-dash, never as a 0% rate.
+  const { rate: hitRate } = hitRateDisplay(intel?.cache, gw?.cache)
   const cost = estimateCost(assume, queries, misses)
   const partnerRows = metrics.partnerMau ?? []
   // Measured usage wins whenever the intelligence service metered anything;
@@ -376,8 +379,9 @@ export function PilotPage() {
         </span>
       </div>
       <p class="dim">
-        The rate-card numbers. MAU is durable (calendar month); every other counter is the gateway's
-        in-process memory <b>since its last boot</b>.
+        The rate-card numbers. Billable MAU lives in the durable mau_events store; the live counter
+        shown here is in-process and rebuilds from the current month's traffic after a gateway
+        restart — every other counter is the gateway's in-process memory <b>since its last boot</b>.
       </p>
 
       <div class="cards">
@@ -391,7 +395,7 @@ export function PilotPage() {
         </div>
         <div class="stat">
           <div class="n">{pct(hitRate)}</div>
-          <div class="l">Answer-cache hit rate</div>
+          <div class="l">Answer-cache hit rate{hitRate == null ? ' · no traffic yet' : ''}</div>
         </div>
         <div class="stat">
           <div class="n">{pct(gw?.advice?.declineRate)}</div>

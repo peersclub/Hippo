@@ -52,6 +52,15 @@ if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_JWT_SECRET) {
 }
 const jwtSecret = process.env.ADMIN_JWT_SECRET ?? randomBytes(32).toString('hex')
 
+// Fail loud, not fatal: without MEMORY_URL every memory proxy silently aims
+// at localhost:8792 — right in dev, wrong in any container/prod deploy (the
+// same misconfiguration class INTELLIGENCE_URL shipped with once).
+if (!process.env.MEMORY_URL) {
+  console.warn(
+    'MEMORY_URL is not set — memory proxies default to http://localhost:8792 (fine for local dev, wrong in prod)',
+  )
+}
+
 // Bootstrap the first operator when the table is empty.
 if ((await operators.count()) === 0) {
   const email = process.env.ADMIN_BOOTSTRAP_EMAIL

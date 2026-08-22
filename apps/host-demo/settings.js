@@ -10,6 +10,17 @@ const qs = new URLSearchParams(location.search)
 const envHost = import.meta.env.VITE_HOST_VENUE_URL || ''
 const HOST = qs.get('host') || (envHost.startsWith('http') ? envHost : 'http://localhost:8796')
 
+// Admin token for the venue console. The venue's /admin/* surface fails
+// closed without ASSETWORKS_ADMIN_TOKEN; the console presents it as
+// x-admin-token. Set once via ?admintoken=... (persisted to localStorage) or
+// baked at build time via VITE_HOST_VENUE_ADMIN_TOKEN (demo sandbox only).
+const qsToken = qs.get('admintoken')
+if (qsToken) localStorage.setItem('hippo_admin_token', qsToken)
+const ADMIN_TOKEN =
+  qsToken || localStorage.getItem('hippo_admin_token') || import.meta.env.VITE_HOST_VENUE_ADMIN_TOKEN || ''
+const adminHeaders = (extra = {}) =>
+  ADMIN_TOKEN ? { ...extra, 'x-admin-token': ADMIN_TOKEN } : { ...extra }
+
 const $ = (id) => document.getElementById(id)
 const fmt = (n, d = 2) =>
   Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
@@ -96,7 +107,7 @@ let allInstruments = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'
 async function patchConfig(patch, savedId) {
   const res = await fetch(`${HOST}/admin/config`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: adminHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify(patch),
   })
   if (res.ok) {
@@ -160,7 +171,7 @@ for (const b of $('c-marginModes').children)
       : [...cur, b.dataset.v]
     patchConfig({ marginModes: next.length ? next : ['isolated'] }, 's-caps')
   }
-fetch(`${HOST}/admin/config`)
+fetch(`${HOST}/admin/config`, { headers: adminHeaders() })
   .then((r) => r.json())
   .then(applyConfig)
   .catch(() => {})
@@ -170,7 +181,7 @@ fetch(`${HOST}/admin/config`)
 // the live flag on load; a failed flip reverts the checkbox instead of lying.
 async function loadDegraded() {
   try {
-    const r = await (await fetch(`${HOST}/admin/gateway/degraded`)).json()
+    const r = await (await fetch(`${HOST}/admin/gateway/degraded`, { headers: adminHeaders() })).json()
     if (typeof r.forced === 'boolean') $('g-degraded').checked = r.forced
   } catch {}
 }
@@ -178,7 +189,7 @@ $('g-degraded').onchange = async (e) => {
   try {
     const r = await fetch(`${HOST}/admin/gateway/degraded`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: adminHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify({ forced: e.target.checked }),
     })
     if (!r.ok) throw new Error(String(r.status))
@@ -193,7 +204,7 @@ loadDegraded()
 // ══ Hippo AI (host-venue proxy → intelligence) ═══════════════════════════════
 async function loadAI() {
   try {
-    const m = await (await fetch(`${HOST}/admin/ai`)).json()
+    const m = await (await fetch(`${HOST}/admin/ai`, { headers: adminHeaders() })).json()
     if (m.error) throw new Error(m.error)
     $('ai-cur').textContent = m.current
     const badge = $('ai-mode')
@@ -219,7 +230,7 @@ async function loadAI() {
 const aiPost = async (path, body) => {
   const r = await fetch(`${HOST}/admin/ai/${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: adminHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify(body),
   })
   if (r.ok) {

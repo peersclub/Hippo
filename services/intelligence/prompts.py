@@ -246,6 +246,53 @@ EXTRACT_RETRY_SUFFIX = (
     'object, starting with \'{"facts":\' and ending with \'}\'.'
 )
 
+# --- Answer language (SDK settings picker) ------------------------------------
+#
+# LANGUAGE PARITY (August 2026): SUPPORTED_LANGUAGES is the service-side half
+# of a contract whose other half is the protocol's SettingsUplink language enum
+# (packages/protocol/src/uplinks.ts). The SDK offers exactly that enum and the
+# gateway forwards the session's value verbatim; a value admitted there but
+# rejected here fails the turn (the `ar` drift bug: analyze-file validated
+# language against a three-value Literal, so every Arabic session's upload
+# 500'd at the gateway). tests/test_answer_language.py asserts the protocol
+# enum, this tuple and both request Literals in main.py are EQUAL — the same
+# drift-guard pattern as the intent-taxonomy parity tests.
+SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "hi", "hinglish", "ar")
+
+# One explicit directive per wire code. The codes alone are too thin for the
+# model ("hinglish" especially), so each maps to a spelled-out instruction;
+# unknown or absent values fall back to English.
+_ANSWER_LANGUAGE_LINES: dict[str, str] = {
+    "en": "ANSWER LANGUAGE: English.",
+    "hi": (
+        "ANSWER LANGUAGE: Hindi (hi), in Devanagari script. Write the "
+        "headline, paragraphs and followups entirely in Hindi."
+    ),
+    "hinglish": (
+        "ANSWER LANGUAGE: Hinglish (hi-Latn) — conversational Hindi written "
+        "in Latin script, mixing in everyday English trading terms, the way "
+        "Indian traders text. Never use Devanagari script."
+    ),
+    "ar": (
+        "ANSWER LANGUAGE: Arabic (ar), in Arabic script. Write the headline, "
+        "paragraphs and followups entirely in Arabic."
+    ),
+}
+
+
+def coerce_language(language: str | None) -> str:
+    """Clamp a wire language to the supported set — English default. Keeps
+    every downstream consumer (prompt line, decline copy, CACHE SCOPE) on one
+    canonical value, so a language can never silently collapse into another's
+    cache entry."""
+    return language if language in SUPPORTED_LANGUAGES else "en"
+
+
+def answer_language_line(language: str | None) -> str:
+    """The answer-language prompt directive for a wire language code."""
+    return _ANSWER_LANGUAGE_LINES.get(language or "en", _ANSWER_LANGUAGE_LINES["en"])
+
+
 # --- Research brief generation (strict JSON out) ------------------------------
 BRIEF_FORMAT_INSTRUCTIONS = """\
 Respond with STRICT JSON only — one object, no prose, no markdown fences:

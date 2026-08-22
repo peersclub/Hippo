@@ -7,6 +7,9 @@
  */
 import type pg from 'pg'
 
+/** The list API's bound — an operator review surface, not an export. */
+export const IDENTITIES_LIST_CAP = 200
+
 export type UserIdentity = {
   partnerId: string
   /** Case-insensitive uniqueness key — always username.toLowerCase(). */
@@ -30,6 +33,13 @@ export interface UserIdentityStore {
   unlink(partnerId: string, sub: string): Promise<void>
   /** The identity linked to this sub, or undefined when none/orphaned. */
   linkedIdentity(partnerId: string, sub: string): Promise<UserIdentity | undefined>
+  /** A partner's identities, most recently seen first, bounded (default
+   * IDENTITIES_LIST_CAP) — the operator read. */
+  listByPartner(partnerId: string, limit?: number): Promise<UserIdentity[]>
+  /** GDPR purge: hard-delete one identity AND every sub→identity link pointing
+   * at it, so no browser can auto-restore the erased identity. Returns rows
+   * removed (identity + links). */
+  deleteByUser(partnerId: string, usernameLower: string): Promise<number>
 }
 
 const key = (partnerId: string, id: string) => `${partnerId}:${id}`
@@ -74,6 +84,26 @@ export class InMemoryUserIdentityStore implements UserIdentityStore {
   async linkedIdentity(partnerId: string, sub: string): Promise<UserIdentity | undefined> {
     const usernameLower = this.links.get(key(partnerId, sub))
     return usernameLower ? this.identities.get(key(partnerId, usernameLower)) : undefined
+  }
+
+  async listByPartner(partnerId: string, limit = IDENTITIES_LIST_CAP): Promise<UserIdentity[]> {
+    return [...this.identities.values()]
+      .filter((i) => i.partnerId === partnerId)
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+      .slice(0, limit)
+      .map((i) => ({ ...i }))
+  }
+
+  async deleteByUser(partnerId: string, usernameLower: string): Promise<number> {
+    let n = 0
+    for (const [k, linked] of this.links) {
+      if (k.startsWith(`${partnerId}:`) && linked === usernameLower) {
+        this.links.delete(k)
+        n += 1
+      }
+    }
+    if (this.identities.delete(key(partnerId, usernameLower))) n += 1
+    return n
   }
 }
 
@@ -145,5 +175,30 @@ export class PostgresUserIdentityStore implements UserIdentityStore {
       [partnerId, sub],
     )
     return res.rows[0] ? rowToIdentity(res.rows[0]) : undefined
+  }
+
+  async listByPartner(partnerId: string, limit = IDENTITIES_LIST_CAP): Promise<UserIdentity[]> {
+    const res = await this.pool.query(
+      `SELECT * FROM user_identities
+       WHERE partner_id = $1
+       ORDER BY last_seen_at DESC
+       LIMIT $2`,
+      [partnerId, limit],
+    )
+    return res.rows.map(rowToIdentity)
+  }
+
+  async deleteByUser(partnerId: string, usernameLower: string): Promise<number> {
+    // Links first, then the identity — the same erase is complete either way,
+    // but this order never leaves a link pointing at a deleted identity.
+    const links = await this.pool.query(
+      'DELETE FROM user_identity_links WHERE partner_id = $1 AND username_lower = $2',
+      [partnerId, usernameLower],
+    )
+    const identity = await this.pool.query(
+      'DELETE FROM user_identities WHERE partner_id = $1 AND username_lower = $2',
+      [partnerId, usernameLower],
+    )
+    return (links.rowCount ?? 0) + (identity.rowCount ?? 0)
   }
 }

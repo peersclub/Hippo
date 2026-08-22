@@ -41,6 +41,9 @@ export interface UploadedFileStore {
   markFailed(partnerId: string, fileId: string, reason: string): Promise<void>
   /** One user's files, newest first, capped (default UPLOADED_FILES_LIST_CAP). */
   listByUser(partnerId: string, userKey: string, limit?: number): Promise<UploadedFile[]>
+  /** GDPR purge: hard-delete one user's upload records (filenames + analysis
+   * excerpts are personal data even without the bytes). Returns rows removed. */
+  deleteByUser(partnerId: string, userKey: string): Promise<number>
 }
 
 const key = (partnerId: string, fileId: string) => `${partnerId}:${fileId}`
@@ -80,6 +83,17 @@ export class InMemoryUploadedFileStore implements UploadedFileStore {
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, limit)
       .map((f) => ({ ...f }))
+  }
+
+  async deleteByUser(partnerId: string, userKey: string): Promise<number> {
+    let n = 0
+    for (const [k, f] of this.files) {
+      if (f.partnerId === partnerId && f.userKey === userKey) {
+        this.files.delete(k)
+        n += 1
+      }
+    }
+    return n
   }
 }
 
@@ -155,5 +169,13 @@ export class PostgresUploadedFileStore implements UploadedFileStore {
       [partnerId, userKey, limit],
     )
     return res.rows.map(rowToFile)
+  }
+
+  async deleteByUser(partnerId: string, userKey: string): Promise<number> {
+    const res = await this.pool.query(
+      'DELETE FROM uploaded_files WHERE partner_id = $1 AND user_key = $2',
+      [partnerId, userKey],
+    )
+    return res.rowCount ?? 0
   }
 }

@@ -6,7 +6,9 @@
  *   GET/POST         /v1/partners            PATCH /v1/partners/:id
  *   POST /v1/partners/:id/suspend|activate|plan
  *   GET/POST         /v1/plans               PATCH/DELETE /v1/plans/:id
- *   GET /v1/users    POST /v1/users/:partnerId/:userId/block|unblock
+ *   GET /v1/users    GET /v1/users/:partnerId/:userId
+ *   POST /v1/users/:partnerId/:userId/block|unblock
+ *   DELETE /v1/users/:partnerId/:userId/everywhere (purge across every store)
  *   GET/DELETE /v1/memory                    (DELETE = bulk partner purge)
  *   GET/PUT/DELETE /v1/memory/:partnerId/:userId  (DELETE = hard purge)
  *   POST /v1/memory/:partnerId/:userId/clear
@@ -16,6 +18,10 @@
  *   GET /v1/tech/telemetry (gateway diagnostics + intelligence health)
  *   GET /v1/intent-signals[/export] (implicit misunderstanding signals; the
  *       export answers JSONL in the eval harness's row shape)
+ *   GET /v1/alerts   POST /v1/alerts/:id/cancel (proactive alerts, per partner)
+ *   GET /v1/shares   DELETE /v1/shares/:id (share links; DELETE = kill switch)
+ *   GET /v1/identities (per-partner user identities, PIN hashes never proxied)
+ *   GET/POST /v1/degraded (force/unforce a partner's degraded mode)
  *
  * That route list is not decoration: admin.test.ts parses it and asserts the
  * router actually serves every path named above. It once advertised a
@@ -93,6 +99,10 @@ export type AdminServiceOptions = {
   fetchImpl?: typeof fetch
   /** Per-IP limiter; false disables (tests). Env-tunable in prod. */
   rateLimit?: RateLimitOptions | false
+  /** Honor x-forwarded-for (deploys behind a reverse proxy). Defaults to
+   * TRUST_PROXY env — off when unset, since trusting the header without a
+   * proxy in front lets any client forge its IP. */
+  trustProxy?: boolean
 }
 
 export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
@@ -112,7 +122,12 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     fetchImpl = fetch,
   } = opts
 
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } })
+  const app = Fastify({
+    logger: process.env.NODE_ENV !== 'test' && { level: 'info' },
+    // Behind the Railway/Vercel proxy every request arrives from the proxy's
+    // address; TRUST_PROXY=1 makes req.ip the real client (x-forwarded-for).
+    trustProxy: opts.trustProxy ?? Boolean(process.env.TRUST_PROXY),
+  })
 
   // ── request hardening ────────────────────────────────────────────────────
   // Coarse per-IP abuse guard (same limiter as the gateway). /health is
@@ -158,6 +173,18 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     detail: Record<string, unknown> = {},
   ) => audit.append({ operatorEmail: op.email, action, target, detail }).catch(() => {})
 
+  /** Tagged template that URL-encodes every interpolated path piece. Raw
+   * interpolation lets a reserved-char id rewrite the upstream path — a
+   * userId holding '/' adds a segment and '?' truncates the rest into a
+   * query string, so a purge aimed at "a?b" would land on key "a". Every
+   * memoryFetch/gatewayFetch path with dynamic parts is built through this. */
+  function upath(strings: TemplateStringsArray, ...parts: string[]): string {
+    return strings.reduce(
+      (acc, s, i) => acc + s + (i < parts.length ? encodeURIComponent(parts[i] ?? '') : ''),
+      '',
+    )
+  }
+
   // Memory-service proxy with the internal token; the admin panel never
   // exposes that token to the browser.
   async function memoryFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -174,11 +201,17 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     })
   }
 
-  /** Gateway /internal proxy (sessions list/kill) — same token discipline. */
+  /** Gateway /internal proxy (sessions list/kill, alerts, shares, identities,
+   * degraded, user purge) — same token + content-type discipline as
+   * memoryFetch (JSON content-type only with an actual body). */
   async function gatewayFetch(path: string, init: RequestInit = {}): Promise<Response> {
     return fetchImpl(`${gatewayUrl}${path}`, {
       ...init,
-      headers: { 'x-hippo-internal-token': internalToken, ...(init.headers ?? {}) },
+      headers: {
+        ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}),
+        'x-hippo-internal-token': internalToken,
+        ...(init.headers ?? {}),
+      },
       signal: AbortSignal.timeout(5_000),
     })
   }
@@ -263,10 +296,13 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
 
     void audit
       .append({
-        operatorEmail: parsed.data.email,
+        // Self-serve: nobody is signed in, and the body's email is whatever
+        // the caller typed. It goes in detail under a name that says so —
+        // never in operatorEmail, which asserts an authenticated identity.
+        operatorEmail: 'provisioning',
         action: 'provision.sandbox',
         target: partnerId,
-        detail: { venueName: parsed.data.venueName },
+        detail: { venueName: parsed.data.venueName, requestedEmail: parsed.data.email },
       })
       .catch(() => {})
 
@@ -302,7 +338,10 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     const parsed = LoginBody.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'invalid login body' })
     const email = parsed.data.email.toLowerCase()
-    const throttleKeys = [`email:${email}`, `ip:${req.ip}`]
+    // Lockout keyed on email+IP, never bare IP: behind a proxy that
+    // TRUST_PROXY doesn't cover, every operator shares one address — a bare
+    // IP key would let 5 failures from one attacker lock out the whole team.
+    const throttleKeys = [`login:${email}:${req.ip}`]
 
     // Locked out? 429 before any credential work (no timing oracle either).
     const retryAfter = throttle.retryAfterS(throttleKeys)
@@ -333,7 +372,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
         .catch(() => {})
       return reply.code(401).send({ error: 'invalid credentials' })
     }
-    throttle.clear(`email:${email}`)
+    throttle.clear(`login:${email}:${req.ip}`)
     const session: OperatorSession = { email: op.email, role: op.role }
     reply.header('set-cookie', sessionCookie(mintSessionToken(session, jwtSecret)))
     return { email: op.email, role: op.role }
@@ -555,16 +594,29 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     const { partnerId, userId } = req.params
     const user = await users.get(partnerId, userId)
     if (!user) return reply.code(404).send({ error: 'unknown user' })
-    // Join the persona view; memory-service downtime degrades, never 500s.
+    // Join the persona view; memory-service downtime degrades, never 500s —
+    // but an outage must never read as absence. personaStatus says which it
+    // is: 'ok' (real persona), 'none' (memory holds nothing — the service
+    // answers a default persona stamped updatedAt 0 for unknown keys), or
+    // 'unavailable' (memory down or erroring; persona is simply unknown).
     let persona: unknown = null
+    let personaStatus: 'ok' | 'none' | 'unavailable' = 'unavailable'
     try {
-      const res = await memoryFetch(`/v1/persona/${partnerId}/${userId}`)
-      if (res.ok) persona = await res.json()
+      const res = await memoryFetch(upath`/v1/persona/${partnerId}/${userId}`)
+      if (res.ok) {
+        const body = (await res.json()) as { updatedAt?: number } | null
+        if (body?.updatedAt) {
+          persona = body
+          personaStatus = 'ok'
+        } else {
+          personaStatus = 'none'
+        }
+      }
     } catch {
-      /* memory unreachable — user row still renders */
+      /* memory unreachable — user row still renders, marked unavailable */
     }
     void record(op, 'user.view', `${partnerId}/${userId}`)
-    return { ...user, persona }
+    return { ...user, persona, personaStatus }
   })
 
   for (const [action, status] of [
@@ -584,6 +636,62 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       },
     )
   }
+
+  // ── purge-user-everywhere (GDPR erasure across every store) ──────────────
+  // Four legs, each isolated: persona hard delete, learned-facts clear and
+  // user-note delete on the memory service, plus the gateway's cross-store
+  // purge (intent signals, uploads, alerts, identities). One leg failing
+  // must stay visible in the response — a deletion the operator believes
+  // happened but didn't is the worst possible lie this panel can tell.
+  type PurgeLeg = { ok: true; detail: unknown } | { ok: false; error: string; status?: number }
+
+  app.delete<{ Params: UserParams }>(
+    '/v1/users/:partnerId/:userId/everywhere',
+    async (req, reply) => {
+      const op = operator(req, reply)
+      if (!op) return reply
+      const { partnerId, userId } = req.params
+      const leg = async (fn: () => Promise<Response>): Promise<PurgeLeg> => {
+        try {
+          const res = await fn()
+          const body: unknown = await res.json().catch(() => null)
+          if (!res.ok) return { ok: false, error: 'upstream error', status: res.status }
+          return { ok: true, detail: body }
+        } catch {
+          return { ok: false, error: 'unreachable' }
+        }
+      }
+      const [persona, learnedFacts, userNote, gateway] = await Promise.all([
+        leg(() => memoryFetch(upath`/admin/personas/${partnerId}/${userId}`, { method: 'DELETE' })),
+        leg(() =>
+          memoryFetch(upath`/v1/scope/user/${partnerId}/${userId}/facts`, { method: 'DELETE' }),
+        ),
+        leg(() => memoryFetch(upath`/v1/scope/user/${partnerId}/${userId}`, { method: 'DELETE' })),
+        leg(() =>
+          gatewayFetch('/internal/user-purge', {
+            method: 'POST',
+            body: JSON.stringify({ partnerId, userKey: userId }),
+          }),
+        ),
+      ])
+      const results = { persona, learnedFacts, userNote, gateway }
+      const ok = persona.ok && learnedFacts.ok && userNote.ok && gateway.ok
+      // The audit row asserts what actually happened — partial when any leg
+      // failed, with the per-leg outcome recorded either way.
+      void record(
+        op,
+        ok ? 'user.purge_everywhere' : 'user.purge_everywhere_partial',
+        `${partnerId}/${userId}`,
+        {
+          persona: persona.ok,
+          learnedFacts: learnedFacts.ok,
+          userNote: userNote.ok,
+          gateway: gateway.ok,
+        },
+      )
+      return { partnerId, userId, ok, results }
+    },
+  )
 
   // ── user-wise memory management (proxied; memory service owns the data) ──
   // Every route names its failed dependency: a memory-service outage is a 502
@@ -611,9 +719,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     if (!op) return reply
     const { partnerId, userId } = req.params
     try {
-      const res = await memoryFetch(
-        `/v1/persona/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}`,
-      )
+      const res = await memoryFetch(upath`/v1/persona/${partnerId}/${userId}`)
       const body = await res.json()
       if (!res.ok) return reply.code(res.status).send(body)
       // The memory service answers a *default* persona for keys it has never
@@ -637,13 +743,17 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid persona update' })
     const { partnerId, userId } = req.params
     try {
-      const res = await memoryFetch(`/v1/persona/${partnerId}/${userId}`, {
+      const res = await memoryFetch(upath`/v1/persona/${partnerId}/${userId}`, {
         method: 'PUT',
         body: JSON.stringify(parsed.data),
       })
-      void record(op, 'memory.update', `${partnerId}/${userId}`, {
-        fields: Object.keys(parsed.data),
-      })
+      // Audit only what happened: a 404ed update recorded as memory.update is
+      // an audit row asserting a write that never landed.
+      if (res.ok)
+        void record(op, 'memory.update', `${partnerId}/${userId}`, {
+          fields: Object.keys(parsed.data),
+        })
+      else void record(op, 'memory.update_failed', `${partnerId}/${userId}`, { status: res.status })
       return reply.code(res.status).send(await res.json())
     } catch {
       return reply.code(502).send({ error: 'memory service unreachable' })
@@ -655,11 +765,12 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     if (!op) return reply
     const { partnerId, userId } = req.params
     try {
-      const res = await memoryFetch(`/v1/persona/${partnerId}/${userId}/clear`, {
+      const res = await memoryFetch(upath`/v1/persona/${partnerId}/${userId}/clear`, {
         method: 'POST',
         body: '{}',
       })
-      void record(op, 'memory.clear', `${partnerId}/${userId}`)
+      if (res.ok) void record(op, 'memory.clear', `${partnerId}/${userId}`)
+      else void record(op, 'memory.clear_failed', `${partnerId}/${userId}`, { status: res.status })
       return reply.code(res.status).send(await res.json())
     } catch {
       return reply.code(502).send({ error: 'memory service unreachable' })
@@ -671,8 +782,13 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     if (!op) return reply
     const { partnerId, userId } = req.params
     try {
-      const res = await memoryFetch(`/admin/personas/${partnerId}/${userId}`, { method: 'DELETE' })
-      void record(op, 'memory.purge', `${partnerId}/${userId}`)
+      const res = await memoryFetch(upath`/admin/personas/${partnerId}/${userId}`, {
+        method: 'DELETE',
+      })
+      // A purge that 404ed must never be audited as a purge — that row is the
+      // record a deletion request gets judged against.
+      if (res.ok) void record(op, 'memory.purge', `${partnerId}/${userId}`)
+      else void record(op, 'memory.purge_failed', `${partnerId}/${userId}`, { status: res.status })
       return reply.code(res.status).send(await res.json())
     } catch {
       return reply.code(502).send({ error: 'memory service unreachable' })
@@ -686,11 +802,20 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     const { partnerId } = req.query
     if (!partnerId) return reply.code(400).send({ error: 'partnerId required' })
     try {
-      const res = await memoryFetch(`/admin/personas?partnerId=${encodeURIComponent(partnerId)}`, {
+      // The memory-service partner purge cascades: personas plus the
+      // partner's user-scope learned facts and user notes. The response and
+      // the audit row both carry the full per-store counts.
+      const res = await memoryFetch(upath`/admin/personas?partnerId=${partnerId}`, {
         method: 'DELETE',
       })
-      const body = (await res.json()) as { deleted?: number }
-      void record(op, 'memory.purge_partner', partnerId, { deleted: body.deleted ?? 0 })
+      const body = (await res.json()) as { deleted?: number; facts?: number; notes?: number }
+      if (res.ok)
+        void record(op, 'memory.purge_partner', partnerId, {
+          deleted: body.deleted ?? 0,
+          facts: body.facts ?? 0,
+          notes: body.notes ?? 0,
+        })
+      else void record(op, 'memory.purge_partner_failed', partnerId, { status: res.status })
       return reply.code(res.status).send(body)
     } catch {
       return reply.code(502).send({ error: 'memory service unreachable' })
@@ -709,9 +834,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       if (!op) return reply
       const { partnerId, userId } = req.params
       try {
-        const res = await memoryFetch(
-          `/v1/scope/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/facts`,
-        )
+        const res = await memoryFetch(upath`/v1/scope/user/${partnerId}/${userId}/facts`)
         return reply.code(res.status).send(await res.json())
       } catch {
         return reply.code(502).send({ error: 'memory service unreachable' })
@@ -726,11 +849,15 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       if (!op) return reply
       const { partnerId, userId } = req.params
       try {
-        const res = await memoryFetch(
-          `/v1/scope/user/${encodeURIComponent(partnerId)}/${encodeURIComponent(userId)}/facts`,
-          { method: 'DELETE' },
-        )
-        void record(op, 'learned_facts.purge', `${partnerId}/${userId}`, { partnerId, userId })
+        const res = await memoryFetch(upath`/v1/scope/user/${partnerId}/${userId}/facts`, {
+          method: 'DELETE',
+        })
+        if (res.ok)
+          void record(op, 'learned_facts.purge', `${partnerId}/${userId}`, { partnerId, userId })
+        else
+          void record(op, 'learned_facts.purge_failed', `${partnerId}/${userId}`, {
+            status: res.status,
+          })
         return reply.code(res.status).send(await res.json())
       } catch {
         return reply.code(502).send({ error: 'memory service unreachable' })
@@ -746,9 +873,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       const op = operator(req, reply)
       if (!op) return reply
       try {
-        const res = await memoryFetch(
-          `/v1/scope/session/${encodeURIComponent(req.params.sessionId)}/facts`,
-        )
+        const res = await memoryFetch(upath`/v1/scope/session/${req.params.sessionId}/facts`)
         return reply.code(res.status).send(await res.json())
       } catch {
         return reply.code(502).send({ error: 'memory service unreachable' })
@@ -779,7 +904,13 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       if (typeof body !== 'string') return reply.code(400).send({ error: 'body (string) required' })
       try {
         const res = await memoryFetch(path, { method: 'PUT', body: JSON.stringify({ body }) })
-        void record(op, 'memory_config.set', target(req.params), { level, length: body.length })
+        if (res.ok)
+          void record(op, 'memory_config.set', target(req.params), { level, length: body.length })
+        else
+          void record(op, 'memory_config.set_failed', target(req.params), {
+            level,
+            status: res.status,
+          })
         return reply.code(res.status).send(await res.json())
       } catch {
         return reply.code(502).send({ error: 'memory service unreachable' })
@@ -792,21 +923,21 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     scopePut('/v1/scope/global', 'global', () => 'global'),
   )
   app.get<{ Params: { partnerId: string } }>('/v1/memory-config/host/:partnerId', (req, reply) =>
-    scopeGet(`/v1/scope/host/${req.params.partnerId}`)(req, reply),
+    scopeGet(upath`/v1/scope/host/${req.params.partnerId}`)(req, reply),
   )
   app.put<{ Params: { partnerId: string } }>('/v1/memory-config/host/:partnerId', (req, reply) =>
     scopePut(
-      `/v1/scope/host/${req.params.partnerId}`,
+      upath`/v1/scope/host/${req.params.partnerId}`,
       'host',
       (p) => p.partnerId ?? '',
     )(req, reply),
   )
   app.get<{ Params: UserParams }>('/v1/memory-config/user/:partnerId/:userId', (req, reply) =>
-    scopeGet(`/v1/scope/user/${req.params.partnerId}/${req.params.userId}`)(req, reply),
+    scopeGet(upath`/v1/scope/user/${req.params.partnerId}/${req.params.userId}`)(req, reply),
   )
   app.put<{ Params: UserParams }>('/v1/memory-config/user/:partnerId/:userId', (req, reply) =>
     scopePut(
-      `/v1/scope/user/${req.params.partnerId}/${req.params.userId}`,
+      upath`/v1/scope/user/${req.params.partnerId}/${req.params.userId}`,
       'user',
       (p) => `${p.partnerId}/${p.userId}`,
     )(req, reply),
@@ -814,7 +945,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
   // Session inspector (read-only): the exact composed memory block that was
   // sent for a session — real history, not a re-derivation.
   app.get<{ Params: { sessionId: string } }>('/v1/memory-config/session/:sessionId', (req, reply) =>
-    scopeGet(`/v1/scope/session/${req.params.sessionId}`)(req, reply),
+    scopeGet(upath`/v1/scope/session/${req.params.sessionId}`)(req, reply),
   )
 
   // ── operators (owner-only) ───────────────────────────────────────────────
@@ -956,6 +1087,125 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
     },
   )
 
+  // ── proactive alerts (gateway proxy) ─────────────────────────────────────
+  // Per-partner alert list (newest first, capped upstream) and the operator
+  // cancel switch. partnerId is required — the gateway 400s without it, and
+  // failing here first keeps the error message honest about whose rule it is.
+  app.get<{ Querystring: { partnerId?: string } }>('/v1/alerts', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    if (!req.query.partnerId) return reply.code(400).send({ error: 'partnerId required' })
+    try {
+      const res = await gatewayFetch(upath`/internal/alerts?partnerId=${req.query.partnerId}`)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  app.post<{ Params: { id: string } }>('/v1/alerts/:id/cancel', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    const body = req.body as { partnerId?: unknown; userKey?: unknown } | null
+    if (typeof body?.partnerId !== 'string' || typeof body?.userKey !== 'string') {
+      return reply.code(400).send({ error: 'partnerId and userKey required' })
+    }
+    try {
+      const res = await gatewayFetch(upath`/internal/alerts/${req.params.id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ partnerId: body.partnerId, userKey: body.userKey }),
+      })
+      if (res.ok)
+        void record(op, 'alert.cancel', req.params.id, {
+          partnerId: body.partnerId,
+          userKey: body.userKey,
+        })
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  // ── share links (gateway proxy) ──────────────────────────────────────────
+  // Live/unexpired shares per partner; DELETE is the kill switch for a link
+  // that leaked. Destructive, so audited — on success only.
+  app.get<{ Querystring: { partnerId?: string } }>('/v1/shares', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    if (!req.query.partnerId) return reply.code(400).send({ error: 'partnerId required' })
+    try {
+      const res = await gatewayFetch(upath`/internal/shares?partnerId=${req.query.partnerId}`)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  app.delete<{ Params: { id: string } }>('/v1/shares/:id', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    try {
+      // body '{}' on purpose: a bodyless DELETE through a JSON content-type
+      // client 400s at the gateway (Fastify rejects empty JSON bodies).
+      const res = await gatewayFetch(upath`/internal/shares/${req.params.id}`, {
+        method: 'DELETE',
+        body: '{}',
+      })
+      if (res.ok) void record(op, 'share.delete', req.params.id)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  // ── user identities (gateway proxy) ──────────────────────────────────────
+  // Per-partner identity roster (last-seen DESC, capped upstream); the
+  // gateway strips pinHash before answering. A read, so no audit row.
+  app.get<{ Querystring: { partnerId?: string } }>('/v1/identities', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    if (!req.query.partnerId) return reply.code(400).send({ error: 'partnerId required' })
+    try {
+      const res = await gatewayFetch(upath`/internal/identities?partnerId=${req.query.partnerId}`)
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  // ── forced-degraded control (gateway proxy) ──────────────────────────────
+  // GET lists the partners currently forced degraded; POST flips one. The
+  // force is an operator action against a live partner surface — audited.
+  app.get('/v1/degraded', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    try {
+      const res = await gatewayFetch('/internal/degraded')
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
+  app.post('/v1/degraded', async (req, reply) => {
+    const op = operator(req, reply)
+    if (!op) return reply
+    const body = req.body as { partnerId?: unknown; forced?: unknown } | null
+    if (typeof body?.partnerId !== 'string' || typeof body?.forced !== 'boolean') {
+      return reply.code(400).send({ error: 'partnerId (string) and forced (boolean) required' })
+    }
+    try {
+      const res = await gatewayFetch('/internal/degraded', {
+        method: 'POST',
+        body: JSON.stringify({ partnerId: body.partnerId, forced: body.forced }),
+      })
+      if (res.ok) void record(op, 'degraded.force', body.partnerId, { forced: body.forced })
+      return reply.code(res.status).send(await res.json())
+    } catch {
+      return reply.code(502).send({ error: 'gateway unreachable' })
+    }
+  })
+
   // ── partner detail (aggregated drill-down) ───────────────────────────────
   app.get<{ Params: { id: string } }>('/v1/partners/:id/detail', async (req, reply) => {
     const op = operator(req, reply)
@@ -1088,9 +1338,12 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
       mau: number
       quota: number | null
     }> = []
-    const partnerRows = await partners.list()
+    // One plans.list() serves every partner row (and the counts block below)
+    // — a per-partner plans.get() here was an N+1 against the plans table.
+    const [partnerRows, planRows] = await Promise.all([partners.list(), plans.list()])
+    const planById = new Map(planRows.map((plan) => [plan.planId, plan]))
     for (const p of partnerRows) {
-      const plan = p.planId ? await plans.get(p.planId) : null
+      const plan = p.planId ? (planById.get(p.planId) ?? null) : null
       const mau = byPartner[p.partnerId] ?? 0
       partnerMau.push({
         partnerId: p.partnerId,
@@ -1122,7 +1375,7 @@ export function buildAdminService(opts: AdminServiceOptions): FastifyInstance {
         partners: partnerRows.length,
         // Self-serve `hippo register` signups waiting on operator approval.
         sandboxPartners: partnerRows.filter((p) => p.status === 'sandbox').length,
-        plans: (await plans.list()).length,
+        plans: planRows.length,
         users: (await users.list({ limit: 1 })).total,
       },
     }

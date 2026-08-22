@@ -6,7 +6,7 @@
  * this; anything the gateway needs beyond it goes through a contract bump on
  * both sides:
  *   POST {INTEL}/v1/intent   {text, language?, history?} → IntentResult
- *   POST {INTEL}/v1/respond  {text, intent, symbol?} → BriefResponse | DeclineResponse
+ *   POST {INTEL}/v1/respond  {text, intent, symbol?, language?} → BriefResponse | DeclineResponse
  *   GET  {INTEL}/health      {ok, mode, model}
  */
 
@@ -208,8 +208,16 @@ export interface IntelligenceClient {
    * `history` (additive) is the bounded thread context for coreference —
    * interpret-stage only; omit it entirely on a first turn. */
   intent(req: { text: string; language?: string; history?: HistoryItem[] }): Promise<IntentResult>
-  /** Rejects on timeout (30s), network error or non-2xx. */
-  respond(req: { text: string; intent: string; symbol?: string }): Promise<RespondResult>
+  /** Rejects on timeout (30s), network error or non-2xx. `language` is the
+   * session's answer language from the settings uplink (protocol enum:
+   * en/hi/hinglish/ar) — the engine writes the answer in it and scopes its
+   * cache by it; omitted means English. */
+  respond(req: {
+    text: string
+    intent: string
+    symbol?: string
+    language?: string
+  }): Promise<RespondResult>
   /**
    * Streaming respond. Throws (before or mid-iteration) on timeout, network
    * error or non-2xx — callers fall back to `respond` degraded handling.
@@ -220,6 +228,10 @@ export interface IntelligenceClient {
     text: string
     intent: string
     symbol?: string
+    /** Session answer language (settings uplink; en/hi/hinglish/ar) — same
+     * contract as respond(): the engine answers in it and it scopes the
+     * fleet answer cache, so a Hindi brief never serves an English session. */
+    language?: string
     persona?: { experienceLevel: 'new' | 'intermediate' | 'pro' }
     /** Layered memory context (platform → venue → user → session). Passed as
      * context ONLY; the engine keeps its no-advice guardrail authoritative. */

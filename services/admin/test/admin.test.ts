@@ -223,7 +223,12 @@ describe('users + memory proxy', () => {
   it('lists/blocks users and joins persona from the memory service', async () => {
     const users = new InMemoryUserStore()
     await users.upsertSeen('koinbx-dev', 'u1')
-    const personaBody = { optIn: true, experienceLevel: 'pro', followedAssets: ['BTC'] }
+    const personaBody = {
+      optIn: true,
+      experienceLevel: 'pro',
+      followedAssets: ['BTC'],
+      updatedAt: 42,
+    }
     const fetchImpl = (async (url: unknown) => {
       expect(String(url)).toContain('/v1/persona/koinbx-dev/u1')
       return new Response(JSON.stringify(personaBody), { status: 200 })
@@ -237,7 +242,7 @@ describe('users + memory proxy', () => {
       url: '/v1/users/koinbx-dev/u1',
       headers: { cookie },
     })
-    expect(detail.json()).toMatchObject({ userId: 'u1', persona: personaBody })
+    expect(detail.json()).toMatchObject({ userId: 'u1', persona: personaBody, personaStatus: 'ok' })
 
     const block = await app.inject({
       method: 'POST',
@@ -1410,6 +1415,557 @@ describe('build provenance', () => {
       sha: expect.any(String),
       builtAt: expect.any(String),
     })
+    await app.close()
+  })
+})
+
+// ── reserved characters must survive the proxy round-trip ──────────────────
+// Fastify hands routes DECODED params. Interpolating them raw into upstream
+// paths rewrites the request: '/' adds a segment, '?' turns the tail into a
+// query string — so a purge aimed at "a?b" lands on key "a". The GDPR routes
+// were the asymmetric ones: the GET encoded, the DELETE did not.
+
+describe('reserved-char ids reach memory encoded on every proxy path', () => {
+  const encoded = encodeURIComponent('u/1?x') // '/' and '?' — the two path-rewriting characters
+
+  it('GET/PUT/clear/DELETE memory and the learned-facts routes all encode the segments', async () => {
+    const seen: string[] = []
+    const fetchImpl = (async (url: unknown) => {
+      seen.push(String(url))
+      return new Response(JSON.stringify({ updatedAt: 1 }), { status: 200 })
+    }) as typeof fetch
+    const { app } = await testAdmin({ fetchImpl, memoryUrl: 'http://mem' })
+    const cookie = await login(app)
+
+    const routes = [
+      ['GET', `/v1/memory/koinbx-dev/${encoded}`, undefined],
+      ['PUT', `/v1/memory/koinbx-dev/${encoded}`, { experienceLevel: 'pro' }],
+      ['POST', `/v1/memory/koinbx-dev/${encoded}/clear`, undefined],
+      ['DELETE', `/v1/memory/koinbx-dev/${encoded}`, undefined],
+      ['GET', `/v1/learned-facts/user/koinbx-dev/${encoded}`, undefined],
+      ['DELETE', `/v1/learned-facts/user/koinbx-dev/${encoded}`, undefined],
+    ] as const
+    for (const [method, url, payload] of routes) {
+      await app.inject({
+        method,
+        url,
+        headers: { cookie },
+        ...(payload !== undefined ? { payload } : {}),
+      })
+    }
+    expect(seen).toHaveLength(routes.length)
+    for (const url of seen) {
+      // The decoded id must never appear raw — every upstream URL carries the
+      // id as ONE encoded segment.
+      expect(url).toContain(encoded)
+      expect(url).not.toContain('u/1?x')
+    }
+    await app.close()
+  })
+
+  it('a purge aimed at "a?b" must not land on key "a" (the truncation bug)', async () => {
+    const seen: string[] = []
+    const fetchImpl = (async (url: unknown) => {
+      seen.push(String(url))
+      return new Response('{"deleted":true}', { status: 200 })
+    }) as typeof fetch
+    const { app } = await testAdmin({ fetchImpl, memoryUrl: 'http://mem' })
+    const cookie = await login(app)
+    await app.inject({
+      method: 'DELETE',
+      url: `/v1/memory/koinbx-dev/${encodeURIComponent('a?b')}`,
+      headers: { cookie },
+    })
+    // Raw interpolation produced ".../a?b" — path "/admin/personas/koinbx-dev/a"
+    // plus query "b": the WRONG user's data. Encoded, the path keeps the id.
+    expect(new URL(seen[0] ?? '').pathname).toBe('/admin/personas/koinbx-dev/a%3Fb')
+    await app.close()
+  })
+})
+
+// ── the audit trail records what happened, not what was attempted ──────────
+
+describe('audit rows on failed memory writes', () => {
+  it('a 404ed purge/update/clear is audited as *_failed and the status propagates', async () => {
+    const fetchImpl = (async () =>
+      new Response('{"error":"unknown persona"}', { status: 404 })) as typeof fetch
+    const { app, audit } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+
+    for (const [method, url, payload] of [
+      ['PUT', '/v1/memory/koinbx-dev/ghost', { experienceLevel: 'pro' }],
+      ['POST', '/v1/memory/koinbx-dev/ghost/clear', undefined],
+      ['DELETE', '/v1/memory/koinbx-dev/ghost', undefined],
+      ['DELETE', '/v1/memory?partnerId=ghost-partner', undefined],
+    ] as const) {
+      const res = await app.inject({
+        method,
+        url,
+        headers: { cookie },
+        ...(payload !== undefined ? { payload } : {}),
+      })
+      // The upstream failure reaches the SPA — never swallowed into a 200.
+      expect(res.statusCode, `${method} ${url}`).toBe(404)
+    }
+
+    const actions = (await audit.list({ limit: 50 })).rows.map((r) => r.action)
+    // No row may assert a write that 404ed…
+    for (const lie of ['memory.update', 'memory.clear', 'memory.purge', 'memory.purge_partner']) {
+      expect(actions, lie).not.toContain(lie)
+    }
+    // …and each failure is recorded as itself, status included.
+    for (const truth of [
+      'memory.update_failed',
+      'memory.clear_failed',
+      'memory.purge_failed',
+      'memory.purge_partner_failed',
+    ]) {
+      expect(actions, truth).toContain(truth)
+    }
+    const failed = (await audit.list({ limit: 50 })).rows.find(
+      (r) => r.action === 'memory.purge_failed',
+    )
+    expect(failed?.detail).toMatchObject({ status: 404 })
+    await app.close()
+  })
+
+  it('partner purge audits the cascade counts (personas + facts + notes)', async () => {
+    const fetchImpl = (async () =>
+      new Response('{"deleted":3,"facts":2,"notes":1}', { status: 200 })) as typeof fetch
+    const { app, audit } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/memory?partnerId=koinbx-dev',
+      headers: { cookie },
+    })
+    expect(res.json()).toEqual({ deleted: 3, facts: 2, notes: 1 })
+    const row = (await audit.list({})).rows.find((r) => r.action === 'memory.purge_partner')
+    expect(row?.detail).toEqual({ deleted: 3, facts: 2, notes: 1 })
+    await app.close()
+  })
+})
+
+// ── an outage is not an absence ─────────────────────────────────────────────
+
+describe('personaStatus on the user detail join', () => {
+  async function userApp(fetchImpl: typeof fetch) {
+    const users = new InMemoryUserStore()
+    await users.upsertSeen('koinbx-dev', 'u1')
+    const { app } = await testAdmin({ users, fetchImpl })
+    return { app, cookie: await login(app) }
+  }
+
+  it("'none' when memory answers its default persona (updatedAt 0)", async () => {
+    const { app, cookie } = await userApp(
+      (async () =>
+        new Response(JSON.stringify({ optIn: false, updatedAt: 0 }), {
+          status: 200,
+        })) as typeof fetch,
+    )
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/users/koinbx-dev/u1',
+      headers: { cookie },
+    })
+    expect(res.json()).toMatchObject({ persona: null, personaStatus: 'none' })
+    await app.close()
+  })
+
+  it("'unavailable' when memory is down or erroring — never rendered as absence", async () => {
+    for (const impl of [
+      (async () => {
+        throw new Error('memory down')
+      }) as typeof fetch,
+      (async () => new Response('{"error":"boom"}', { status: 500 })) as typeof fetch,
+    ]) {
+      const { app, cookie } = await userApp(impl)
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/users/koinbx-dev/u1',
+        headers: { cookie },
+      })
+      expect(res.statusCode).toBe(200) // the user row itself still renders
+      expect(res.json()).toMatchObject({ persona: null, personaStatus: 'unavailable' })
+      await app.close()
+    }
+  })
+})
+
+// ── purge-user-everywhere (GDPR erasure across every store) ─────────────────
+
+describe('DELETE /v1/users/:partnerId/:userId/everywhere', () => {
+  function purgeStack(gatewayStatus = 200) {
+    const seen: Array<{ url: string; method: string; body: unknown }> = []
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      seen.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      })
+      if (String(url).includes('/internal/user-purge')) {
+        return new Response(
+          JSON.stringify({
+            partnerId: 'koinbx-dev',
+            userKey: 'u1',
+            deleted: { intentSignals: 2, uploadedFiles: 1, alerts: 3, identities: 0 },
+          }),
+          { status: gatewayStatus },
+        )
+      }
+      return new Response('{"deleted":true}', { status: 200 })
+    }) as typeof fetch
+    return { seen, fetchImpl }
+  }
+
+  it('fans out to all four legs and aggregates the results', async () => {
+    const { seen, fetchImpl } = purgeStack()
+    const { app, audit } = await testAdmin({
+      fetchImpl,
+      memoryUrl: 'http://mem',
+      gatewayUrl: 'http://gw',
+      internalToken: 'itok',
+    })
+    const cookie = await login(app)
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/users/koinbx-dev/u1/everywhere',
+      headers: { cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.ok).toBe(true)
+    expect(body.results.persona).toEqual({ ok: true, detail: { deleted: true } })
+    expect(body.results.learnedFacts.ok).toBe(true)
+    expect(body.results.userNote.ok).toBe(true)
+    expect(body.results.gateway.detail.deleted).toMatchObject({ intentSignals: 2 })
+
+    const urls = seen.map((s) => `${s.method} ${s.url}`).sort()
+    expect(urls).toEqual(
+      [
+        'DELETE http://mem/admin/personas/koinbx-dev/u1',
+        'DELETE http://mem/v1/scope/user/koinbx-dev/u1/facts',
+        'DELETE http://mem/v1/scope/user/koinbx-dev/u1',
+        'POST http://gw/internal/user-purge',
+      ].sort(),
+    )
+    const gw = seen.find((s) => s.url.includes('/internal/user-purge'))
+    expect(gw?.body).toEqual({ partnerId: 'koinbx-dev', userKey: 'u1' })
+
+    const actions = (await audit.list({})).rows.map((r) => r.action)
+    expect(actions).toContain('user.purge_everywhere')
+    await app.close()
+  })
+
+  it('a failed leg stays visible: ok=false, per-leg detail, partial audit row', async () => {
+    const { fetchImpl } = purgeStack(500)
+    const { app, audit } = await testAdmin({ fetchImpl })
+    const cookie = await login(app)
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/users/koinbx-dev/u1/everywhere',
+      headers: { cookie },
+    })
+    const body = res.json()
+    expect(body.ok).toBe(false)
+    expect(body.results.gateway).toEqual({ ok: false, error: 'upstream error', status: 500 })
+    // Memory legs still report their own truth — not blanked by the failure.
+    expect(body.results.persona.ok).toBe(true)
+    const row = (await audit.list({})).rows.find(
+      (r) => r.action === 'user.purge_everywhere_partial',
+    )
+    expect(row?.detail).toMatchObject({ gateway: false, persona: true })
+    await app.close()
+  })
+
+  it('is operator-gated and encodes reserved-char ids on every leg', async () => {
+    const { seen, fetchImpl } = purgeStack()
+    const { app } = await testAdmin({ fetchImpl, memoryUrl: 'http://mem' })
+    expect(
+      (await app.inject({ method: 'DELETE', url: '/v1/users/koinbx-dev/u1/everywhere' }))
+        .statusCode,
+    ).toBe(401)
+    expect(seen).toEqual([])
+
+    const cookie = await login(app)
+    await app.inject({
+      method: 'DELETE',
+      url: `/v1/users/koinbx-dev/${encodeURIComponent('u/1?x')}/everywhere`,
+      headers: { cookie },
+    })
+    const memoryCalls = seen.filter((s) => s.url.startsWith('http://mem'))
+    expect(memoryCalls).toHaveLength(3)
+    for (const call of memoryCalls) {
+      expect(call.url).toContain('u%2F1%3Fx')
+    }
+    await app.close()
+  })
+})
+
+// ── operator visibility proxies (alerts / shares / identities / degraded) ──
+
+describe('gateway visibility proxies', () => {
+  function gatewayStub() {
+    const seen: Array<{ url: string; method: string; token: string | null; body?: string }> = []
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      seen.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        token: new Headers(init?.headers).get('x-hippo-internal-token'),
+        ...(typeof init?.body === 'string' ? { body: init.body } : {}),
+      })
+      return new Response('{"ok":true}', { status: 200 })
+    }) as typeof fetch
+    return { seen, fetchImpl }
+  }
+
+  it('proxies list routes with the internal token; partnerId is required', async () => {
+    const { seen, fetchImpl } = gatewayStub()
+    const { app } = await testAdmin({ fetchImpl, gatewayUrl: 'http://gw', internalToken: 'itok' })
+    const cookie = await login(app)
+
+    for (const path of ['/v1/alerts', '/v1/shares', '/v1/identities']) {
+      // Without partnerId: 400 before any gateway call.
+      const missing = await app.inject({ method: 'GET', url: path, headers: { cookie } })
+      expect(missing.statusCode, path).toBe(400)
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `${path}?partnerId=koinbx-dev`,
+        headers: { cookie },
+      })
+      expect(res.statusCode, path).toBe(200)
+    }
+    expect(seen.map((s) => s.url)).toEqual([
+      'http://gw/internal/alerts?partnerId=koinbx-dev',
+      'http://gw/internal/shares?partnerId=koinbx-dev',
+      'http://gw/internal/identities?partnerId=koinbx-dev',
+    ])
+    expect(seen.every((s) => s.token === 'itok')).toBe(true)
+    await app.close()
+  })
+
+  it('cancels an alert (validated body, audited on success)', async () => {
+    const { seen, fetchImpl } = gatewayStub()
+    const { app, audit } = await testAdmin({ fetchImpl, gatewayUrl: 'http://gw' })
+    const cookie = await login(app)
+
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/alerts/al_1/cancel',
+      headers: { cookie },
+      payload: { partnerId: 'koinbx-dev' }, // userKey missing
+    })
+    expect(bad.statusCode).toBe(400)
+    expect(seen).toEqual([])
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/alerts/al_1/cancel',
+      headers: { cookie },
+      payload: { partnerId: 'koinbx-dev', userKey: 'id:vic' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(seen[0]?.url).toBe('http://gw/internal/alerts/al_1/cancel')
+    expect(JSON.parse(seen[0]?.body ?? '{}')).toEqual({
+      partnerId: 'koinbx-dev',
+      userKey: 'id:vic',
+    })
+    expect((await audit.list({})).rows.map((r) => r.action)).toContain('alert.cancel')
+    await app.close()
+  })
+
+  it('deletes a share with the Fastify-safe {} body and audits it', async () => {
+    const { seen, fetchImpl } = gatewayStub()
+    const { app, audit } = await testAdmin({ fetchImpl, gatewayUrl: 'http://gw' })
+    const cookie = await login(app)
+    const res = await app.inject({ method: 'DELETE', url: '/v1/shares/sh_1', headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    expect(seen[0]).toMatchObject({
+      url: 'http://gw/internal/shares/sh_1',
+      method: 'DELETE',
+      body: '{}', // bodyless DELETE through a JSON client 400s at the gateway
+    })
+    expect((await audit.list({})).rows.map((r) => r.action)).toContain('share.delete')
+    await app.close()
+  })
+
+  it('forces/unforces degraded mode (audited) and lists the forced set', async () => {
+    const { seen, fetchImpl } = gatewayStub()
+    const { app, audit } = await testAdmin({ fetchImpl, gatewayUrl: 'http://gw' })
+    const cookie = await login(app)
+
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/degraded', headers: { cookie } })).statusCode,
+    ).toBe(200)
+
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/degraded',
+      headers: { cookie },
+      payload: { partnerId: 'koinbx-dev', forced: 'yes' }, // not a boolean
+    })
+    expect(bad.statusCode).toBe(400)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/degraded',
+      headers: { cookie },
+      payload: { partnerId: 'koinbx-dev', forced: true },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(seen.map((s) => `${s.method} ${s.url}`)).toEqual([
+      'GET http://gw/internal/degraded',
+      'POST http://gw/internal/degraded',
+    ])
+    const row = (await audit.list({})).rows.find((r) => r.action === 'degraded.force')
+    expect(row).toMatchObject({ target: 'koinbx-dev', detail: { forced: true } })
+    await app.close()
+  })
+
+  it('401s unauthenticated and 502s when the gateway is down', async () => {
+    const downImpl = (async () => {
+      throw new Error('gateway down')
+    }) as typeof fetch
+    const { app } = await testAdmin({ fetchImpl: downImpl })
+    const routes = [
+      ['GET', '/v1/alerts?partnerId=p'],
+      ['POST', '/v1/alerts/al_1/cancel'],
+      ['GET', '/v1/shares?partnerId=p'],
+      ['DELETE', '/v1/shares/sh_1'],
+      ['GET', '/v1/identities?partnerId=p'],
+      ['GET', '/v1/degraded'],
+      ['POST', '/v1/degraded'],
+    ] as const
+    for (const [method, url] of routes) {
+      expect((await app.inject({ method, url })).statusCode, `${method} ${url}`).toBe(401)
+    }
+    const cookie = await login(app)
+    for (const [method, url] of routes) {
+      const payload = url.includes('cancel')
+        ? { partnerId: 'p', userKey: 'k' }
+        : url === '/v1/degraded' && method === 'POST'
+          ? { partnerId: 'p', forced: true }
+          : undefined
+      const res = await app.inject({
+        method,
+        url,
+        headers: { cookie },
+        ...(payload ? { payload } : {}),
+      })
+      expect(res.statusCode, `${method} ${url}`).toBe(502)
+      expect(res.json().error, `${method} ${url}`).toBe('gateway unreachable')
+    }
+    await app.close()
+  })
+})
+
+// ── lockout keying: one attacker must not lock the whole team ───────────────
+
+describe('login lockout keying (email+IP)', () => {
+  // Literal-free credentials so the secret scanner stays quiet.
+  const rightPass = ['correct', 'horse', 'battery'].join(' ')
+  const wrongPass = ['wrong', 'guess', 'entirely'].join(' ')
+  const secondPass = ['a', 'fine', 'passphrase', '2'].join(' ')
+
+  it('5 failures against one email do not lock a different operator on the same IP', async () => {
+    const { app, operators } = await testAdmin()
+    await operators.create({
+      email: 'second@hippo.dev',
+      passwordHash: hashPassword(secondPass),
+      role: 'operator',
+    })
+    // Attacker hammers ops@ from the (shared) inject address…
+    for (let i = 0; i < 5; i++) {
+      await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'ops@hippo.dev', password: wrongPass },
+      })
+    }
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: { email: 'ops@hippo.dev', password: rightPass },
+        })
+      ).statusCode,
+    ).toBe(429)
+    // …and the second operator, same IP, still signs in. Under the old bare
+    // `ip:` key this was a 429 — one attacker locked out every operator
+    // behind the shared proxy address.
+    const other = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'second@hippo.dev', password: secondPass },
+    })
+    expect(other.statusCode).toBe(200)
+    await app.close()
+  })
+
+  it('with trustProxy, x-forwarded-for separates clients; without it, it is ignored', async () => {
+    // trustProxy on: the forwarded client IP keys the lockout.
+    const trusted = await testAdmin({ trustProxy: true })
+    for (let i = 0; i < 5; i++) {
+      await trusted.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: { 'x-forwarded-for': '9.9.9.9' },
+        payload: { email: 'ops@hippo.dev', password: wrongPass },
+      })
+    }
+    const sameClient = await trusted.app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { 'x-forwarded-for': '9.9.9.9' },
+      payload: { email: 'ops@hippo.dev', password: rightPass },
+    })
+    expect(sameClient.statusCode).toBe(429)
+    const otherClient = await trusted.app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { 'x-forwarded-for': '8.8.8.8' },
+      payload: { email: 'ops@hippo.dev', password: rightPass },
+    })
+    expect(otherClient.statusCode).toBe(200)
+    await trusted.app.close()
+
+    // trustProxy off (default): the header is untrusted noise — all attempts
+    // share the socket address, so the lockout holds regardless of the header.
+    const direct = await testAdmin()
+    for (let i = 0; i < 5; i++) {
+      await direct.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: { 'x-forwarded-for': `10.0.0.${i}` },
+        payload: { email: 'ops@hippo.dev', password: wrongPass },
+      })
+    }
+    const forged = await direct.app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { 'x-forwarded-for': '10.0.0.99' },
+      payload: { email: 'ops@hippo.dev', password: rightPass },
+    })
+    expect(forged.statusCode).toBe(429)
+    await direct.app.close()
+  })
+})
+
+// ── self-serve provisioning: body input never masquerades as an identity ───
+
+describe('provisioning audit row provenance', () => {
+  it('records the caller-typed email as requestedEmail, never as operatorEmail', async () => {
+    const { app, audit } = await testAdmin()
+    await app.inject({
+      method: 'POST',
+      url: '/v1/provision/sandbox',
+      payload: { email: 'attacker@evil.example', venueName: 'Shady Venue' },
+    })
+    const row = (await audit.list({})).rows.find((r) => r.action === 'provision.sandbox')
+    expect(row?.operatorEmail).toBe('provisioning')
+    expect(row?.detail).toMatchObject({ requestedEmail: 'attacker@evil.example' })
     await app.close()
   })
 })

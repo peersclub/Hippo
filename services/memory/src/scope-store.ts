@@ -191,6 +191,10 @@ export interface ScopeMemoryStore {
   setHost(partnerId: string, body: string, now: number): Promise<MemoryDoc>
   getUserNote(partnerId: string, userId: string): Promise<MemoryDoc>
   setUserNote(partnerId: string, userId: string, body: string, now: number): Promise<MemoryDoc>
+  /** GDPR purge: hard-delete one user's freeform note (the user-scope NOTE —
+   * distinct from learned facts, which clearLearnedFacts covers). True when a
+   * row existed. */
+  deleteUserNote(partnerId: string, userId: string): Promise<boolean>
   getSession(sessionId: string): Promise<SessionMemory>
   /** Store the composed snapshot (+ ids) for the inspector. */
   putComposed(
@@ -220,6 +224,12 @@ export interface ScopeMemoryStore {
   /** Clear all learned facts for a scope (the user-visible clear / opt-out).
    * Returns the number removed. */
   clearLearnedFacts(scope: LearnedFactScope, ids: LearnedFactIds): Promise<number>
+  /** Partner offboarding purge: hard-delete every user-scope learned fact the
+   * partner holds. Returns facts removed. */
+  deleteLearnedFactsByPartner(partnerId: string): Promise<number>
+  /** Partner offboarding purge: hard-delete every freeform user note the
+   * partner holds. Returns notes removed. */
+  deleteUserNotesByPartner(partnerId: string): Promise<number>
 }
 
 export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
@@ -252,6 +262,19 @@ export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
     const doc = { body: clampTo(body, MAX_BODY), updatedAt: now }
     this.userNotes.set(this.key(partnerId, userId), doc)
     return doc
+  }
+  async deleteUserNote(partnerId: string, userId: string): Promise<boolean> {
+    return this.userNotes.delete(this.key(partnerId, userId))
+  }
+  async deleteUserNotesByPartner(partnerId: string): Promise<number> {
+    let n = 0
+    for (const k of [...this.userNotes.keys()]) {
+      if (k.startsWith(`${partnerId}:`)) {
+        this.userNotes.delete(k)
+        n += 1
+      }
+    }
+    return n
   }
   private sessions = new Map<string, SessionMemory>()
   async getSession(sessionId: string) {
@@ -306,6 +329,19 @@ export class InMemoryScopeMemoryStore implements ScopeMemoryStore {
     const key = this.learnedKey(scope, ids)
     const n = this.learned.get(key)?.length ?? 0
     this.learned.delete(key)
+    return n
+  }
+  async deleteLearnedFactsByPartner(partnerId: string): Promise<number> {
+    // User-scope keys carry the partner id (`user:<partnerId>:<userId>`);
+    // session-scope keys deliberately do not, so they are out of reach here —
+    // same as the Postgres backing, which matches on scope='user'.
+    let n = 0
+    for (const [k, facts] of this.learned) {
+      if (k.startsWith(`user:${partnerId}:`)) {
+        n += facts.length
+        this.learned.delete(k)
+      }
+    }
     return n
   }
 }
@@ -370,6 +406,19 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
       [partnerId, userId, clamped, now],
     )
     return { body: clamped, updatedAt: now }
+  }
+  async deleteUserNote(partnerId: string, userId: string): Promise<boolean> {
+    const res = await this.pool.query(
+      'DELETE FROM memory_user_notes WHERE partner_id = $1 AND user_id = $2',
+      [partnerId, userId],
+    )
+    return (res.rowCount ?? 0) > 0
+  }
+  async deleteUserNotesByPartner(partnerId: string): Promise<number> {
+    const res = await this.pool.query('DELETE FROM memory_user_notes WHERE partner_id = $1', [
+      partnerId,
+    ])
+    return res.rowCount ?? 0
   }
   async getSession(sessionId: string): Promise<SessionMemory> {
     const res = await this.pool.query(
@@ -509,6 +558,16 @@ export class PostgresScopeMemoryStore implements ScopeMemoryStore {
             "DELETE FROM memory_learned_facts WHERE scope = 'user' AND partner_id = $1 AND user_id = $2",
             [ids.partnerId ?? '', ids.userId ?? ''],
           )
+    return res.rowCount ?? 0
+  }
+
+  async deleteLearnedFactsByPartner(partnerId: string): Promise<number> {
+    // scope='user' rows carry the partner id; session-scope rows key on the
+    // session id alone — same reach as the in-memory twin's key prefix scan.
+    const res = await this.pool.query(
+      "DELETE FROM memory_learned_facts WHERE scope = 'user' AND partner_id = $1",
+      [partnerId],
+    )
     return res.rowCount ?? 0
   }
 }

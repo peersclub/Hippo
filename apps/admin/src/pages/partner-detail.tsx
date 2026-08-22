@@ -33,6 +33,17 @@ type InviteDraft = { email: string; role: 'admin' | 'viewer' }
 /** POST /v1/partners/:id/admins response — inviteToken appears here ONCE. */
 type MintedInvite = { email: string; inviteToken: string; inviteExpiresAt: number }
 
+/** Live share link (gateway passthrough; market-level content, no user data). */
+type ShareRecord = {
+  id: string
+  partnerId: string
+  venueName: string
+  symbol: string
+  headline: string
+  createdAt: number
+  expiresAt: number
+}
+
 const fmt = (ts: number) => new Date(ts).toLocaleString()
 
 export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
@@ -40,10 +51,20 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
   const [admins, setAdmins] = useState<AdminSeat[] | null>([])
   const [invite, setInvite] = useState<InviteDraft | null>(null)
   const [minted, setMinted] = useState<MintedInvite | null>(null)
+  // Gateway-side reads degrade section-locally: null = unavailable (rendered
+  // as an outage notice, never as "none").
+  const [shares, setShares] = useState<ShareRecord[] | null>(null)
+  const [forcedDegraded, setForcedDegraded] = useState<boolean | null>(null)
 
   const state = useLoad(async () => {
-    // Seats degrade to an inline notice (null) — they never take down the
-    // whole detail view.
+    // Seats, shares and the degraded flag degrade to an inline notice (null)
+    // — they never take down the whole detail view.
+    void get<{ shares: ShareRecord[] }>(`/v1/shares?partnerId=${encodeURIComponent(partnerId)}`)
+      .then((res) => setShares(res.shares ?? []))
+      .catch(() => setShares(null))
+    void get<{ forced: string[] }>('/v1/degraded')
+      .then((res) => setForcedDegraded(res.forced.includes(partnerId)))
+      .catch(() => setForcedDegraded(null))
     const [d, seats] = await Promise.all([
       get<Detail>(`/v1/partners/${encodeURIComponent(partnerId)}/detail`),
       get<AdminSeat[]>(`/v1/partners/${encodeURIComponent(partnerId)}/admins`).catch(() => null),
@@ -111,13 +132,57 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
     })
     if (!ok) return
     try {
-      const res = await del<{ deleted: number }>(
+      const res = await del<{ deleted: number; facts?: number; notes?: number }>(
         `/v1/memory?partnerId=${encodeURIComponent(partnerId)}`,
       )
-      toast(`Purged ${res.deleted} persona record${res.deleted === 1 ? '' : 's'}`)
+      toast(
+        `Purged ${res.deleted} persona record${res.deleted === 1 ? '' : 's'}` +
+          (res.facts != null || res.notes != null
+            ? ` · ${res.facts ?? 0} fact set${(res.facts ?? 0) === 1 ? '' : 's'} · ${res.notes ?? 0} note${(res.notes ?? 0) === 1 ? '' : 's'}`
+            : ''),
+      )
       state.retry()
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'purge failed', 'err')
+    }
+  }
+
+  async function revokeShare(share: ShareRecord) {
+    const ok = await confirmAction({
+      title: 'Revoke share link',
+      body: `The public page for "${share.headline}" (${share.symbol}) 404s from the next open — the kill switch for a leaked link.`,
+      confirmLabel: 'Revoke link',
+    })
+    if (!ok) return
+    try {
+      const res = await del<{ deleted: boolean }>(`/v1/shares/${encodeURIComponent(share.id)}`)
+      toast(res.deleted ? 'Share link revoked' : 'Link was already gone', res.deleted ? 'ok' : 'err')
+      state.retry()
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'revoke failed', 'err')
+    }
+  }
+
+  async function toggleDegraded() {
+    if (forcedDegraded == null) return
+    const next = !forcedDegraded
+    if (next) {
+      const ok = await confirmAction({
+        title: `Force degraded mode for ${partnerId}`,
+        body: 'Every turn for this partner takes the degraded path (no LLM) until unforced. Same switch the host console has; a gateway restart clears it.',
+        confirmLabel: 'Force degraded',
+      })
+      if (!ok) return
+    }
+    try {
+      const res = await post<{ partnerId: string; forced: boolean }>('/v1/degraded', {
+        partnerId,
+        forced: next,
+      })
+      setForcedDegraded(res.forced)
+      toast(res.forced ? 'Degraded mode forced' : 'Degraded mode unforced')
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'toggle failed', 'err')
     }
   }
 
@@ -305,6 +370,44 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
         </tbody>
       </table>
 
+      <h2>Share links</h2>
+      {shares === null ? (
+        <div class="dim">
+          Share links unavailable — the gateway could not be reached. Retry the page.
+        </div>
+      ) : shares.length === 0 ? (
+        <div class="dim">No live share links.</div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Link</th>
+              <th>Symbol</th>
+              <th>Headline</th>
+              <th>Created</th>
+              <th>Expires</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {shares.map((s) => (
+              <tr key={s.id}>
+                <td class="mono">{s.id}</td>
+                <td class="mono">{s.symbol}</td>
+                <td>{s.headline}</td>
+                <td class="dim">{fmt(s.createdAt)}</td>
+                <td class="dim">{fmt(s.expiresAt)}</td>
+                <td style="text-align:right">
+                  <button class="btn danger sm" type="button" onClick={() => revokeShare(s)}>
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
       <div class="page-head" style="margin-top:22px; margin-bottom:0">
         <h2>Portal admins</h2>
         <button
@@ -386,6 +489,30 @@ export function PartnerDetailPage({ partnerId }: { partnerId: string }) {
             {Object.keys(plan.entitlements).length === 0 && <span class="dim">none</span>}
           </div>
         </>
+      )}
+
+      <h2>Degraded mode</h2>
+      {forcedDegraded == null ? (
+        <div class="dim">
+          Degraded state unavailable — the gateway could not be reached. Retry the page.
+        </div>
+      ) : (
+        <div class="actions" style="display:flex; gap:8px; align-items:center">
+          <span class={`badge ${forcedDegraded ? 'suspended' : 'active'}`}>
+            {forcedDegraded ? 'forced degraded' : 'live'}
+          </span>
+          <button
+            class={`btn ${forcedDegraded ? '' : 'danger'} sm`}
+            type="button"
+            onClick={toggleDegraded}
+          >
+            {forcedDegraded ? 'Unforce degraded' : 'Force degraded'}
+          </button>
+          <span class="dim">
+            Same switch the host console has — forces every turn down the no-LLM path; a gateway
+            restart clears it.
+          </span>
+        </div>
       )}
 
       <h2>Danger zone</h2>

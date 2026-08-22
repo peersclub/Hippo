@@ -36,8 +36,11 @@ export function SessionsPage() {
   }, [partnerId])
 
   // Live surface — ambient auto-refresh, same cadence as the dashboard.
+  // Hidden tabs skip the poll (same guard as the Pilot/Tech pages).
   useEffect(() => {
-    const t = setInterval(() => state.retry(), REFRESH_MS)
+    const t = setInterval(() => {
+      if (!document.hidden) state.retry()
+    }, REFRESH_MS)
     return () => clearInterval(t)
   }, [state.retry])
 

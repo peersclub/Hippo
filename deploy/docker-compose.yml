@@ -82,6 +82,17 @@ services:
       ADMIN_JWT_SECRET: local-admin-jwt-secret
       GATEWAY_URL: http://gateway:8788
       INTELLIGENCE_URL: http://intelligence:8791
+      # Memory proxies (personas, learned facts, memory-config) — without
+      # this the service warns at boot and aims at localhost, which is empty
+      # inside a container.
+      MEMORY_URL: http://memory:8792
+      # First-boot owner operator (created only while the table is empty).
+      # LOCAL-ONLY credentials — never reuse them anywhere real.
+      ADMIN_BOOTSTRAP_EMAIL: ops@hippo.local
+      ADMIN_BOOTSTRAP_PASSWORD: local-admin-password
+      # TRUST_PROXY stays unset here: nothing proxies compose traffic, and
+      # honoring x-forwarded-for without a proxy lets clients forge their IP.
+      # Set TRUST_PROXY=1 on real deploys behind Railway/Vercel.
     ports: ['8794:8794']
     depends_on:
       postgres: { condition: service_healthy }

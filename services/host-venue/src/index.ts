@@ -70,6 +70,12 @@ const app = buildService({
   store,
   keys,
   adminToken: process.env.ASSETWORKS_ADMIN_TOKEN,
+  // Browser origins allowed on /admin/* cross-origin (comma list; reflected,
+  // never `*`). Unset = /admin/* carries no ACAO header at all.
+  adminOrigins: (process.env.HOST_VENUE_ADMIN_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   uiUserId: UI_USER,
   instruments: (process.env.ASSETWORKS_INSTRUMENTS ?? 'BTC/USDT,ETH/USDT,SOL/USDT').split(','),
 })

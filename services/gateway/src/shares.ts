@@ -67,6 +67,12 @@ export interface ShareStore {
   create(record: ShareRecord): void
   /** Live record or null — expiry is checked here, so a hit is never stale. */
   get(id: string, now?: number): ShareRecord | null
+  /** One partner's LIVE (unexpired) shares, newest first — the operator read
+   * behind GET /internal/shares. Expired rows never appear. */
+  list(partnerId: string, now?: number): ShareRecord[]
+  /** Operator kill switch for a leaked link: hard-delete one share by id.
+   * Returns true when a row was removed; false is an idempotent no-op. */
+  delete(id: string): boolean
 }
 
 export class InMemoryShareStore implements ShareStore {
@@ -95,6 +101,23 @@ export class InMemoryShareStore implements ShareStore {
       return null
     }
     return row
+  }
+
+  list(partnerId: string, now: number = Date.now()): ShareRecord[] {
+    const out: ShareRecord[] = []
+    for (const [id, row] of this.rows) {
+      // Same expiry law as get(): a listed row is never stale.
+      if (row.expiresAt <= now) {
+        this.rows.delete(id)
+        continue
+      }
+      if (row.partnerId === partnerId) out.push({ ...row })
+    }
+    return out.sort((a, b) => b.createdAt - a.createdAt)
+  }
+
+  delete(id: string): boolean {
+    return this.rows.delete(id)
   }
 }
 

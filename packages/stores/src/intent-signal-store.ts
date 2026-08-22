@@ -75,6 +75,13 @@ export interface IntentSignalStore {
   list(query: IntentSignalQuery): Promise<IntentSignal[]>
   /** Counts by signal and by classified intent — the "Understanding" tiles. */
   summary(partnerId: string): Promise<IntentSignalSummary>
+  /** GDPR purge: hard-delete one user's signals. Rows carry raw trader text
+   * (`originalText`), so this is the store's right-to-erasure surface.
+   * Returns rows removed. */
+  deleteByUser(partnerId: string, userKey: string): Promise<number>
+  /** Partner offboarding: hard-delete every signal a partner holds.
+   * Returns rows removed. */
+  deleteByPartner(partnerId: string): Promise<number>
 }
 
 /** Bound trader text to INTENT_SIGNAL_TEXT_CAP; '' and undefined both mean
@@ -131,6 +138,28 @@ export class InMemoryIntentSignalStore implements IntentSignalStore {
 
   async summary(partnerId: string): Promise<IntentSignalSummary> {
     return summarize(this.rowsFor(partnerId))
+  }
+
+  async deleteByUser(partnerId: string, userKey: string): Promise<number> {
+    let n = 0
+    for (const [id, s] of this.signals) {
+      if (s.partnerId === partnerId && s.userKey === userKey) {
+        this.signals.delete(id)
+        n += 1
+      }
+    }
+    return n
+  }
+
+  async deleteByPartner(partnerId: string): Promise<number> {
+    let n = 0
+    for (const [id, s] of this.signals) {
+      if (s.partnerId === partnerId) {
+        this.signals.delete(id)
+        n += 1
+      }
+    }
+    return n
   }
 }
 
@@ -213,5 +242,20 @@ export class PostgresIntentSignalStore implements IntentSignalStore {
       }
     }
     return { total, bySignal, byIntent }
+  }
+
+  async deleteByUser(partnerId: string, userKey: string): Promise<number> {
+    const res = await this.pool.query(
+      'DELETE FROM intent_signals WHERE partner_id = $1 AND user_key = $2',
+      [partnerId, userKey],
+    )
+    return res.rowCount ?? 0
+  }
+
+  async deleteByPartner(partnerId: string): Promise<number> {
+    const res = await this.pool.query('DELETE FROM intent_signals WHERE partner_id = $1', [
+      partnerId,
+    ])
+    return res.rowCount ?? 0
   }
 }
