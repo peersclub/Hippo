@@ -1,7 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
-// The router reads location/window at import time — stub the browser globals
-// first, then import dynamically. Node test env, no jsdom dependency.
 const listeners: Record<string, (() => void)[]> = {}
 const fakeLocation = { hash: '' }
 
@@ -20,17 +18,16 @@ function fireHashChange(hash: string) {
   for (const fn of listeners.hashchange ?? []) fn()
 }
 
-describe('hash router', () => {
+describe('createHashRouter', () => {
   it('parses pages, params, and defaults; reacts to hashchange; navigates', async () => {
-    const { route, navigate } = await import('../src/router.js')
+    const { createHashRouter } = await import('../src/router/hash.js')
+    const { route, navigate } = createHashRouter('dashboard')
 
-    // Default with empty hash — overview, not dashboard (copy-paste trap).
-    expect(route.value).toEqual({ page: 'overview', params: [] })
+    expect(route.value).toEqual({ page: 'dashboard', params: [] })
 
     fireHashChange('#/partners')
     expect(route.value).toEqual({ page: 'partners', params: [] })
 
-    // Params are split and URI-decoded (user ids can contain anything).
     fireHashChange('#/users/koinbx-dev/venue%3Auser%2F42')
     expect(route.value).toEqual({ page: 'users', params: ['koinbx-dev', 'venue:user/42'] })
 
@@ -38,5 +35,12 @@ describe('hash router', () => {
     expect(fakeLocation.hash).toBe('#/plans')
     navigate('#/audit')
     expect(fakeLocation.hash).toBe('#/audit')
+  })
+
+  it('honours a non-dashboard default page (portal overview)', async () => {
+    fakeLocation.hash = ''
+    const { createHashRouter } = await import('../src/router/hash.js')
+    const { route } = createHashRouter('overview')
+    expect(route.value).toEqual({ page: 'overview', params: [] })
   })
 })

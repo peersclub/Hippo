@@ -1,17 +1,22 @@
-/* Hippo Admin — same dark-terminal world as the host demo, calmer density. */
+/* Hippo SPA chrome — admin + portal. Tokens from @hippo/tokens.
+   Console density (7px buttons, 200px sidebar) is deliberate: these are
+   operator surfaces, not the trader SDK. Colours/type come from the brand. */
+@import "@hippo/tokens/tokens.css";
+
 :root {
-  --bg: #0e1014;
-  --panel: #14161c;
-  --panel-2: #191c24;
-  --hairline: rgba(255, 255, 255, 0.07);
-  --ink: #e9ebf0;
-  --dim: #8a8f9c;
-  --accent: #f0b94a;
-  --accent-ink: #15171d;
-  --up: #2ec48d;
-  --down: #ff8585;
+  --bg: var(--hippo-bg);
+  --panel: var(--hippo-panel);
+  --panel-2: var(--hippo-card);
+  --hairline: var(--hippo-hairline);
+  --ink: var(--hippo-text-hi);
+  --dim: var(--hippo-text-dim);
+  --accent: var(--hippo-amber);
+  --accent-ink: var(--hippo-amber-ink);
+  --up: var(--hippo-up);
+  --down: var(--hippo-down);
   --info: #6aa9ff;
 }
+
 * {
   margin: 0;
   padding: 0;
@@ -20,7 +25,7 @@
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: system-ui, sans-serif;
+  font-family: var(--hippo-font-body);
   font-size: 14px;
   min-height: 100vh;
 }
@@ -51,6 +56,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-family: var(--hippo-font-display);
   font-weight: 700;
   font-size: 15px;
   padding: 4px 18px 16px;
@@ -69,6 +75,7 @@ textarea {
   font-weight: 400;
   color: var(--dim);
   font-size: 11px;
+  font-family: var(--hippo-font-body);
 }
 .nav a {
   display: block;
@@ -114,6 +121,7 @@ textarea {
   margin-bottom: 20px;
 }
 h1 {
+  font-family: var(--hippo-font-display);
   font-size: 18px;
   font-weight: 650;
 }
@@ -185,7 +193,7 @@ tr.rowlink:hover td {
   background: rgba(255, 255, 255, 0.02);
 }
 .mono {
-  font-family: ui-monospace, monospace;
+  font-family: var(--hippo-font-mono);
   font-size: 12px;
 }
 .dim {
@@ -221,6 +229,10 @@ tr.rowlink:hover td {
   background: rgba(46, 196, 141, 0.14);
   color: var(--up);
 }
+.badge.sandbox {
+  background: rgba(240, 185, 74, 0.14);
+  color: var(--accent);
+}
 
 .cards {
   display: grid;
@@ -238,6 +250,7 @@ tr.rowlink:hover td {
   font-size: 22px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  font-family: var(--hippo-font-mono);
 }
 .stat .n.text {
   font-size: 13px;
@@ -284,7 +297,6 @@ textarea:focus {
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
   z-index: 40;
-  /* it is a button (keyboard-dismissable) — reset chrome */
   border: none;
   padding: 0;
 }
@@ -364,7 +376,7 @@ textarea:focus {
   border-radius: 6px;
   padding: 3px 8px;
   font-size: 12px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--hippo-font-mono);
 }
 .kv {
   display: grid;
@@ -402,8 +414,11 @@ textarea:focus {
 .alert:hover {
   filter: brightness(1.15);
 }
+button.alert {
+  width: 100%;
+  text-align: left;
+}
 
-/* ── UX kit: toasts, modal, skeleton, error banner ── */
 .toasts {
   position: fixed;
   top: 16px;
@@ -508,12 +523,6 @@ textarea:focus {
   width: 220px;
 }
 
-.badge.sandbox {
-  background: rgba(240, 185, 74, 0.14);
-  color: var(--accent);
-}
-
-/* Shared zero-row state (ui.tsx <Empty/>) — rides inside a full-width td. */
 .empty-state {
   padding: 26px;
   text-align: center;
@@ -525,15 +534,8 @@ textarea:focus {
   opacity: 0.85;
 }
 
-/* Alert rendered as a button (e.g. "sandbox approvals" → sets the filter). */
-button.alert {
-  width: 100%;
-  text-align: left;
-}
-
-/* One-time invite token display — shown exactly once, copy from here. */
 .token-box {
-  font-family: ui-monospace, monospace;
+  font-family: var(--hippo-font-mono);
   font-size: 12.5px;
   word-break: break-all;
   background: rgba(255, 255, 255, 0.05);

@@ -1,6 +1,7 @@
 /**
  * Admin panel shell: login gate → sidebar layout → hash-routed pages.
  */
+import { AppShell } from '@hippo/ui'
 import { render } from 'preact'
 import { useEffect } from 'preact/hooks'
 import { currentOperator, get, post } from './api.js'
@@ -17,20 +18,21 @@ import { SessionsPage } from './pages/sessions.js'
 import { TechPage } from './pages/tech.js'
 import { UserDetailPage, UsersPage } from './pages/users.js'
 import { navigate, route } from './router.js'
-import { ConfirmHost, Toasts } from './ui.js'
+
+import '@hippo/ui/spa.css'
 
 const NAV = [
-  ['dashboard', 'Dashboard'],
-  ['pilot', 'Pilot'],
-  ['partners', 'Partners'],
-  ['plans', 'Plans'],
-  ['users', 'Users'],
-  ['sessions', 'Sessions'],
-  ['tech', 'Tech'],
-  ['memory', 'Memory'],
-  ['memory-config', 'Memory Config'],
-  ['operators', 'Operators'],
-  ['audit', 'Audit'],
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'pilot', label: 'Pilot' },
+  { key: 'partners', label: 'Partners' },
+  { key: 'plans', label: 'Plans' },
+  { key: 'users', label: 'Users' },
+  { key: 'sessions', label: 'Sessions' },
+  { key: 'tech', label: 'Tech' },
+  { key: 'memory', label: 'Memory' },
+  { key: 'memory-config', label: 'Memory Config' },
+  { key: 'operators', label: 'Operators' },
+  { key: 'audit', label: 'Audit' },
 ] as const
 
 function Page() {
@@ -74,7 +76,6 @@ function Shell() {
   const op = currentOperator.value
 
   useEffect(() => {
-    // Resume an existing cookie session on load.
     get<{ email: string; role: 'owner' | 'operator' }>('/auth/me')
       .then((me) => {
         currentOperator.value = me
@@ -88,40 +89,21 @@ function Shell() {
   if (!op) return <LoginPage />
 
   return (
-    <div class="layout">
-      <aside class="sidebar">
-        <div class="logo">
-          <span class="dot">H</span>Hippo <span class="sub">Admin</span>
-        </div>
-        <nav class="nav">
-          {NAV.map(([key, label]) => (
-            <a key={key} href={`#/${key}`} class={page === key ? 'on' : ''}>
-              {label}
-            </a>
-          ))}
-        </nav>
-        <div class="foot">
-          <div>{op.email}</div>
-          <div class="dim">{op.role}</div>
-          <button
-            type="button"
-            onClick={() => {
-              void post('/auth/logout').finally(() => {
-                currentOperator.value = null
-                navigate('login')
-              })
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      </aside>
-      <main class="main">
-        <Page />
-      </main>
-      <Toasts />
-      <ConfirmHost />
-    </div>
+    <AppShell
+      sub="Admin"
+      nav={NAV}
+      page={page}
+      email={op.email}
+      role={op.role}
+      onSignOut={() => {
+        void post('/auth/logout').finally(() => {
+          currentOperator.value = null
+          navigate('login')
+        })
+      }}
+    >
+      <Page />
+    </AppShell>
   )
 }
 

@@ -1,0 +1,29 @@
+{
+  "name": "@hippo/tokens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dark Glass Instrument tokens — the only source of --hippo-* values. Zero runtime deps. SDK (Shadow DOM), site, and @hippo/ui all consume this.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tokens.css": "./src/tokens.css"
+  },
+  "files": [
+    "dist",
+    "src/tokens.css"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
