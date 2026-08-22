@@ -55,6 +55,10 @@ function Shell() {
       })
   }, [])
 
+  useEffect(() => {
+    if (admin && (page === 'login' || page === 'claim')) navigate('overview')
+  }, [admin, page])
+
   if (!admin) return page === 'claim' ? <ClaimPage /> : <LoginPage />
 
   return (

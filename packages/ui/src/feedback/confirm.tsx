@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 
 type ConfirmRequest = {
   title: string
@@ -36,6 +36,19 @@ export function confirmAction(opts: {
 export function ConfirmHost() {
   const req = confirmReq.value
   const [typed, setTyped] = useState('')
+
+  useEffect(() => {
+    if (!req) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      confirmReq.value = null
+      setTyped('')
+      req.resolve(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [req])
+
   if (!req) return null
 
   const armed = !req.typedPhrase || typed === req.typedPhrase
@@ -48,8 +61,8 @@ export function ConfirmHost() {
   return (
     <>
       <button type="button" class="drawer-veil" aria-label="Cancel" onClick={() => done(false)} />
-      <div class="modal" role="dialog" aria-modal="true">
-        <h1>{req.title}</h1>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hippo-confirm-title">
+        <h1 id="hippo-confirm-title">{req.title}</h1>
         <p class="modal-body">{req.body}</p>
         {req.typedPhrase && (
           <label class="field">

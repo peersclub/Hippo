@@ -12,9 +12,17 @@ export type HashRouter = {
   navigate: (to: string) => void
 }
 
+function decode(segment: string): string {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
 function parse(defaultPage: string): Route {
   const hash = location.hash.replace(/^#\/?/, '')
-  const [page = defaultPage, ...params] = hash.split('/').map(decodeURIComponent)
+  const [page = defaultPage, ...params] = hash.split('/').map(decode)
   return { page: page || defaultPage, params }
 }
 

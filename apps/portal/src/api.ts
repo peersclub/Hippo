@@ -16,5 +16,8 @@ export type PortalIdentity = {
 
 export const currentAdmin = signal<PortalIdentity | null>(null)
 
-const client = createApi({ identity: currentAdmin })
+const client = createApi({
+  identity: currentAdmin,
+  loginPath: ['/auth/login', '/auth/claim'],
+})
 export const { api, get, post, patch } = client

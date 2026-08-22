@@ -86,6 +86,10 @@ function Shell() {
       })
   }, [])
 
+  useEffect(() => {
+    if (op && page === 'login') navigate('dashboard')
+  }, [op, page])
+
   if (!op) return <LoginPage />
 
   return (

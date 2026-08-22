@@ -47,4 +47,19 @@ describe('createApi', () => {
     expect(identity.value).toBeNull()
     expect(fakeLocation.hash).toBe('#/login')
   })
+
+  it('401 on a listed login path does not bounce the hash', async () => {
+    const identity = signal<{ email: string } | null>(null)
+    const fakeLocation = { hash: '#/claim' }
+    vi.stubGlobal('location', fakeLocation)
+    vi.stubGlobal('fetch', async () => ({
+      status: 401,
+      ok: false,
+      json: async () => ({ error: 'invalid invite' }),
+    }))
+
+    const api = createApi({ identity, loginPath: ['/auth/login', '/auth/claim'] })
+    await expect(api.post('/auth/claim', { token: 'x' })).rejects.toBeInstanceOf(ApiError)
+    expect(fakeLocation.hash).toBe('#/claim')
+  })
 })

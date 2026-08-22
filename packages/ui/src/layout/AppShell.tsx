@@ -32,7 +32,12 @@ export function AppShell({
         </div>
         <nav class="nav">
           {nav.map((item) => (
-            <a key={item.key} href={`#/${item.key}`} class={page === item.key ? 'on' : ''}>
+            <a
+              key={item.key}
+              href={`#/${item.key}`}
+              class={page === item.key ? 'on' : ''}
+              aria-current={page === item.key ? 'page' : undefined}
+            >
               {item.label}
             </a>
           ))}

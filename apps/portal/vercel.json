@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter @hippo/protocol build && vite build",
+  "buildCommand": "pnpm --filter @hippo/tokens build && pnpm --filter @hippo/ui build && pnpm --filter @hippo/protocol build && vite build",
   "outputDirectory": "dist",
   "rewrites": [
     {

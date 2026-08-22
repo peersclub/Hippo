@@ -8,11 +8,15 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./dist/index.js"
     },
     "./spa.css": "./src/css/spa.css"
   },
+  "sideEffects": [
+    "./src/css/spa.css"
+  ],
   "files": [
     "dist",
     "src/css"

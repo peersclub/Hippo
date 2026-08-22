@@ -25,10 +25,14 @@ export type ApiClient = {
 
 export function createApi<Identity>(opts: {
   identity: Signal<Identity | null>
-  loginPath?: string
+  loginPath?: string | readonly string[]
   loginHash?: string
 }): ApiClient {
-  const loginPath = opts.loginPath ?? '/auth/login'
+  const loginPaths = new Set(
+    typeof opts.loginPath === 'string' || opts.loginPath === undefined
+      ? [opts.loginPath ?? '/auth/login']
+      : opts.loginPath,
+  )
   const loginHash = opts.loginHash ?? '#/login'
 
   async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -42,7 +46,7 @@ export function createApi<Identity>(opts: {
       },
       credentials: 'same-origin',
     })
-    if (res.status === 401 && path !== loginPath) {
+    if (res.status === 401 && !loginPaths.has(path)) {
       opts.identity.value = null
       location.hash = loginHash
       throw new ApiError(401, 'signed out')

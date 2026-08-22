@@ -454,6 +454,11 @@ button.alert {
     opacity: 1;
   }
 }
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
 
 .modal {
   position: fixed;
@@ -504,6 +509,11 @@ button.alert {
     background-position: -200% 0;
   }
 }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
 
 .error-banner {
   display: flex;
@@ -527,6 +537,10 @@ button.alert {
   padding: 26px;
   text-align: center;
   color: var(--dim);
+}
+.empty-state .empty-title {
+  font-weight: 600;
+  color: var(--ink);
 }
 .empty-state .empty-hint {
   margin-top: 5px;

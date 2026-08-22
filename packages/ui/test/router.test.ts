@@ -35,6 +35,10 @@ describe('createHashRouter', () => {
     expect(fakeLocation.hash).toBe('#/plans')
     navigate('#/audit')
     expect(fakeLocation.hash).toBe('#/audit')
+
+    fireHashChange('#/users/%zz')
+    expect(route.value.page).toBe('users')
+    expect(route.value.params).toEqual(['%zz'])
   })
 
   it('honours a non-dashboard default page (portal overview)', async () => {
